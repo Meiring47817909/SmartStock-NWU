@@ -1,0 +1,68 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+Thumbs.db
+desktop.ini
+*.pem
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# serwist (generated service worker — rebuilt by `next build`)
+/public/sw.js
+/public/sw.js.map
+/public/swe-worker-*.js
+/public/swe-worker-*.js.map
+
+# firebase (local CLI/emulator artifacts — only relevant if you run
+# `firebase emulators:start` or similar locally; safe to keep even if unused)
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+firebase-export-*/
+
+# firebase admin SDK service account keys — full admin access to the
+# project if leaked. Never commit these; credentials belong in .env.local.
+*firebase-adminsdk*.json
+serviceAccountKey.json
+*.serviceaccount.json
