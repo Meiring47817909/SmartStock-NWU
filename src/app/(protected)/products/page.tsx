@@ -71,6 +71,33 @@ const productBarcodes = (p: {
   barcode?: string;
 }): string[] => p.barcodes ?? (p.barcode ? [p.barcode] : []);
 
+// Today as a YYYY-MM-DD string in the viewer's local timezone — used as the
+// floor for the Lend From date picker. Deliberately avoids
+// `new Date().toISOString()`, which reports the UTC date and can be a day
+// off from "today" depending on the viewer's timezone.
+function todayDateStr(): string {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+// Formats a YYYY-MM-DD date-only string (native <input type="date"> value)
+// for display. Deliberately doesn't go through `new Date(...)` — that parses
+// date-only strings as UTC midnight, which can shift the displayed day by
+// one depending on the viewer's timezone.
+function formatLendDate(value: string | null | undefined): string {
+  if (!value) return "—";
+  const [year, month, day] = value.split("-");
+  const monthNames = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  const monthIdx = Number(month) - 1;
+  if (!year || !day || monthIdx < 0 || monthIdx > 11) return value;
+  return `${day} ${monthNames[monthIdx]} ${year}`;
+}
+
 const STATUS_BADGE_CLASS = (qty: number, threshold: number) =>
   qty === 0
     ? "bg-red-100 text-red-800"
@@ -97,6 +124,8 @@ type FormData = {
   reorder_threshold: string;
   available: boolean;
   location: string;
+  lend_from: string;
+  lend_to: string;
   images: ImageUpload[];
 };
 
@@ -109,6 +138,8 @@ const EMPTY_FORM: FormData = {
   reorder_threshold: "5",
   available: true,
   location: DEFAULT_LOCATION,
+  lend_from: "",
+  lend_to: "",
   images: [],
 };
 
@@ -212,6 +243,8 @@ export default function ProductsPage() {
       reorder_threshold: String(p.reorder_threshold),
       available: p.available ?? true,
       location: p.location ?? DEFAULT_LOCATION,
+      lend_from: p.lend_from ?? "",
+      lend_to: p.lend_to ?? "",
       // Existing images are Storage paths — no File attached, so the
       // uploader/urlFormatter knows to resolve them via storageDownloadUrl
       // instead of an in-memory object URL.
@@ -241,6 +274,14 @@ export default function ProductsPage() {
       setError("Add at least one barcode.");
       return;
     }
+    if (form.lend_from && form.lend_from < todayDateStr()) {
+      setError("Lend From date can't be in the past.");
+      return;
+    }
+    if (form.lend_from && form.lend_to && form.lend_to < form.lend_from) {
+      setError("Lend To date can't be before Lend From date.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -266,6 +307,8 @@ export default function ProductsPage() {
         reorder_threshold: Number(form.reorder_threshold),
         available: form.available,
         location: form.location,
+        lend_from: form.lend_from || null,
+        lend_to: form.lend_to || null,
         updated_at: new Date().toISOString(),
       };
 
@@ -315,6 +358,8 @@ export default function ProductsPage() {
             reorder_threshold: editing.reorder_threshold ?? 0,
             available: editing.available ?? true,
             location: editing.location ?? DEFAULT_LOCATION,
+            lend_from: editing.lend_from ?? null,
+            lend_to: editing.lend_to ?? null,
             images: editing.images ?? [],
           },
           after: payload,
@@ -614,6 +659,32 @@ export default function ProductsPage() {
                 </Select>
               </div>
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5">
+                <Label htmlFor="p-lend-from">Lend From</Label>
+                <Input
+                  id="p-lend-from"
+                  type="date"
+                  min={todayDateStr()}
+                  value={form.lend_from}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, lend_from: e.target.value }))
+                  }
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="p-lend-to">Lend To</Label>
+                <Input
+                  id="p-lend-to"
+                  type="date"
+                  min={form.lend_from || todayDateStr()}
+                  value={form.lend_to}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, lend_to: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
             <div className="grid gap-1.5">
               <Label htmlFor="p-barcode">Barcodes *</Label>
               {form.barcodes.length > 0 && (
@@ -837,6 +908,18 @@ export default function ProductsPage() {
                         Location:
                       </div>
                       <p className="text-sm">{previewProduct.location}</p>
+                    </div>
+                  )}
+
+                  {(previewProduct.lend_from || previewProduct.lend_to) && (
+                    <div>
+                      <div className="mb-1 text-sm font-semibold">
+                        Lendable:
+                      </div>
+                      <p className="text-sm">
+                        {formatLendDate(previewProduct.lend_from)} –{" "}
+                        {formatLendDate(previewProduct.lend_to)}
+                      </p>
                     </div>
                   )}
 

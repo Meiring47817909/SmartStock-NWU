@@ -32,6 +32,11 @@ export interface Product {
   reorder_threshold: number
   available: boolean
   location: string
+  // Date window (YYYY-MM-DD, native <input type="date"> format) during which
+  // staff are allowed to lend this product out. null/unset means no
+  // restriction — informational only, not currently enforced in Stock Out.
+  lend_from: string | null
+  lend_to: string | null
   created_at: string
   updated_at: string
   // Firebase Storage paths (not download URLs) — resolved to a URL at
