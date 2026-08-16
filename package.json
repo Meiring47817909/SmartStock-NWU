@@ -6,7 +6,10 @@
     "dev": "concurrently -p none \"serwist build --watch\" \"next dev\"",
     "build": "next build && serwist build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "emulators": "firebase emulators:start",
+    "seed:emulators": "node scripts/seed-emulator.mjs",
+    "dev:emulators": "cross-env NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FIREBASE_ADMIN_PROJECT_ID=demo-smartstock-nwu concurrently -p none \"serwist build --watch\" \"next dev\""
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -41,6 +44,7 @@
     "esbuild": "^0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
+    "firebase-tools": "^15.27.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

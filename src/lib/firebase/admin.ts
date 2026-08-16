@@ -11,9 +11,28 @@ import { getFirestore } from 'firebase-admin/firestore'
 // Credentials come from .env.local (never committed — see .gitignore), not
 // from the downloaded service-account JSON file itself.
 
+// The demo- project id used for local emulator testing (see firebase.json /
+// .firebaserc and `npm run dev:emulators`) — keep this in sync with the
+// EMULATOR_PROJECT_ID in src/lib/firebase/config.ts, the client-side half
+// of this same setup.
+const EMULATOR_PROJECT_ID = 'demo-smartstock-nwu'
+
 function getAdminApp(): App {
   const existing = getApps()[0]
   if (existing) return existing
+
+  // The Admin SDK auto-detects these two host vars and silently redirects
+  // every call to the local emulators instead of the real project — this
+  // is Firebase's own convention, not something specific to this app. When
+  // they're set, emulators don't check credentials at all, so a bare
+  // projectId is enough; this deliberately avoids requiring the real
+  // service-account secrets just to run local tests against fake data.
+  const usingEmulator =
+    !!process.env.FIREBASE_AUTH_EMULATOR_HOST || !!process.env.FIRESTORE_EMULATOR_HOST
+  if (usingEmulator) {
+    const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID || EMULATOR_PROJECT_ID
+    return initializeApp({ projectId })
+  }
 
   const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID
   const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL
