@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { formatDate } from '@/lib/utils'
+import { Fragment, useEffect, useState } from 'react'
+import { formatDate, formatDateOnly, isoToLocalDateStr } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
-import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore'
+import { collection, query, where, getDocs, orderBy, limit, doc, getDoc } from 'firebase/firestore'
 import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
@@ -272,8 +272,8 @@ function IssuedPerStaffReport() {
               return sum + tLines.reduce((s2: number, l: any) => s2 + (l.quantity || 0), 0)
             }, 0)
             return (
-              <>
-                <TableRow key={s.id} className="cursor-pointer" onClick={() => toggleExpand(s.id)}>
+              <Fragment key={s.id}>
+                <TableRow className="cursor-pointer" onClick={() => toggleExpand(s.id)}>
                   <TableCell className="font-medium">{s.full_name}</TableCell>
                   <TableCell className="text-muted-foreground">{s.department ?? '—'}</TableCell>
                   <TableCell className="font-semibold">{txns.length}</TableCell>
@@ -286,13 +286,16 @@ function IssuedPerStaffReport() {
                       <TableCell colSpan={2} className="pl-8 font-mono text-xs text-muted-foreground">
                         {t.reference_no} · {formatDate(t.created_at)}
                       </TableCell>
-                      <TableCell colSpan={3} className="text-xs text-muted-foreground">
+                      <TableCell colSpan={2} className="text-xs text-muted-foreground">
                         {(t.transaction_lines || []).map((l: any) => `${l.product_name ?? '?'} ×${l.quantity}`).join(', ')}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {t.lend_to ? <>Expected {formatDateOnly(t.lend_to)}</> : '—'}
                       </TableCell>
                     </TableRow>
                   ))
                 )}
-              </>
+              </Fragment>
             )
           })}
         </TableBody>
@@ -301,9 +304,25 @@ function IssuedPerStaffReport() {
   )
 }
 
+// Mirrors lineStatus() in returns/page.tsx, adapted for a completed return
+// record rather than a still-outstanding line: Partial takes priority (the
+// originating Stock Out still has a balance owed, possibly settled across
+// more than one return visit), otherwise Early/On time/Late compares the
+// date this return was actually made against the originating Lend To date
+// — a historical judgement, not a live "today" one.
+function returnRowStatus(t: any): { label: string; className: string } | null {
+  if (t.partial) return { label: 'Partial', className: 'bg-amber-100 text-amber-800' }
+  if (!t.expected_date) return null
+  const returnedOn = t.created_at ? isoToLocalDateStr(t.created_at) : ''
+  if (returnedOn < t.expected_date) return { label: 'Early', className: 'bg-emerald-100 text-emerald-800' }
+  if (returnedOn === t.expected_date) return { label: 'On time', className: 'bg-sky-100 text-sky-800' }
+  return { label: 'Late', className: 'bg-red-100 text-red-800' }
+}
+
 function ReturnsReport() {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [expanded, setExpanded] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -311,7 +330,10 @@ function ReturnsReport() {
       const txns = snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
 
       // transaction_lines is its own collection now — fetch once and
-      // re-attach as `.transaction_lines` for the render code below.
+      // re-attach as `.transaction_lines` for the render code below. This
+      // pulls in every line for every transaction (not just RETURNs), which
+      // is used again below to look up the originating OUT transaction's
+      // issued quantities.
       const linesSnap = await getDocs(collection(db, 'transaction_lines'))
       const linesByTxn: Record<string, any[]> = {}
       linesSnap.forEach(d => {
@@ -319,6 +341,52 @@ function ReturnsReport() {
         ;(linesByTxn[l.transaction_id] ??= []).push(l)
       })
       txns.forEach(t => { t.transaction_lines = linesByTxn[t.id] ?? [] })
+
+      // Total returned so far per [linked OUT transaction][product] — summed
+      // across every RETURN on record, since a loan can be settled across
+      // more than one return visit (see the same logic in returns/page.tsx).
+      const returnedByOutTxn: Record<string, Record<string, number>> = {}
+      txns.forEach(t => {
+        if (!t.linked_txn_id) return
+        const bucket = (returnedByOutTxn[t.linked_txn_id] ??= {})
+        ;(t.transaction_lines || []).forEach((l: any) => {
+          bucket[l.product_id] = (bucket[l.product_id] ?? 0) + (l.quantity || 0)
+        })
+      })
+
+      // Fetch each distinct linked OUT transaction once, for its Lend To
+      // date and originally-issued quantities.
+      const linkedIds = Array.from(new Set(txns.map(t => t.linked_txn_id).filter(Boolean))) as string[]
+      const outTxnById: Record<string, any> = {}
+      await Promise.all(linkedIds.map(async (id) => {
+        const outSnap = await getDoc(doc(db, 'transactions', id))
+        if (outSnap.exists()) outTxnById[id] = { id: outSnap.id, ...outSnap.data() }
+      }))
+
+      txns.forEach(t => {
+        const outTxn = t.linked_txn_id ? outTxnById[t.linked_txn_id] : null
+        // The raw Firestore doc ID (t.linked_txn_id) means nothing to
+        // Selouna — she only ever sees the human reference number
+        // (TXN-XXXXXXXX) elsewhere in the app (Stock Out, Transaction
+        // History, the Returns page itself). Surface that instead so she
+        // can actually match this return back to the Stock Out it settles.
+        t.linked_txn_ref = outTxn?.reference_no ?? null
+        t.expected_date = outTxn?.lend_to ?? null
+        const outLines = outTxn ? (linesByTxn[outTxn.id] || []) : []
+        // Per-product remaining balance on the linked OUT transaction — used
+        // to show Selouna exactly what's still owed when she expands a
+        // Partial row, not just the fact that something is.
+        t.outstandingLines = outTxn
+          ? outLines
+              .map((l: any) => {
+                const issued = l.quantity || 0
+                const returned = returnedByOutTxn[outTxn.id]?.[l.product_id] ?? 0
+                return { product_name: l.product_name ?? 'Unknown', outstanding: issued - returned }
+              })
+              .filter((l: any) => l.outstanding > 0)
+          : []
+        t.partial = t.outstandingLines.length > 0
+      })
 
       setData(txns)
       setLoading(false)
@@ -334,27 +402,58 @@ function ReturnsReport() {
             <TableHead>Reference</TableHead>
             <TableHead>Staff</TableHead>
             <TableHead>Items Returned</TableHead>
-            <TableHead>Linked OUT Ref</TableHead>
-            <TableHead>Date</TableHead>
+            <TableHead>Returning For</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Expected</TableHead>
+            <TableHead>Date Returned</TableHead>
+            <TableHead></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {loading && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
-          {!loading && data.length === 0 && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">No returns recorded yet</TableCell></TableRow>}
+          {loading && <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
+          {!loading && data.length === 0 && <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">No returns recorded yet</TableCell></TableRow>}
           {data.map((t: any) => {
             const tLines = t.transaction_lines || []
+            const status = returnRowStatus(t)
+            const isExpanded = expanded === t.id
             return (
-              <TableRow key={t.id}>
-                <TableCell className="font-mono text-xs">{t.reference_no}</TableCell>
-                <TableCell className="font-medium">{t.staff_name ?? '—'}</TableCell>
-                <TableCell className="text-sm">
-                  {tLines.map((l: any) => `${l.product_name ?? '?'} ×${l.quantity}`).join(', ')}
-                </TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">
-                  {t.linked_txn_id ? `Linked ID: ${t.linked_txn_id}` : '—'}
-                </TableCell>
-                <TableCell className="text-xs text-muted-foreground">{formatDate(t.created_at)}</TableCell>
-              </TableRow>
+              <Fragment key={t.id}>
+                <TableRow
+                  className={t.partial ? 'cursor-pointer' : ''}
+                  onClick={() => t.partial && setExpanded(isExpanded ? null : t.id)}
+                >
+                  <TableCell className="font-mono text-xs">{t.reference_no}</TableCell>
+                  <TableCell className="font-medium">{t.staff_name ?? '—'}</TableCell>
+                  <TableCell className="text-sm">
+                    {tLines.map((l: any) => `${l.product_name ?? '?'} ×${l.quantity}`).join(', ')}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {t.linked_txn_ref ?? '—'}
+                  </TableCell>
+                  <TableCell>{status && <Badge className={`${status.className} uppercase`}>{status.label}</Badge>}</TableCell>
+                  <TableCell className="text-muted-foreground">{formatDateOnly(t.expected_date)}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{formatDate(t.created_at)}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {t.partial && (isExpanded ? '▲' : '▼')}
+                  </TableCell>
+                </TableRow>
+                {isExpanded && t.partial && (
+                  <TableRow className="bg-muted/50">
+                    <TableCell colSpan={8} className="p-4">
+                      <div className="text-sm">
+                        <span className="font-medium text-foreground">Still outstanding on {t.linked_txn_ref ?? 'the original Stock Out'}:</span>
+                        <ul className="mt-1 ml-4 list-disc">
+                          {t.outstandingLines.map((l: any, i: number) => (
+                            <li key={i}>
+                              {l.product_name} <span className="text-muted-foreground">× {l.outstanding}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </Fragment>
             )
           })}
         </TableBody>
@@ -369,6 +468,7 @@ function TransactionHistoryReport() {
   const [typeFilter, setTypeFilter] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [expanded, setExpanded] = useState<string | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -440,23 +540,58 @@ function TransactionHistoryReport() {
               <TableHead>Items</TableHead>
               <TableHead>Flag</TableHead>
               <TableHead>Date</TableHead>
+              <TableHead></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
-            {!loading && data.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">No transactions found</TableCell></TableRow>}
+            {loading && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
+            {!loading && data.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">No transactions found</TableCell></TableRow>}
             {data.map((t: any) => {
               const tLines = t.transaction_lines || []
               const totalQty = tLines.reduce((s: number, l: any) => s + (l.quantity || 0), 0)
+              const isExpanded = expanded === t.id
               return (
-                <TableRow key={t.id}>
-                  <TableCell className="font-mono text-xs">{t.reference_no}</TableCell>
-                  <TableCell><Badge className={TXN_BADGE_CLASS[t.transaction_type] ?? ''}>{t.transaction_type}</Badge></TableCell>
-                  <TableCell className="text-muted-foreground">{t.staff_name ?? '—'}</TableCell>
-                  <TableCell className="text-muted-foreground">{tLines.length} line{tLines.length !== 1 ? 's' : ''} · {totalQty} units</TableCell>
-                  <TableCell>{t.manual_override && <Badge className="bg-amber-100 text-amber-800">Manual</Badge>}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{formatDate(t.created_at)}</TableCell>
-                </TableRow>
+                <Fragment key={t.id}>
+                  <TableRow className="cursor-pointer" onClick={() => setExpanded(isExpanded ? null : t.id)}>
+                    <TableCell className="font-mono text-xs">{t.reference_no}</TableCell>
+                    <TableCell><Badge className={`${TXN_BADGE_CLASS[t.transaction_type] ?? ''} uppercase`}>{t.transaction_type}</Badge></TableCell>
+                    <TableCell className="text-muted-foreground">{t.staff_name ?? '—'}</TableCell>
+                    <TableCell className="text-muted-foreground">{tLines.length} line{tLines.length !== 1 ? 's' : ''} · {totalQty} units</TableCell>
+                    <TableCell>{t.manual_override && <Badge className="bg-amber-100 text-amber-800 uppercase">Manual</Badge>}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{formatDate(t.created_at)}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{isExpanded ? '▲' : '▼'}</TableCell>
+                  </TableRow>
+                  {isExpanded && (
+                    <TableRow className="bg-muted/50">
+                      <TableCell colSpan={7} className="p-4">
+                        <div className="flex flex-col gap-1.5 text-sm">
+                          {tLines.length > 0 ? (
+                            <ul className="ml-4 list-disc">
+                              {tLines.map((l: any, i: number) => (
+                                <li key={l.id ?? i}>
+                                  {l.product_name ?? 'Unknown product'} <span className="text-muted-foreground">× {l.quantity}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-muted-foreground">No line items recorded.</p>
+                          )}
+                          {(t.lend_from || t.lend_to) && (
+                            <div>
+                              <span className="font-medium text-foreground">Lend window:</span>{' '}
+                              {formatDateOnly(t.lend_from)} – {formatDateOnly(t.lend_to)}
+                            </div>
+                          )}
+                          {t.notes && (
+                            <div>
+                              <span className="font-medium text-foreground">Notes:</span> {t.notes}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
               )
             })}
           </TableBody>

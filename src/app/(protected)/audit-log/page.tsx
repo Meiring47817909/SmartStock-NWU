@@ -1,9 +1,9 @@
 'use client'
 
 import { Fragment, useEffect, useState } from 'react'
-import { formatDate } from '@/lib/utils'
+import { formatDate, formatDateOnly } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
-import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore'
+import { collection, query, orderBy, limit, getDocs, where } from 'firebase/firestore'
 import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import type { AuditLogEntry, AuditAction, AuditEntityType } from '@/types/database'
+import type { AuditLogEntry, AuditAction, AuditEntityType, TransactionLine } from '@/types/database'
 
 const ACTION_BADGE_CLASS: Record<AuditAction, string> = {
   create: 'bg-emerald-100 text-emerald-800',
@@ -20,6 +20,18 @@ const ACTION_BADGE_CLASS: Record<AuditAction, string> = {
   delete: 'bg-red-100 text-red-800',
   activate: 'bg-emerald-100 text-emerald-800',
   deactivate: 'bg-accent text-accent-foreground',
+}
+
+// Same mapping as TXN_BADGE_CLASS on the Reports page's transaction-history
+// tab — every transaction audit entry logs 'create' as its action (the
+// transactions collection is append-only, never updated), which isn't
+// useful to look at in a list of IN/OUT/RETURN activity. Show the
+// transaction's actual type instead, styled the same as it is in Reports.
+const TXN_BADGE_CLASS: Record<string, string> = {
+  IN: 'bg-emerald-100 text-emerald-800',
+  OUT: 'bg-accent text-accent-foreground',
+  RETURN: 'bg-sky-100 text-sky-800',
+  ADJUST: 'bg-amber-100 text-amber-800',
 }
 
 const ENTITY_LABEL: Record<AuditEntityType, string> = {
@@ -32,6 +44,150 @@ const ENTITY_LABEL: Record<AuditEntityType, string> = {
 const ALL_ENTITIES = '__all__'
 const ALL_ACTIONS = '__all__'
 
+// Plain-English labels for the raw Firestore field names that show up in
+// product/category/staff before-after snapshots — Selouna shouldn't have to
+// know what "quantity_on_hand" or "reorder_threshold" mean.
+const FIELD_LABELS: Record<string, string> = {
+  name: 'Name',
+  surname: 'Surname',
+  description: 'Description',
+  category_name: 'Category',
+  barcodes: 'Barcodes',
+  quantity_on_hand: 'Qty on hand',
+  reorder_threshold: 'Reorder threshold',
+  available: 'Available',
+  location: 'Location',
+  lend_from: 'Lend from',
+  lend_to: 'Lend to',
+  email: 'Email',
+  department: 'Department',
+  card_uid: 'Card UID',
+  is_active: 'Active',
+}
+
+// Fields that are either internal bookkeeping (id, timestamps, the raw
+// category_id/uid used to join to other records) or not useful to show as a
+// diff (raw Storage paths for photos) — left out of the friendly view.
+const SKIP_FIELDS = new Set(['id', 'created_at', 'updated_at', 'category_id', 'images', 'full_name', 'uid'])
+
+function friendlyLabel(key: string): string {
+  return FIELD_LABELS[key] ?? key.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
+}
+
+function friendlyValue(key: string, value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—'
+  if (typeof value === 'boolean') {
+    if (key === 'available') return value ? 'Available' : 'Unavailable'
+    if (key === 'is_active') return value ? 'Active' : 'Inactive'
+    return value ? 'Yes' : 'No'
+  }
+  if (Array.isArray(value)) return value.length ? value.join(', ') : '—'
+  if ((key === 'lend_from' || key === 'lend_to') && typeof value === 'string') return formatDateOnly(value)
+  return String(value)
+}
+
+// Plain-language before/after view for product, category and staff entries.
+// On a create, `before` is null, so every field in `after` is just listed.
+// On an update, both are full-object snapshots — only the fields that
+// actually changed are shown, as "Field: old → new".
+function FieldDiff({ before, after }: { before: Record<string, unknown> | null; after: Record<string, unknown> | null }) {
+  const keys = Array.from(new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})])).filter(
+    (k) => !SKIP_FIELDS.has(k),
+  )
+  const rows = keys
+    .map((key) => ({ key, before: before?.[key], after: after?.[key] }))
+    .filter(({ before: b, after: a }) => !before || JSON.stringify(b) !== JSON.stringify(a))
+
+  if (rows.length === 0) {
+    return <p className="text-sm text-muted-foreground">No details recorded.</p>
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {rows.map(({ key, before: b, after: a }) => (
+        <div key={key} className="flex flex-wrap items-baseline gap-1.5 text-sm">
+          <span className="font-medium text-foreground">{friendlyLabel(key)}:</span>
+          {before ? (
+            <>
+              <span className="text-muted-foreground line-through">{friendlyValue(key, b)}</span>
+              <span className="text-muted-foreground">→</span>
+              <span className="text-foreground">{friendlyValue(key, a)}</span>
+            </>
+          ) : (
+            <span className="text-foreground">{friendlyValue(key, a)}</span>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Transactions are append-only (only ever logged as 'create', with `before`
+// always null) and their `after` snapshot is already a purpose-built shape
+// rather than a raw entity record — so instead of a field-by-field diff,
+// show it the same way the Reports page's transaction-history tab does:
+// staff, line/unit counts, manual-entry flag, notes. The individual product
+// names/quantities aren't in `after` at all — they live in `transaction_lines`
+// (one doc per line item), fetched separately on expand — see `lines` prop.
+function TransactionSummary({ after, lines }: { after: Record<string, unknown> | null; lines: TransactionLine[] | undefined }) {
+  if (!after) return <p className="text-sm text-muted-foreground">No details recorded.</p>
+  const staffName = typeof after.staff_name === 'string' ? after.staff_name : null
+  const lineCount = typeof after.line_count === 'number' ? after.line_count : null
+  const totalQty = typeof after.total_qty === 'number' ? after.total_qty : null
+  const notes = typeof after.notes === 'string' && after.notes ? after.notes : null
+  const reference = typeof after.reference_no === 'string' ? after.reference_no : null
+  const manual = after.manual_override === true
+  // Only OUT transactions set these (Stock Out's Confirm step) — IN and
+  // RETURN never write lend_from/lend_to, so both are null/absent there.
+  const lendFrom = typeof after.lend_from === 'string' ? after.lend_from : null
+  const lendTo = typeof after.lend_to === 'string' ? after.lend_to : null
+
+  return (
+    <div className="flex flex-col gap-1.5 text-sm">
+      {reference && (
+        <div>
+          <span className="font-medium text-foreground">Reference:</span>{' '}
+          <span className="font-mono text-xs text-muted-foreground">{reference}</span>
+        </div>
+      )}
+      {staffName && (
+        <div>
+          <span className="font-medium text-foreground">Staff:</span> {staffName}
+        </div>
+      )}
+      {(lineCount !== null || totalQty !== null) && (
+        <div>
+          <span className="font-medium text-foreground">Items:</span>{' '}
+          {lineCount ?? '—'} line{lineCount === 1 ? '' : 's'} · {totalQty ?? '—'} units
+        </div>
+      )}
+      {lines === undefined ? (
+        <p className="text-xs text-muted-foreground">Loading items…</p>
+      ) : lines.length > 0 ? (
+        <ul className="ml-4 list-disc">
+          {lines.map((l) => (
+            <li key={l.id}>
+              {l.product_name ?? 'Unknown product'} <span className="text-muted-foreground">× {l.quantity}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {(lendFrom || lendTo) && (
+        <div>
+          <span className="font-medium text-foreground">Lend window:</span>{' '}
+          {formatDateOnly(lendFrom)} – {formatDateOnly(lendTo)}
+        </div>
+      )}
+      {manual && <Badge className="w-fit bg-amber-100 text-amber-800">Manual entry — no card scan</Badge>}
+      {notes && (
+        <div>
+          <span className="font-medium text-foreground">Notes:</span> {notes}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function AuditLogPage() {
   const [entries, setEntries] = useState<AuditLogEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -40,6 +196,9 @@ export default function AuditLogPage() {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
+  // Keyed by transaction entity_id — fetched lazily the first time a
+  // transaction row is expanded, then cached so re-expanding is instant.
+  const [lines, setLines] = useState<Record<string, TransactionLine[]>>({})
 
   useEffect(() => {
     async function load() {
@@ -61,8 +220,22 @@ export default function AuditLogPage() {
     (!actionFilter || e.action === actionFilter)
   )
 
-  function toggleExpand(id: string) {
-    setExpanded(prev => prev === id ? null : id)
+  async function toggleExpand(e: AuditLogEntry) {
+    if (expanded === e.id) { setExpanded(null); return }
+    setExpanded(e.id)
+    if (e.entity_type === 'transaction' && !lines[e.entity_id]) {
+      const snap = await getDocs(query(collection(db, 'transaction_lines'), where('transaction_id', '==', e.entity_id)))
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as TransactionLine[]
+      setLines(prev => ({ ...prev, [e.entity_id]: items }))
+    }
+  }
+
+  function actionBadge(e: AuditLogEntry) {
+    const txnType = e.entity_type === 'transaction' ? e.after?.transaction_type : undefined
+    if (typeof txnType === 'string') {
+      return <Badge className={`${TXN_BADGE_CLASS[txnType] ?? ''} uppercase`}>{txnType}</Badge>
+    }
+    return <Badge className={`${ACTION_BADGE_CLASS[e.action] ?? ''} uppercase`}>{e.action}</Badge>
   }
 
   return (
@@ -129,10 +302,10 @@ export default function AuditLogPage() {
             {!loading && filtered.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">No audit entries found</TableCell></TableRow>}
             {filtered.map(e => (
               <Fragment key={e.id}>
-                <TableRow className="cursor-pointer" onClick={() => toggleExpand(e.id)}>
+                <TableRow className="cursor-pointer" onClick={() => toggleExpand(e)}>
                   <TableCell className="text-xs text-muted-foreground">{formatDate(e.created_at)}</TableCell>
                   <TableCell className="font-medium">{e.user_name ?? '—'}</TableCell>
-                  <TableCell><Badge className={ACTION_BADGE_CLASS[e.action] ?? ''}>{e.action}</Badge></TableCell>
+                  <TableCell>{actionBadge(e)}</TableCell>
                   <TableCell className="text-muted-foreground">{ENTITY_LABEL[e.entity_type] ?? e.entity_type}</TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">{e.entity_id}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{expanded === e.id ? '▲' : '▼'}</TableCell>
@@ -140,20 +313,30 @@ export default function AuditLogPage() {
                 {expanded === e.id && (
                   <TableRow className="bg-muted/50">
                     <TableCell colSpan={6} className="p-4">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <div className="mb-1 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">Before</div>
-                          <pre className="m-0 overflow-x-auto rounded-md border bg-background p-3 text-xs whitespace-pre-wrap break-words text-muted-foreground">
-                            {e.before ? JSON.stringify(e.before, null, 2) : '— (none)'}
-                          </pre>
+                      {e.entity_type === 'transaction' ? (
+                        <TransactionSummary after={e.after} lines={lines[e.entity_id]} />
+                      ) : (
+                        <FieldDiff before={e.before} after={e.after} />
+                      )}
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
+                          Show raw data
+                        </summary>
+                        <div className="mt-2 grid grid-cols-2 gap-3">
+                          <div>
+                            <div className="mb-1 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">Before</div>
+                            <pre className="m-0 overflow-x-auto rounded-md border bg-background p-3 text-xs whitespace-pre-wrap break-words text-muted-foreground">
+                              {e.before ? JSON.stringify(e.before, null, 2) : '— (none)'}
+                            </pre>
+                          </div>
+                          <div>
+                            <div className="mb-1 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">After</div>
+                            <pre className="m-0 overflow-x-auto rounded-md border bg-background p-3 text-xs whitespace-pre-wrap break-words text-muted-foreground">
+                              {e.after ? JSON.stringify(e.after, null, 2) : '— (none)'}
+                            </pre>
+                          </div>
                         </div>
-                        <div>
-                          <div className="mb-1 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">After</div>
-                          <pre className="m-0 overflow-x-auto rounded-md border bg-background p-3 text-xs whitespace-pre-wrap break-words text-muted-foreground">
-                            {e.after ? JSON.stringify(e.after, null, 2) : '— (none)'}
-                          </pre>
-                        </div>
-                      </div>
+                      </details>
                     </TableCell>
                   </TableRow>
                 )}

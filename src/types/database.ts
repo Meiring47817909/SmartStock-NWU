@@ -73,6 +73,11 @@ export interface Transaction {
   return_date: string | null
   linked_txn_id: number | null
   manual_override: boolean
+  // Loan window set by Selouna on Stock Out's Confirm step (YYYY-MM-DD,
+  // native <input type="date"> format) — when the item is being lent out
+  // and when it's due back. Only ever set on OUT transactions.
+  lend_from: string | null
+  lend_to: string | null
   created_at: string
   // joined
   staff_name?: string

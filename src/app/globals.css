@@ -173,6 +173,23 @@ body {
   html {
     @apply font-sans;
   }
+  /* Every button in the app (shadcn's <Button>, which renders a native
+     <button>, plus the plain <button> elements used for row/icon actions
+     like copy, remove, drag handles, etc.) should show the pointer cursor
+     on hover. Browsers don't agree on a default here — some show `default`
+     for native buttons — so it's set explicitly instead of relying on it.
+     Disabled buttons get `not-allowed` instead; shadcn's Button already
+     pairs `disabled` with `pointer-events-none`, which blocks hover
+     entirely, but the explicit rule covers plain <button disabled> used
+     outside that component too. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+  button:disabled,
+  [role="button"][aria-disabled="true"] {
+    cursor: not-allowed;
+  }
 }
 
 /* Sonner's default toast description colour is a light grey baked into its

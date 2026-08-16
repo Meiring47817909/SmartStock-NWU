@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { genRef, cn } from '@/lib/utils'
+import { genRef, cn, todayDateStr } from '@/lib/utils'
 import { CreditCard, Barcode, CheckCircle, X, Plus, Minus, Users, Search } from 'lucide-react'
 import { db } from '@/lib/firebase/config'
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, orderBy, limit } from 'firebase/firestore'
@@ -12,6 +12,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
@@ -42,6 +43,8 @@ export default function StockOutPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [reference, setReference] = useState('')
+  const [lendFrom, setLendFrom] = useState(todayDateStr())
+  const [lendTo, setLendTo] = useState('')
 
   // Manual staff selection state
   const [showStaffSearch, setShowStaffSearch] = useState(false)
@@ -122,17 +125,30 @@ export default function StockOutPage() {
     setError(''); setLoading(true)
     const product = await findProductByBarcode(barcode) as unknown as Product | null
     if (!product) { setError(`Barcode "${barcode}" not found.`); setLoading(false); return }
+    if (product.quantity_on_hand <= 0) {
+      setError(`${product.name} is out of stock.`)
+      setBarcodeInput('')
+      setLoading(false)
+      return
+    }
+    let capped = false
     setCart(prev => {
       const existing = prev.find(i => i.product.id === product.id)
-      if (existing) return prev.map(i => i.product.id === product.id ? { ...i, quantity: i.quantity + 1 } : i)
+      if (existing) {
+        if (existing.quantity >= product.quantity_on_hand) { capped = true; return prev }
+        return prev.map(i => i.product.id === product.id ? { ...i, quantity: i.quantity + 1 } : i)
+      }
       return [...prev, { product, quantity: 1 }]
     })
+    if (capped) setError(`Only ${product.quantity_on_hand} of "${product.name}" in stock — already at the max in the cart.`)
     setBarcodeInput('')
     setLoading(false)
   }
 
   async function handleConfirm() {
     if (!staff || cart.length === 0) return
+    if (!lendTo) { setError('Select a return (To) date.'); return }
+    if (lendTo < lendFrom) { setError("Return (To) date can't be before the From date."); return }
     setLoading(true); setError('')
     const ref = genRef()
     try {
@@ -147,6 +163,8 @@ export default function StockOutPage() {
         staff_name: staff.full_name,
         manual_override: manualOverride,
         notes: manualOverride ? 'Staff selected manually (no card scan)' : '',
+        lend_from: lendFrom,
+        lend_to: lendTo,
         created_at: new Date().toISOString()
       }
       const txnRef = await addDoc(collection(db, 'transactions'), txnPayload)
@@ -180,7 +198,10 @@ export default function StockOutPage() {
     setLoading(false)
   }
 
-  function reset() { setStep('staff'); setStaff(null); setCart([]); setError(''); setReference(''); setManualOverride(false) }
+  function reset() {
+    setStep('staff'); setStaff(null); setCart([]); setError(''); setReference(''); setManualOverride(false)
+    setLendFrom(todayDateStr()); setLendTo('')
+  }
 
   const stepIndex = STEPS.indexOf(step) === -1 ? 3 : STEPS.indexOf(step)
 
@@ -272,13 +293,11 @@ export default function StockOutPage() {
               <CardTitle className="flex items-center gap-2"><Barcode className="size-4" /> Step 2 — Scan Items</CardTitle>
             </CardHeader>
             <CardContent className="py-4">
-              <div className="mb-4 flex gap-2">
-                <Input ref={barcodeRef} placeholder="Scan or type barcode…"
+              <div className="mb-4">
+                <Input ref={barcodeRef} placeholder="Scan or type barcode, then press Enter…"
                   value={barcodeInput} onChange={e => setBarcodeInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && barcodeInput && lookupBarcode(barcodeInput)} autoFocus />
-                <Button disabled={!barcodeInput || loading} onClick={() => lookupBarcode(barcodeInput)}>
-                  {loading ? '…' : 'Add'}
-                </Button>
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); barcodeInput && !loading && lookupBarcode(barcodeInput) } }}
+                  autoFocus />
               </div>
               {cart.length > 0 && (
                 <Table>
@@ -303,10 +322,15 @@ export default function StockOutPage() {
                             </Button>
                             <span className="min-w-6 text-center font-semibold">{item.quantity}</span>
                             <Button variant="ghost" size="icon-sm"
-                              onClick={() => setCart(c => c.map(i => i.product.id === item.product.id ? { ...i, quantity: i.quantity + 1 } : i))}>
+                              disabled={item.quantity >= item.product.quantity_on_hand}
+                              title={item.quantity >= item.product.quantity_on_hand ? `Only ${item.product.quantity_on_hand} in stock` : undefined}
+                              onClick={() => setCart(c => c.map(i => i.product.id === item.product.id ? { ...i, quantity: Math.min(i.product.quantity_on_hand, i.quantity + 1) } : i))}>
                               <Plus className="size-3" />
                             </Button>
                           </div>
+                          {item.quantity >= item.product.quantity_on_hand && (
+                            <p className="mt-0.5 text-[0.7rem] text-muted-foreground">Max in stock</p>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Button variant="ghost" size="icon-sm" className="text-red-600 hover:text-red-700"
@@ -366,9 +390,24 @@ export default function StockOutPage() {
                 })}
               </TableBody>
             </Table>
+            <div className="mb-4 grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5">
+                <Label htmlFor="lend-from">Lend From</Label>
+                <Input id="lend-from" type="date" value={lendFrom} min={todayDateStr()}
+                  onChange={e => setLendFrom(e.target.value)} />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="lend-to">Lend To *</Label>
+                <Input id="lend-to" type="date" value={lendTo} min={lendFrom || todayDateStr()} required
+                  onChange={e => setLendTo(e.target.value)} />
+              </div>
+            </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setStep('items')}>← Back</Button>
-              <Button disabled={loading || cart.some(i => i.product.quantity_on_hand < i.quantity)} onClick={handleConfirm}>
+              <Button
+                disabled={loading || !lendTo || lendTo < lendFrom || cart.some(i => i.product.quantity_on_hand < i.quantity)}
+                onClick={handleConfirm}
+              >
                 {loading ? 'Processing…' : 'Confirm Issue'}
               </Button>
             </div>

@@ -118,15 +118,11 @@ export default function StockInPage() {
             <CardTitle className="flex items-center gap-2"><Barcode className="size-4" /> Scan Items</CardTitle>
           </CardHeader>
           <CardContent className="py-4">
-            <div className="mb-4 flex gap-2">
-              <Input placeholder="Scan or type barcode…"
+            <div className="mb-4">
+              <Input placeholder="Scan or type barcode, then press Enter…"
                 value={barcodeInput} onChange={e => setBarcodeInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); barcodeInput && lookupBarcode(barcodeInput) } }}
                 autoFocus />
-              <Button type="button" disabled={!barcodeInput}
-                onClick={() => barcodeInput && lookupBarcode(barcodeInput)}>
-                Add
-              </Button>
             </div>
 
             {cart.length === 0 && (

@@ -1,17 +1,26 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { formatDate, stockStatusLabel } from '@/lib/utils'
+import { formatDateOnly, stockStatusLabel, todayDateStr } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
-import { collection, query, where, orderBy, limit, getDocs, getCountFromServer } from 'firebase/firestore'
+import { collection, query, where, orderBy, getDocs, getCountFromServer } from 'firebase/firestore'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 
-const TXN_BADGE_CLASS: Record<string, string> = {
-  IN: 'bg-emerald-100 text-emerald-800',
-  OUT: 'bg-accent text-accent-foreground',
-  RETURN: 'bg-sky-100 text-sky-800',
+// Every row here is still outstanding — nothing has been returned yet — so
+// the label needs to describe urgency going forward, not judge a completed
+// action. "Early/On time/Late" (used in the Reports Returns tab, which
+// describes an actual past return event) reads backwards here: it implies
+// something already happened. This table only ever shows lines with a
+// remaining balance, so there's no "Partial" case to consider the way there
+// is on the Returns report (every row here already IS the outstanding portion).
+function outstandingStatus(expectedDate: string | null): { label: string; className: string } | null {
+  if (!expectedDate) return null
+  const today = todayDateStr()
+  if (today > expectedDate) return { label: 'Overdue', className: 'bg-red-100 text-red-800' }
+  if (today === expectedDate) return { label: 'Due Today', className: 'bg-amber-100 text-amber-800' }
+  return { label: 'Not Due Yet', className: 'bg-emerald-100 text-emerald-800' }
 }
 
 export default function DashboardPage() {
@@ -22,7 +31,7 @@ export default function DashboardPage() {
     today_transactions: 0,
     total_staff: 0
   })
-  const [recentTxn, setRecentTxn] = useState<any[]>([])
+  const [outstanding, setOutstanding] = useState<any[]>([])
   const [lowItems, setLowItems] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -60,11 +69,57 @@ export default function DashboardPage() {
         items.sort((a, b) => a.quantity_on_hand - b.quantity_on_hand)
         const topLowItems = items.slice(0, 8)
 
-        // Fetch recent transactions
-        const recentTxnSnap = await getDocs(query(transactionsRef, orderBy('created_at', 'desc'), limit(8)))
-        const txnList: any[] = []
-        recentTxnSnap.forEach(doc => {
-          txnList.push({ id: doc.id, ...doc.data() })
+        // Outstanding returns: every OUT transaction line whose issued
+        // quantity hasn't been fully returned yet — scoped per originating
+        // OUT transaction via linked_txn_id, same correctly-scoped logic as
+        // returns/page.tsx and the Reports Returns tab (a flat per-product
+        // total here would incorrectly let a return against one loan cancel
+        // out an unrelated later loan of the same product).
+        const outSnap = await getDocs(query(transactionsRef, where('transaction_type', '==', 'OUT')))
+        const returnSnap = await getDocs(query(transactionsRef, where('transaction_type', '==', 'RETURN')))
+        const outTxns = outSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
+        const returnTxns = returnSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
+
+        const linesSnap = await getDocs(collection(db, 'transaction_lines'))
+        const linesByTxn: Record<string, any[]> = {}
+        linesSnap.forEach(d => {
+          const l = d.data()
+          ;(linesByTxn[l.transaction_id] ??= []).push(l)
+        })
+
+        const returnedByTxn: Record<string, Record<string, number>> = {}
+        returnTxns.forEach(t => {
+          if (!t.linked_txn_id) return
+          const bucket = (returnedByTxn[t.linked_txn_id] ??= {})
+          ;(linesByTxn[t.id] || []).forEach((l: any) => {
+            bucket[l.product_id] = (bucket[l.product_id] ?? 0) + (l.quantity || 0)
+          })
+        })
+
+        const outstandingList: any[] = []
+        outTxns.forEach(t => {
+          ;(linesByTxn[t.id] || []).forEach((l: any) => {
+            const issued = l.quantity || 0
+            const returned = returnedByTxn[t.id]?.[l.product_id] ?? 0
+            const remaining = issued - returned
+            if (remaining <= 0) return
+            outstandingList.push({
+              id: `${t.id}_${l.product_id}`,
+              product_name: l.product_name ?? 'Unknown',
+              staff_name: t.staff_name ?? '—',
+              qty: remaining,
+              expected_date: t.lend_to ?? null,
+              txn_ref: t.reference_no ?? '',
+            })
+          })
+        })
+        // Most urgent first — overdue/soonest-due at the top, undated
+        // (pre-Stage A) loans pushed to the end since there's nothing to sort them by.
+        outstandingList.sort((a, b) => {
+          if (!a.expected_date && !b.expected_date) return 0
+          if (!a.expected_date) return 1
+          if (!b.expected_date) return -1
+          return a.expected_date.localeCompare(b.expected_date)
         })
 
         setStats({
@@ -74,7 +129,7 @@ export default function DashboardPage() {
           today_transactions: todayTxnSnap.data().count,
           total_staff: totalStaffSnap.data().count
         })
-        setRecentTxn(txnList)
+        setOutstanding(outstandingList)
         setLowItems(topLowItems)
       } catch (err) {
         console.error("Failed to load dashboard data", err)
@@ -116,30 +171,38 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-2 gap-5">
         <Card className="py-0">
-          <CardHeader className="border-b py-3">
-            <CardTitle className="text-sm">Recent Transactions</CardTitle>
+          <CardHeader className="flex-row items-center justify-between border-b py-3">
+            <CardTitle className="text-sm">Outstanding Returns</CardTitle>
+            {outstanding.length > 0 && (
+              <Badge className="bg-accent text-accent-foreground">{outstanding.length} outstanding</Badge>
+            )}
           </CardHeader>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Ref</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Staff ID</TableHead>
-                <TableHead>Date</TableHead>
+                <TableHead>Product</TableHead>
+                <TableHead>Staff</TableHead>
+                <TableHead>Qty</TableHead>
+                <TableHead>Expected</TableHead>
+                <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {recentTxn.length === 0 && (
-                <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">No transactions yet</TableCell></TableRow>
+              {outstanding.length === 0 && (
+                <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Nothing outstanding ✓</TableCell></TableRow>
               )}
-              {recentTxn.map((t) => (
-                <TableRow key={t.id}>
-                  <TableCell className="font-mono text-xs">{t.reference_no}</TableCell>
-                  <TableCell><Badge className={TXN_BADGE_CLASS[t.transaction_type] ?? ''}>{t.transaction_type}</Badge></TableCell>
-                  <TableCell className="text-muted-foreground">{t.staff_id ?? '—'}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{formatDate(t.created_at)}</TableCell>
-                </TableRow>
-              ))}
+              {outstanding.slice(0, 8).map((o) => {
+                const status = outstandingStatus(o.expected_date)
+                return (
+                  <TableRow key={o.id}>
+                    <TableCell className="font-medium">{o.product_name}</TableCell>
+                    <TableCell className="text-muted-foreground">{o.staff_name}</TableCell>
+                    <TableCell className="font-semibold">{o.qty}</TableCell>
+                    <TableCell className="text-muted-foreground">{formatDateOnly(o.expected_date)}</TableCell>
+                    <TableCell>{status && <Badge className={`${status.className} uppercase`}>{status.label}</Badge>}</TableCell>
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
         </Card>

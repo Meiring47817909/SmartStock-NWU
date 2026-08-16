@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { stockStatusLabel, genBarcode } from "@/lib/utils";
-import { Search, Plus, Pencil, Eye, RefreshCw, ImageOff, X } from "lucide-react";
+import { DragDropContext, Draggable, Droppable, type DropResult } from "@hello-pangea/dnd";
+import { stockStatusLabel, genBarcode, formatDateOnly, todayDateStr } from "@/lib/utils";
+import { Search, Plus, Pencil, Eye, RefreshCw, ImageOff, X, GripVertical, Copy } from "lucide-react";
+import { toast } from "sonner";
 import { db, storage } from "@/lib/firebase/config";
 import {
   collection,
@@ -71,32 +73,12 @@ const productBarcodes = (p: {
   barcode?: string;
 }): string[] => p.barcodes ?? (p.barcode ? [p.barcode] : []);
 
-// Today as a YYYY-MM-DD string in the viewer's local timezone — used as the
-// floor for the Lend From date picker. Deliberately avoids
-// `new Date().toISOString()`, which reports the UTC date and can be a day
-// off from "today" depending on the viewer's timezone.
-function todayDateStr(): string {
-  const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${mm}-${dd}`;
-}
-
-// Formats a YYYY-MM-DD date-only string (native <input type="date"> value)
-// for display. Deliberately doesn't go through `new Date(...)` — that parses
-// date-only strings as UTC midnight, which can shift the displayed day by
-// one depending on the viewer's timezone.
-function formatLendDate(value: string | null | undefined): string {
-  if (!value) return "—";
-  const [year, month, day] = value.split("-");
-  const monthNames = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-  ];
-  const monthIdx = Number(month) - 1;
-  if (!year || !day || monthIdx < 0 || monthIdx > 11) return value;
-  return `${day} ${monthNames[monthIdx]} ${year}`;
-}
+// todayDateStr moved to the shared @/lib/utils — Stock Out's Confirm step
+// needed the same "today" floor for its lend-date pickers.
+// formatLendDate moved to the shared formatDateOnly() in @/lib/utils — the
+// Audit Log's friendly transaction/product diff view needed the same
+// date-only-safe formatting, so it's no longer specific to this page.
+const formatLendDate = formatDateOnly;
 
 const STATUS_BADGE_CLASS = (qty: number, threshold: number) =>
   qty === 0
@@ -259,13 +241,39 @@ export default function ProductsPage() {
     const trimmed = code.trim();
     if (!trimmed) return;
     setForm((f) =>
-      f.barcodes.includes(trimmed) ? f : { ...f, barcodes: [trimmed, ...f.barcodes] },
+      // Appended, not prepended — new barcodes shouldn't silently jump to
+      // primary and undo whatever order was set by dragging. The first
+      // barcode ever added still lands at index 0, which is why existing
+      // products keep their current primary untouched.
+      f.barcodes.includes(trimmed) ? f : { ...f, barcodes: [...f.barcodes, trimmed] },
     );
     setBarcodeInput("");
   }
 
   function removeBarcode(code: string) {
     setForm((f) => ({ ...f, barcodes: f.barcodes.filter((b) => b !== code) }));
+  }
+
+  async function copyBarcode(code: string) {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast.success(`Copied "${code}"`);
+    } catch {
+      toast.error("Couldn't copy — clipboard access was blocked.");
+    }
+  }
+
+  // The first barcode in the array is the primary one (see productBarcodes()
+  // and every "primary barcode" display across the app) — dragging a chip to
+  // the top makes it primary instead of relying on insertion order.
+  function handleBarcodeDragEnd(result: DropResult) {
+    if (!result.destination) return;
+    setForm((f) => {
+      const items = Array.from(f.barcodes);
+      const [reordered] = items.splice(result.source.index, 1);
+      items.splice(result.destination!.index, 0, reordered);
+      return { ...f, barcodes: items };
+    });
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -505,7 +513,21 @@ export default function ProductsPage() {
                   )}
                 </TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">
-                  {productBarcodes(p)[0] ?? "—"}
+                  {productBarcodes(p)[0] ? (
+                    <span className="inline-flex items-center gap-1">
+                      {productBarcodes(p)[0]}
+                      <button
+                        type="button"
+                        onClick={() => copyBarcode(productBarcodes(p)[0])}
+                        className="text-muted-foreground hover:text-foreground"
+                        title="Copy barcode"
+                      >
+                        <Copy className="size-3" />
+                      </button>
+                    </span>
+                  ) : (
+                    "—"
+                  )}
                   {productBarcodes(p).length > 1 && (
                     <span className="ml-1 text-muted-foreground/70">
                       +{productBarcodes(p).length - 1} more
@@ -688,29 +710,52 @@ export default function ProductsPage() {
             <div className="grid gap-1.5">
               <Label htmlFor="p-barcode">Barcodes *</Label>
               {form.barcodes.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {form.barcodes.map((code, i) => (
-                    <span
-                      key={code}
-                      className="inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-1 font-mono text-xs"
-                    >
-                      {code}
-                      {i === 0 && form.barcodes.length > 1 && (
-                        <span className="text-[10px] text-muted-foreground">
-                          (primary)
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => removeBarcode(code)}
-                        className="text-muted-foreground hover:text-red-600"
-                        title="Remove barcode"
+                <DragDropContext onDragEnd={handleBarcodeDragEnd}>
+                  <Droppable droppableId="product-barcodes" direction="vertical">
+                    {(provided) => (
+                      <div
+                        {...provided.droppableProps}
+                        ref={provided.innerRef}
+                        className="flex flex-col gap-1.5"
                       >
-                        <X className="size-3" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
+                        {form.barcodes.map((code, i) => (
+                          <Draggable key={code} draggableId={code} index={i}>
+                            {(provided, snapshot) => (
+                              <div
+                                {...provided.draggableProps}
+                                ref={provided.innerRef}
+                                className={`flex items-center gap-2 rounded-md border bg-muted px-2 py-1.5 font-mono text-xs ${snapshot.isDragging ? "bg-accent shadow-md" : ""}`}
+                              >
+                                <div
+                                  {...provided.dragHandleProps}
+                                  className="cursor-grab text-muted-foreground active:cursor-grabbing"
+                                  title="Drag to reorder"
+                                >
+                                  <GripVertical className="size-3.5" />
+                                </div>
+                                <span className="flex-1 truncate">{code}</span>
+                                {i === 0 && form.barcodes.length > 1 && (
+                                  <Badge className="bg-emerald-100 text-[10px] text-emerald-800">
+                                    Primary
+                                  </Badge>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => removeBarcode(code)}
+                                  className="text-muted-foreground hover:text-red-600"
+                                  title="Remove barcode"
+                                >
+                                  <X className="size-3" />
+                                </button>
+                              </div>
+                            )}
+                          </Draggable>
+                        ))}
+                        {provided.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
+                </DragDropContext>
               )}
               <div className="flex gap-1">
                 <Input

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { genRef } from '@/lib/utils'
+import { genRef, formatDateOnly, todayDateStr } from '@/lib/utils'
 import { CreditCard, CheckCircle, Users, Search, RotateCcw } from 'lucide-react'
 import { db } from '@/lib/firebase/config'
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, getDoc, orderBy, limit } from 'firebase/firestore'
@@ -30,6 +30,29 @@ interface OpenLine {
   already_returned: number
   returnable: number
   returning: number
+  // The originating Stock Out transaction's Lend To date (Stage A) — null
+  // for transactions created before that field existed.
+  expected_date: string | null
+}
+
+// Partial takes priority over timing: if some of this line has already come
+// back, what matters is that a balance is still owed, not whether today
+// happens to be before/on/after the due date. Only computed for lines with
+// nothing returned yet and a known expected_date — legacy transactions from
+// before Stage A have no lend_to to compare against.
+//
+// Labels describe urgency of the still-open balance, not a judgement on a
+// completed action — nothing has been returned yet at this point, so
+// "Early/On time/Late" (which reads naturally in the Reports Returns tab,
+// describing an actual past return) would misleadingly imply the return
+// already happened.
+function lineStatus(l: OpenLine): { label: string; className: string } | null {
+  if (l.already_returned > 0) return { label: 'Partial', className: 'bg-amber-100 text-amber-800' }
+  if (!l.expected_date) return null
+  const today = todayDateStr()
+  if (today > l.expected_date) return { label: 'Overdue', className: 'bg-red-100 text-red-800' }
+  if (today === l.expected_date) return { label: 'Due Today', className: 'bg-amber-100 text-amber-800' }
+  return { label: 'Not Due Yet', className: 'bg-emerald-100 text-emerald-800' }
 }
 
 type Step = 'staff' | 'items' | 'done'
@@ -126,12 +149,25 @@ export default function ReturnsPage() {
       }
     })
 
-    let returnedMap: Record<string, number> = {}
+    // Keyed by [originating OUT transaction id][product_id] — NOT a flat
+    // per-product total. A RETURN transaction always records which OUT
+    // transaction it was returning against, via linked_txn_id (see
+    // handleConfirm below). Scoping it this way matters: a staff member can
+    // have more than one OUT transaction for the same product over time, and
+    // a return against one of them must not reduce the returnable quantity
+    // on an unrelated, later OUT transaction for that same product — a flat
+    // per-product map here previously caused exactly that, incorrectly
+    // shrinking (or entirely hiding, once it hit zero) products on a fresh
+    // Stock Out because of an unrelated return from a past transaction.
+    const returnedByTxn: Record<string, Record<string, number>> = {}
     returnTxnsSnap.forEach(doc => {
+      const txn = doc.data()
+      const linkedTxnId = txn.linked_txn_id as string | undefined
+      if (!linkedTxnId) return
       const lines = linesByTxn[doc.id] || []
       lines.forEach((l: any) => {
-        const pid = l.product_id
-        returnedMap[pid] = (returnedMap[pid] ?? 0) + (l.quantity || 0)
+        const bucket = (returnedByTxn[linkedTxnId] ??= {})
+        bucket[l.product_id] = (bucket[l.product_id] ?? 0) + (l.quantity || 0)
       })
     })
 
@@ -142,7 +178,7 @@ export default function ReturnsPage() {
 
       lines.forEach((l: any, idx: number) => {
         const issued = l.quantity || 0
-        const alreadyReturned = returnedMap[l.product_id] ?? 0
+        const alreadyReturned = returnedByTxn[doc.id]?.[l.product_id] ?? 0
         const returnable = issued - alreadyReturned
         if (returnable <= 0) return
 
@@ -158,6 +194,7 @@ export default function ReturnsPage() {
           already_returned: alreadyReturned,
           returnable,
           returning: 0,
+          expected_date: txn.lend_to ?? null,
         })
       })
     })
@@ -336,27 +373,36 @@ export default function ReturnsPage() {
                       <TableHead>Ref</TableHead>
                       <TableHead>Issued</TableHead>
                       <TableHead>Returnable</TableHead>
+                      <TableHead>Expected</TableHead>
+                      <TableHead>Status</TableHead>
                       <TableHead>Returning</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {lines.map(l => (
-                      <TableRow key={l.line_id}>
-                        <TableCell>
-                          <div className="font-medium">{l.product_name}</div>
-                        </TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">{l.txn_ref}</TableCell>
-                        <TableCell className="text-muted-foreground">{l.issued_qty}</TableCell>
-                        <TableCell className="font-semibold">{l.returnable}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1.5">
-                            <Button variant="ghost" size="icon-sm" onClick={() => updateReturning(l.line_id, l.returning - 1)}>−</Button>
-                            <span className={`min-w-6 text-center font-bold ${l.returning > 0 ? 'text-primary' : 'text-muted-foreground'}`}>{l.returning}</span>
-                            <Button variant="ghost" size="icon-sm" onClick={() => updateReturning(l.line_id, l.returning + 1)}>+</Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {lines.map(l => {
+                      const status = lineStatus(l)
+                      return (
+                        <TableRow key={l.line_id}>
+                          <TableCell>
+                            <div className="font-medium">{l.product_name}</div>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs text-muted-foreground">{l.txn_ref}</TableCell>
+                          <TableCell className="text-muted-foreground">{l.issued_qty}</TableCell>
+                          <TableCell className="font-semibold">{l.returnable}</TableCell>
+                          <TableCell className="text-muted-foreground">{formatDateOnly(l.expected_date)}</TableCell>
+                          <TableCell>
+                            {status && <Badge className={status.className}>{status.label}</Badge>}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1.5">
+                              <Button variant="ghost" size="icon-sm" onClick={() => updateReturning(l.line_id, l.returning - 1)}>−</Button>
+                              <span className={`min-w-6 text-center font-bold ${l.returning > 0 ? 'text-primary' : 'text-muted-foreground'}`}>{l.returning}</span>
+                              <Button variant="ghost" size="icon-sm" onClick={() => updateReturning(l.line_id, l.returning + 1)}>+</Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
                   </TableBody>
                 </Table>
               )}

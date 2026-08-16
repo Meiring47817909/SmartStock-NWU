@@ -53,15 +53,20 @@ Stock Out (`src/app/(protected)/stock-out/page.tsx`) is a 3-step wizard: `staff`
 
 This feature ships in two stages. Do Stage A first — it's small, self-contained, and useful even before Stage B exists. Stage B depends on Stage A's data model.
 
-## Stage A — Manual lend dates on Stock Out's Confirm step
+## Stage A — Manual lend dates on Stock Out's Confirm step — **DONE**
 Selouna needs to record a from/to date on the transaction itself when she hands equipment to a staff member who walked in and asked to borrow something (no online request involved).
+
+**Built as:** `Transaction.lend_from`/`lend_to` (`string | null`, same `YYYY-MM-DD` convention as `Product.lend_from`/`lend_to`) added to `src/types/database.ts`. On the Confirm step in `stock-out/page.tsx`, two `<Input type="date">` fields sit between the items table and the Confirm/Back buttons — **Lend From defaults to today and stays editable** (`min` floored at today, same as the Product form's picker), **Lend To is required** (marked with `*`, `min` floored at Lend From, `required` on the input) — this is a deliberate change from the original spec below, which had both fields optional; Selouna decided every Stock Out needs a return date, not just loans. `lendFrom`/`lendTo` state is reset in `reset()` alongside the rest of the wizard state. `handleConfirm` guards against a missing or invalid Lend To before writing anything (`Select a return (To) date.` / `Return (To) date can't be before the From date.`), and the Confirm Issue button is disabled under the same conditions so the bad state is unreachable, not just rejected after the fact. Both fields are included in `txnPayload`, so they flow into `transactions` and — since `handleConfirm`'s `logAudit(...)` call spreads `...txnPayload` into `after` — into the audit log for free, no extra work needed there. `todayDateStr()` (the timezone-safe "today" helper, previously local to `products/page.tsx`) moved to the shared `@/lib/utils` so both pages use the same one.
+
+<details>
+<summary>Original spec (superseded by "Built as" above, kept for context)</summary>
 
 1. **Type:** Add `lend_from: string | null` and `lend_to: string | null` to the `Transaction` interface in `src/types/database.ts`, same `YYYY-MM-DD` convention as `Product.lend_from`/`lend_to`.
 2. **UI:** In the Confirm card (`step === 'confirm'` block, currently around line 333), add two `<Input type="date">` fields (From / To) above or below the items table. Make them optional — not every Stock Out is a loan (e.g. consumables that don't come back), so don't require them to proceed. Reuse the same "To can't be before From" guard used on the Product form (see `handleSave` in `products/page.tsx` for the pattern).
 3. **State + save:** Add `lendFrom`/`lendTo` state, include them in `txnPayload` inside `handleConfirm` (currently around line 143), and reset them in the `reset()` function alongside the other step-reset state.
 4. **Audit log:** `handleConfirm` already calls `logAudit(...)` — include the two new fields in the `after` snapshot passed there.
 
-That's the whole of Stage A. No new collections, no new pages.
+</details>
 
 ## Stage B — Staff self-service lending + Scan Items integration
 Now let staff request a product online ahead of time, using the lend window Selouna already configured on the product, and have Stock Out surface that request when she serves them.
@@ -141,7 +146,7 @@ When the cart contains items sourced from loan requests, prefill the From/To inp
 Inside `handleConfirm`, after the transaction and its lines are written successfully, `updateDoc` each matched `loan_requests` doc to `status: 'fulfilled'`, `fulfilled_txn_id: txnRef.id`.
 
 ## Suggested build order
-1. Stage A end-to-end (type, UI, save, audit log) — verify with `npm run build`.
+1. ~~Stage A end-to-end (type, UI, save, audit log)~~ — **done**, see Stage A above (Lend To ended up required, not optional — read the "Built as" note, not the struck-through spec below it, before touching this code).
 2. Stage B data model (`LoanRequest` type + Firestore collection, no UI yet).
 3. ~~Staff login provisioning~~ — **done** (section 2 above). Re-test the conflict/refusal paths after merging (duplicate email on add/edit, email sync failure, reset-email collision) before building anything that depends on it — don't just trust that it still works untouched.
 4. Lending portal page, using the login flow from step 3.
