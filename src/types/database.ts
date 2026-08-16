@@ -55,6 +55,10 @@ export interface StaffMember {
   department: string | null
   card_uid: string | null
   is_active: boolean
+  // Firebase Auth UID this staff record is linked to, for lending-portal
+  // login — null until "Send Login Email" has provisioned an account.
+  // Written only by the /api/staff/* routes; see src/lib/server/staffAdmin.ts.
+  uid: string | null
   created_at: string
   updated_at: string
 }

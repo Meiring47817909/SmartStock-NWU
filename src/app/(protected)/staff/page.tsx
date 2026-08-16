@@ -1,10 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Search, Plus, Pencil, CreditCard } from 'lucide-react'
+import { toast } from 'sonner'
+import { Search, Plus, Pencil, CreditCard, Mail } from 'lucide-react'
 import { db } from '@/lib/firebase/config'
 import { collection, query, getDocs, addDoc, updateDoc, doc, orderBy } from 'firebase/firestore'
 import { logAudit } from '@/lib/firebase/audit'
+import { normalizeEmail, findStaffEmailConflict, postStaffAdmin } from '@/lib/firebase/staff'
 import { useAuth } from '@/context/AuthContext'
 import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
@@ -35,6 +37,7 @@ export default function StaffPage() {
   const [form, setForm] = useState<FormData>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [sendingId, setSendingId] = useState<string | null>(null)
 
   async function load() {
     setLoading(true)
@@ -83,17 +86,46 @@ export default function StaffPage() {
     setSaving(true); setError('')
     const name = form.name.trim()
     const surname = form.surname.trim()
-    const payload = {
-      name,
-      surname,
-      full_name: `${name} ${surname}`.trim(),
-      email: form.email.trim() || null,
-      department: form.department.trim() || null,
-      card_uid: form.card_uid.trim() || null,
-    }
+    // Normalize once, up front — every place that stores or compares this
+    // email (this check, the Auth-sync call, the Firestore payload) has to
+    // agree on the same casing, or a duplicate could slip past by casing
+    // alone. See findStaffEmailConflict in src/lib/firebase/staff.ts.
+    const normalizedEmail = form.email.trim() ? normalizeEmail(form.email) : null
 
     try {
+      if (normalizedEmail) {
+        const conflict = await findStaffEmailConflict(normalizedEmail, editing?.id.toString())
+        if (conflict) {
+          setError(`This email is already used by ${conflict.full_name}.`)
+          setSaving(false)
+          return
+        }
+      }
+
+      const payload = {
+        name,
+        surname,
+        full_name: `${name} ${surname}`.trim(),
+        email: normalizedEmail,
+        department: form.department.trim() || null,
+        card_uid: form.card_uid.trim() || null,
+      }
+
       if (editing) {
+        // If this record already has a linked login account and the email
+        // actually changed, the Auth account's email has to be updated to
+        // match — same account, same uid, never a second account. Do this
+        // BEFORE writing Firestore, and only proceed to the Firestore write
+        // if it succeeds, so the two can never drift out of sync.
+        const previousEmail = editing.email ? normalizeEmail(editing.email) : null
+        if (editing.uid && normalizedEmail && normalizedEmail !== previousEmail) {
+          if (!user) throw new Error('Not signed in.')
+          await postStaffAdmin('/api/staff/update-email', user, {
+            staffId: editing.id.toString(),
+            newEmail: normalizedEmail,
+          })
+        }
+
         const updated = { ...payload, updated_at: new Date().toISOString() }
         await updateDoc(doc(db, 'staff', editing.id.toString()), updated)
         logAudit({
@@ -145,6 +177,36 @@ export default function StaffPage() {
     }
   }
 
+  // Provisions (first time) or resends a lending-portal login email. Safe
+  // to click any number of times — see /api/staff/send-reset-email for the
+  // full decision tree (handout: "Staff login — resolved auth model").
+  async function sendLoginEmail(s: StaffMember) {
+    if (!user) return
+    if (!s.email) {
+      toast.error('This staff member has no email on file.')
+      return
+    }
+    setSendingId(s.id.toString())
+    try {
+      const res = await postStaffAdmin<{ linked: boolean; email: string; uid: string }>(
+        '/api/staff/send-reset-email', user, { staffId: s.id.toString() },
+      )
+      toast.success(`Login email sent to ${res.email}.`)
+      if (!s.uid) {
+        logAudit({
+          userId: user.uid, userName: profile?.full_name ?? user.email,
+          action: 'update', entityType: 'staff', entityId: s.id.toString(),
+          before: { uid: null },
+          after: { uid: res.uid },
+        })
+        load() // refresh so the row picks up the newly-linked uid
+      }
+    } catch (err: any) {
+      toast.error(err.message)
+    }
+    setSendingId(null)
+  }
+
   const f = (k: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }))
 
@@ -184,7 +246,12 @@ export default function StaffPage() {
               <TableRow key={s.id} className={s.is_active ? '' : 'opacity-50'}>
                 <TableCell>
                   <div className="font-medium">{s.full_name}</div>
-                  {s.email && <div className="text-xs text-muted-foreground">{s.email}</div>}
+                  {s.email && (
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      {s.email}
+                      {s.uid && <span className="text-emerald-600">· portal linked</span>}
+                    </div>
+                  )}
                 </TableCell>
                 <TableCell className="text-muted-foreground">{s.department ?? '—'}</TableCell>
                 <TableCell>
@@ -203,6 +270,15 @@ export default function StaffPage() {
                   <div className="flex gap-1">
                     <Button variant="ghost" size="icon-sm" onClick={() => openEdit(s)}>
                       <Pencil className="size-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost" size="sm"
+                      disabled={!s.email || sendingId === s.id.toString()}
+                      title={!s.email ? 'No email on file' : undefined}
+                      onClick={() => sendLoginEmail(s)}
+                    >
+                      <Mail className="size-3.5" />
+                      {sendingId === s.id.toString() ? 'Sending…' : s.uid ? 'Resend Login Email' : 'Send Login Email'}
                     </Button>
                     <Button
                       variant="ghost" size="sm"
