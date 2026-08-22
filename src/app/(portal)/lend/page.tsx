@@ -8,6 +8,7 @@ import { formatDateOnly } from '@/lib/utils'
 import { usePortalCart } from '@/context/PortalCartContext'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import ProductPreviewDialog from '@/components/products/ProductPreviewDialog'
 import { Package } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Product } from '@/types/database'
@@ -16,6 +17,7 @@ export default function LendBrowsePage() {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [quantities, setQuantities] = useState<Record<number, number>>({})
+  const [previewProduct, setPreviewProduct] = useState<Product | null>(null)
   const { addToCart } = usePortalCart()
 
   useEffect(() => {
@@ -61,7 +63,11 @@ export default function LendBrowsePage() {
 
       <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
         {products.map((p) => (
-          <Card key={p.id} className="overflow-hidden py-0">
+          <Card
+            key={p.id}
+            className="cursor-pointer overflow-hidden py-0 transition-shadow hover:shadow-md"
+            onClick={() => setPreviewProduct(p)}
+          >
             <div className="flex aspect-square items-center justify-center overflow-hidden bg-muted">
               {p.images?.[0] ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -76,7 +82,10 @@ export default function LendBrowsePage() {
                 Lendable {formatDateOnly(p.lend_from)} – {formatDateOnly(p.lend_to)}
               </div>
               <div className="text-xs text-muted-foreground">{p.quantity_on_hand} available</div>
-              <div className="mt-1 flex items-center gap-1.5">
+              {/* stopPropagation on every control here — the card itself opens
+                  the preview modal on click, and these need to keep working
+                  without also popping that open underneath them. */}
+              <div className="mt-1 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                 <Button variant="ghost" size="icon-sm" onClick={() => setQty(p.id, qtyFor(p) - 1, p.quantity_on_hand)}>−</Button>
                 <span className="min-w-6 text-center font-bold text-primary">{qtyFor(p)}</span>
                 <Button variant="ghost" size="icon-sm" onClick={() => setQty(p.id, qtyFor(p) + 1, p.quantity_on_hand)}>+</Button>
@@ -86,6 +95,8 @@ export default function LendBrowsePage() {
           </Card>
         ))}
       </div>
+
+      <ProductPreviewDialog product={previewProduct} onClose={() => setPreviewProduct(null)} />
     </div>
   )
 }

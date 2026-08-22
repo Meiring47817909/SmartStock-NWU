@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { DragDropContext, Draggable, Droppable, type DropResult } from "@hello-pangea/dnd";
-import { stockStatusLabel, genBarcode, formatDateOnly, todayDateStr } from "@/lib/utils";
-import { Search, Plus, Pencil, Eye, RefreshCw, ImageOff, X, GripVertical, Copy } from "lucide-react";
+import { stockStatusLabel, genBarcode, todayDateStr } from "@/lib/utils";
+import { Search, Plus, Pencil, Eye, RefreshCw, X, GripVertical, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { db, storage } from "@/lib/firebase/config";
 import {
@@ -51,14 +51,10 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-} from "@/components/ui/carousel";
 import MultiImageUploader, {
   type ImageUpload,
 } from "@/components/products/MultiImageUploader";
+import ProductPreviewDialog from "@/components/products/ProductPreviewDialog";
 import type { Product, Category } from "@/types/database";
 
 const ALL_CATEGORIES = "__all__";
@@ -75,10 +71,6 @@ const productBarcodes = (p: {
 
 // todayDateStr moved to the shared @/lib/utils — Stock Out's Confirm step
 // needed the same "today" floor for its lend-date pickers.
-// formatLendDate moved to the shared formatDateOnly() in @/lib/utils — the
-// Audit Log's friendly transaction/product diff view needed the same
-// date-only-safe formatting, so it's no longer specific to this page.
-const formatLendDate = formatDateOnly;
 
 const STATUS_BADGE_CLASS = (qty: number, threshold: number) =>
   qty === 0
@@ -139,25 +131,9 @@ export default function ProductsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
-  const [activeImage, setActiveImage] = useState(0);
   // Transient text for the "type/paste a barcode" input in the Add/Edit
   // dialog — not part of form state since it's cleared on every add.
   const [barcodeInput, setBarcodeInput] = useState("");
-
-  // Reset to the first photo whenever a different product is previewed.
-  useEffect(() => {
-    setActiveImage(0);
-  }, [previewProduct?.id]);
-
-  // Auto-cycle through photos every 5s, only while there's more than one.
-  useEffect(() => {
-    const images = previewProduct?.images;
-    if (!images || images.length <= 1) return;
-    const timer = setInterval(() => {
-      setActiveImage((i) => (i + 1) % images.length);
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [previewProduct?.id, previewProduct?.images]);
 
   async function load() {
     setLoading(true);
@@ -850,147 +826,10 @@ export default function ProductsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Preview modal */}
-      <Dialog
-        open={!!previewProduct}
-        onOpenChange={(open) => !open && setPreviewProduct(null)}
-      >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[700px]">
-          {previewProduct && (
-            <>
-              <div className="grid gap-6 sm:grid-cols-2">
-                <div>
-                  {previewProduct.images && previewProduct.images.length > 0 ? (
-                    <>
-                      {/* Main photo — a plain <img>, not the Carousel itself. Which
-                          photo shows is driven by activeImage, set either by the
-                          auto-cycle timer or by clicking a thumbnail below. */}
-                      <div className="flex aspect-square items-center justify-center overflow-hidden rounded-lg bg-muted">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={storageDownloadUrl(
-                            previewProduct.images[activeImage] ??
-                              previewProduct.images[0],
-                          )}
-                          alt=""
-                          className="size-full object-cover"
-                        />
-                      </div>
-
-                      {/* Thumbnail strip — only shown for 2-3 photos. Clicking a
-                          thumbnail jumps the main photo to it. */}
-                      {previewProduct.images.length > 1 && (
-                        <Carousel className="mt-2 w-full">
-                          {/* py-1: CarouselContent's own wrapper div clips with
-                              overflow-hidden sized exactly to this row's height —
-                              without vertical padding here, the active thumbnail's
-                              ring gets clipped flush at the top/bottom edge.
-                              justify-center: keeps the thumbnail cluster centered
-                              in the row regardless of whether there are 2 or 3. */}
-                          <CarouselContent className="-ml-2 justify-evenly py-1">
-                            {previewProduct.images.map((path, i) => (
-                              <CarouselItem
-                                key={path}
-                                className="basis-auto pl-2"
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveImage(i)}
-                                  className={`block size-20 shrink-0 overflow-hidden rounded-md ring-2 transition-colors ${
-                                    i === activeImage
-                                      ? "ring-primary"
-                                      : "ring-transparent hover:ring-border"
-                                  }`}
-                                >
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img
-                                    src={storageDownloadUrl(path)}
-                                    alt=""
-                                    className="size-full object-cover"
-                                  />
-                                </button>
-                              </CarouselItem>
-                            ))}
-                          </CarouselContent>
-                        </Carousel>
-                      )}
-                    </>
-                  ) : (
-                    <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-lg bg-muted text-muted-foreground">
-                      <ImageOff className="size-8" />
-                      <span className="text-sm">No photos</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-3">
-                  <DialogTitle className="font-heading text-2xl font-bold">
-                    {previewProduct.name}
-                  </DialogTitle>
-
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {previewProduct.category_name && (
-                      <Badge className="bg-accent text-accent-foreground">
-                        {previewProduct.category_name}
-                      </Badge>
-                    )}
-                    <Badge
-                      className={AVAILABLE_BADGE_CLASS(
-                        previewProduct.available ?? true,
-                      )}
-                    >
-                      {previewProduct.available ?? true
-                        ? "Available"
-                        : "Unavailable"}
-                    </Badge>
-                  </div>
-
-                  <div className="border-t" />
-
-                  {previewProduct.location && (
-                    <div>
-                      <div className="mb-1 text-sm font-semibold">
-                        Location:
-                      </div>
-                      <p className="text-sm">{previewProduct.location}</p>
-                    </div>
-                  )}
-
-                  {(previewProduct.lend_from || previewProduct.lend_to) && (
-                    <div>
-                      <div className="mb-1 text-sm font-semibold">
-                        Lendable:
-                      </div>
-                      <p className="text-sm">
-                        {formatLendDate(previewProduct.lend_from)} –{" "}
-                        {formatLendDate(previewProduct.lend_to)}
-                      </p>
-                    </div>
-                  )}
-
-                  {previewProduct.description && (
-                    <div>
-                      <div className="mb-1 text-sm font-semibold">
-                        Description:
-                      </div>
-                      <p className="text-sm">{previewProduct.description}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setPreviewProduct(null)}
-                >
-                  Close
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+      <ProductPreviewDialog
+        product={previewProduct}
+        onClose={() => setPreviewProduct(null)}
+      />
     </div>
   );
 }
