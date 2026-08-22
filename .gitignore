@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/campus-marketplace
 
 # next.js
 /.next/
