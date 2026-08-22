@@ -107,7 +107,7 @@ type TaggedStorage = typeof storage & { __emulatorConnected?: boolean };
 if (USE_EMULATORS && typeof window !== 'undefined') {
   if (!(db as TaggedFirestore).__emulatorConnected) {
     try {
-      connectFirestoreEmulator(db, '127.0.0.1', 8080);
+      connectFirestoreEmulator(db, '127.0.0.1', 8081);
       (db as TaggedFirestore).__emulatorConnected = true;
     } catch {
       // Already connected on this instance — safe to ignore.
