@@ -78,6 +78,9 @@ export interface Transaction {
   // and when it's due back. Only ever set on OUT transactions.
   lend_from: string | null
   lend_to: string | null
+  // Set when this OUT transaction was issued against an accepted loan
+  // request (see loan-requests portal). null for walk-ins.
+  linked_request_id: string | null
   created_at: string
   // joined
   staff_name?: string
@@ -125,8 +128,52 @@ export interface CartItem {
   quantity: number
 }
 
+// Lending-portal negotiation request. One request = one cart, one shared
+// date range, one status covering every line (see LENDING_PORTAL_SPEC.md §1).
+export type LoanRequestStatus =
+  | 'pending'    // awaiting Selouna's first review
+  | 'countered'  // Selouna proposed changes, awaiting staff accept/decline
+  | 'accepted'   // staff accepted (or Selouna approved as-is); awaiting pickup
+  | 'declined'   // staff declined a counter — terminal
+  | 'expired'    // pending/countered request that blew past its expiry — terminal
+  | 'withdrawn'  // staff cancelled a pending/countered/accepted request — terminal
+  | 'fulfilled'  // Stock Out issued against it — terminal
+  | 'no_show'    // accepted but pickup window passed with nothing issued — terminal
+
+export interface LoanRequest {
+  id: string                    // Firestore document ID
+  staff_id: string               // StaffMember document ID (resolved via StaffMember.uid at submission)
+  staff_name: string              // denormalized, same pattern as Transaction.staff_name
+  status: LoanRequestStatus
+  message: string | null          // optional note from staff at submission
+  from_date: string               // YYYY-MM-DD — current shared date range. Mutable: Selouna's
+                                   // counter can change it, overwritten in place.
+  to_date: string                 // YYYY-MM-DD
+  // Immutable snapshot of what was originally submitted — set once, never
+  // touched again — so the staff-facing counter-diff view can show what
+  // Selouna changed even after from_date/to_date are overwritten in place.
+  original_from_date: string
+  original_to_date: string
+  created_at: string              // ISO — set once at submission, never changes
+  updated_at: string              // ISO — bumped on every status transition. Expiry is computed
+                                   // from this (see loanRequests.ts) — never store an expiry date.
+  fulfilled_txn_id: string | null // set by Stock Out once issued
+}
+
+export interface LoanRequestLine {
+  id: string                    // Firestore document ID
+  request_id: string             // LoanRequest document ID
+  product_id: string              // Firestore document ID of the product (Product.id.toString())
+  product_name: string            // denormalized
+  requested_quantity: number      // set once at submission — never edited after
+  offered_quantity: number        // starts equal to requested_quantity. Selouna's counter edits
+                                   // this (reduce, or set to 0 to drop the line). This is the
+                                   // number Stock Out actually issues against on fulfillment.
+  created_at: string
+}
+
 export type AuditAction = 'create' | 'update' | 'delete' | 'activate' | 'deactivate'
-export type AuditEntityType = 'product' | 'category' | 'staff' | 'transaction'
+export type AuditEntityType = 'product' | 'category' | 'staff' | 'transaction' | 'loan_request'
 
 export interface AuditLogEntry {
   id: string             // Firestore document ID

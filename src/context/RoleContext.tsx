@@ -13,6 +13,7 @@ interface RoleContextValue {
   canViewReports: boolean   // admin + manager
   canViewAuditLog: boolean  // admin only
   canWorkOffline: boolean   // admin only — see (protected)/layout.tsx offline gate
+  canManageLoanRequests: boolean // admin + manager — Selouna's loan-requests queue
 }
 
 const RoleContext = createContext<RoleContextValue>({
@@ -25,6 +26,7 @@ const RoleContext = createContext<RoleContextValue>({
   canViewReports: false,
   canViewAuditLog: false,
   canWorkOffline: false,
+  canManageLoanRequests: false,
 })
 
 export function RoleProvider({ role, children }: { role: Role; children: React.ReactNode }) {
@@ -38,6 +40,7 @@ export function RoleProvider({ role, children }: { role: Role; children: React.R
     canViewReports: role === 'admin' || role === 'manager',
     canViewAuditLog: role === 'admin',
     canWorkOffline: role === 'admin',
+    canManageLoanRequests: role === 'admin' || role === 'manager',
   }
   return <RoleContext.Provider value={value}>{children}</RoleContext.Provider>
 }

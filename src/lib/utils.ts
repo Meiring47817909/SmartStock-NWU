@@ -65,6 +65,17 @@ export function isoToLocalDateStr(iso: string): string {
   return dateStrFromDate(new Date(iso))
 }
 
+// Adds (or subtracts, with a negative `days`) whole days to a YYYY-MM-DD
+// date-only string, returning another YYYY-MM-DD string. Goes through the
+// local-date-safe dateStrFromDate/Date(y,m,d) construction rather than
+// string-slicing arithmetic, so month/year rollovers are handled correctly.
+export function addDaysToDateStr(dateStr: string, days: number): string {
+  const [year, month, day] = dateStr.split('-').map(Number)
+  const d = new Date(year, month - 1, day)
+  d.setDate(d.getDate() + days)
+  return dateStrFromDate(d)
+}
+
 // Formats a YYYY-MM-DD date-only string (native <input type="date"> value)
 // for display. Deliberately doesn't go through `new Date(...)` — that parses
 // date-only strings as UTC midnight, which can shift the displayed day by

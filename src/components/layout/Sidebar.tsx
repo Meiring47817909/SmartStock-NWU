@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard, Package, LogOut, ArrowUpFromLine, ArrowDownToLine,
-  Users, RotateCcw, BarChart2, ScrollText, Tag,
+  Users, RotateCcw, BarChart2, ScrollText, Tag, ClipboardList,
 } from 'lucide-react'
 import { signOut } from 'firebase/auth'
 import { auth } from '@/lib/firebase/config'
@@ -29,7 +29,7 @@ const ROLE_BADGE_CLASS: Record<string, string> = {
 export default function Sidebar({ profile }: { profile: Profile | null }) {
   const pathname = usePathname()
   const router = useRouter()
-  const { canManageProducts, canManageStaff, canViewReports } = useRole()
+  const { canManageProducts, canManageStaff, canViewReports, canManageLoanRequests } = useRole()
 
   async function handleLogout() {
     await signOut(auth)
@@ -124,6 +124,13 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
                   <SidebarMenuItem>
                     <SidebarMenuButton render={<Link href="/reports" />} isActive={isActive('/reports')}>
                       <BarChart2 className="size-4" /> Reports
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )}
+                {canManageLoanRequests && (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton render={<Link href="/loan-requests" />} isActive={isActive('/loan-requests')}>
+                      <ClipboardList className="size-4" /> Loan Requests
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 )}

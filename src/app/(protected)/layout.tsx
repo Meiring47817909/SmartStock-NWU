@@ -16,7 +16,7 @@ import type { Profile, Role } from '@/types/database'
 // Routes restricted to admin only
 const ADMIN_ONLY = ['/staff', '/audit-log']
 // Routes restricted to admin + manager
-const MANAGER_PLUS = ['/reports']
+const MANAGER_PLUS = ['/reports', '/loan-requests']
 
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth()
@@ -42,6 +42,16 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
         return
       }
 
+      // A Firebase Auth user with no profiles/{uid} doc is exactly what a
+      // lending-portal borrower account looks like (see StaffPortalContext) —
+      // AuthContext no longer synthesizes a fake role:'staff' Profile for
+      // this case, so treat it as an auth error rather than letting them
+      // fall through to BICS with a default role.
+      if (!profile) {
+        router.push('/login?error=no-profile')
+        return
+      }
+
       if (ADMIN_ONLY.some(p => pathname.startsWith(p)) && role !== 'admin') {
         router.push('/dashboard')
       }
@@ -49,9 +59,9 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
         router.push('/dashboard')
       }
     }
-  }, [user, role, loading, pathname, router])
+  }, [user, profile, role, loading, pathname, router])
 
-  if (loading || !user) {
+  if (loading || !user || !profile) {
     return <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center' }}>Loading...</div>
   }
 

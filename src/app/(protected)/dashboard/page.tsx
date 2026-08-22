@@ -4,9 +4,11 @@ import { useEffect, useState } from 'react'
 import { formatDateOnly, stockStatusLabel, todayDateStr } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { collection, query, where, orderBy, getDocs, getCountFromServer } from 'firebase/firestore'
+import { computeExpiryDate, expireIfNeeded } from '@/lib/firebase/loanRequests'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
+import type { LoanRequest } from '@/types/database'
 
 // Every row here is still outstanding — nothing has been returned yet — so
 // the label needs to describe urgency going forward, not judge a completed
@@ -33,6 +35,7 @@ export default function DashboardPage() {
   })
   const [outstanding, setOutstanding] = useState<any[]>([])
   const [lowItems, setLowItems] = useState<any[]>([])
+  const [loanRequests, setLoanRequests] = useState<{ id: string; staff_name: string; item_count: number; status: string; expires: string | null }[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -122,6 +125,35 @@ export default function DashboardPage() {
           return a.expected_date.localeCompare(b.expected_date)
         })
 
+        // Outstanding loan requests — pending/countered, lazily flipped to
+        // expired/no_show before rendering just like Selouna's queue and
+        // My Requests, so this card never shows a stale active status.
+        const loanReqSnap = await getDocs(collection(db, 'loan_requests'))
+        let loanReqs = loanReqSnap.docs.map(d => ({ id: d.id, ...d.data() })) as LoanRequest[]
+        loanReqs = await Promise.all(loanReqs.map(async (r) => {
+          if (r.status !== 'pending' && r.status !== 'countered') return r
+          const next = await expireIfNeeded(r)
+          return next !== r.status ? { ...r, status: next } : r
+        }))
+        const loanReqLinesSnap = await getDocs(collection(db, 'loan_request_lines'))
+        const lineCountByRequest: Record<string, number> = {}
+        loanReqLinesSnap.forEach(d => {
+          const requestId = d.data().request_id as string
+          lineCountByRequest[requestId] = (lineCountByRequest[requestId] ?? 0) + 1
+        })
+        const openLoanRequests = loanReqs
+          .filter(r => r.status === 'pending' || r.status === 'countered')
+          .map(r => ({
+            id: r.id, staff_name: r.staff_name, item_count: lineCountByRequest[r.id] ?? 0,
+            status: r.status, expires: computeExpiryDate(r),
+          }))
+        openLoanRequests.sort((a, b) => {
+          if (!a.expires && !b.expires) return 0
+          if (!a.expires) return 1
+          if (!b.expires) return -1
+          return a.expires.localeCompare(b.expires)
+        })
+
         setStats({
           total_products: totalProductsSnap.data().count,
           total_stock: totalStock,
@@ -131,6 +163,7 @@ export default function DashboardPage() {
         })
         setOutstanding(outstandingList)
         setLowItems(topLowItems)
+        setLoanRequests(openLoanRequests)
       } catch (err) {
         console.error("Failed to load dashboard data", err)
       } finally {
@@ -237,6 +270,44 @@ export default function DashboardPage() {
                       {stockStatusLabel(p.quantity_on_hand, p.reorder_threshold)}
                     </Badge>
                   </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      </div>
+
+      <div className="mt-5 grid grid-cols-1 gap-5">
+        <Card className="py-0">
+          <CardHeader className="flex-row items-center justify-between border-b py-3">
+            <CardTitle className="text-sm">Outstanding Loan Requests</CardTitle>
+            {loanRequests.length > 0 && (
+              <Badge className="bg-accent text-accent-foreground">{loanRequests.length} outstanding</Badge>
+            )}
+          </CardHeader>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Staff</TableHead>
+                <TableHead>Items</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Expires</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loanRequests.length === 0 && (
+                <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">Nothing outstanding ✓</TableCell></TableRow>
+              )}
+              {loanRequests.slice(0, 8).map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell className="font-medium">{r.staff_name}</TableCell>
+                  <TableCell className="text-muted-foreground">{r.item_count} item{r.item_count === 1 ? '' : 's'}</TableCell>
+                  <TableCell>
+                    <Badge className={`${r.status === 'countered' ? 'bg-sky-100 text-sky-800' : 'bg-amber-100 text-amber-800'} uppercase`}>
+                      {r.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{r.expires ? formatDateOnly(r.expires) : '—'}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

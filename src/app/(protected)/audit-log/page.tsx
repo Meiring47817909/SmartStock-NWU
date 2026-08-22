@@ -39,6 +39,21 @@ const ENTITY_LABEL: Record<AuditEntityType, string> = {
   category: 'Category',
   staff: 'Staff',
   transaction: 'Transaction',
+  loan_request: 'Loan Request',
+}
+
+// Same reasoning as TXN_BADGE_CLASS above — a loan_request audit entry
+// always logs 'update' as its action (the interesting information is which
+// status it moved to), so show the status instead of the generic verb.
+const LOAN_REQUEST_BADGE_CLASS: Record<string, string> = {
+  pending: 'bg-amber-100 text-amber-800',
+  countered: 'bg-sky-100 text-sky-800',
+  accepted: 'bg-emerald-100 text-emerald-800',
+  fulfilled: 'bg-accent text-accent-foreground',
+  declined: 'bg-red-100 text-red-800',
+  expired: 'bg-muted text-muted-foreground',
+  withdrawn: 'bg-muted text-muted-foreground',
+  no_show: 'bg-red-100 text-red-800',
 }
 
 const ALL_ENTITIES = '__all__'
@@ -63,12 +78,22 @@ const FIELD_LABELS: Record<string, string> = {
   department: 'Department',
   card_uid: 'Card UID',
   is_active: 'Active',
+  status: 'Status',
+  from_date: 'From date',
+  to_date: 'To date',
+  message: 'Message',
 }
 
 // Fields that are either internal bookkeeping (id, timestamps, the raw
-// category_id/uid used to join to other records) or not useful to show as a
-// diff (raw Storage paths for photos) — left out of the friendly view.
-const SKIP_FIELDS = new Set(['id', 'created_at', 'updated_at', 'category_id', 'images', 'full_name', 'uid'])
+// category_id/uid/staff_id used to join to other records) or not useful to
+// show as a diff (raw Storage paths for photos, the immutable
+// original_from_date/original_to_date snapshot which would just look like a
+// noisy duplicate of from_date/to_date on a loan_request's create entry) —
+// left out of the friendly view.
+const SKIP_FIELDS = new Set([
+  'id', 'created_at', 'updated_at', 'category_id', 'images', 'full_name', 'uid',
+  'staff_id', 'original_from_date', 'original_to_date',
+])
 
 function friendlyLabel(key: string): string {
   return FIELD_LABELS[key] ?? key.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
@@ -82,7 +107,10 @@ function friendlyValue(key: string, value: unknown): string {
     return value ? 'Yes' : 'No'
   }
   if (Array.isArray(value)) return value.length ? value.join(', ') : '—'
-  if ((key === 'lend_from' || key === 'lend_to') && typeof value === 'string') return formatDateOnly(value)
+  if (
+    (key === 'lend_from' || key === 'lend_to' || key === 'from_date' || key === 'to_date') &&
+    typeof value === 'string'
+  ) return formatDateOnly(value)
   return String(value)
 }
 
@@ -231,6 +259,10 @@ export default function AuditLogPage() {
   }
 
   function actionBadge(e: AuditLogEntry) {
+    const loanStatus = e.entity_type === 'loan_request' ? e.after?.status : undefined
+    if (typeof loanStatus === 'string') {
+      return <Badge className={`${LOAN_REQUEST_BADGE_CLASS[loanStatus] ?? ''} uppercase`}>{loanStatus.replace('_', ' ')}</Badge>
+    }
     const txnType = e.entity_type === 'transaction' ? e.after?.transaction_type : undefined
     if (typeof txnType === 'string') {
       return <Badge className={`${TXN_BADGE_CLASS[txnType] ?? ''} uppercase`}>{txnType}</Badge>
@@ -249,7 +281,7 @@ export default function AuditLogPage() {
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Select
-          items={{ [ALL_ENTITIES]: 'All entities', product: 'Product', category: 'Category', staff: 'Staff', transaction: 'Transaction' }}
+          items={{ [ALL_ENTITIES]: 'All entities', product: 'Product', category: 'Category', staff: 'Staff', transaction: 'Transaction', loan_request: 'Loan Request' }}
           value={entityFilter || ALL_ENTITIES}
           onValueChange={v => setEntityFilter(v && v !== ALL_ENTITIES ? v : '')}
         >
@@ -260,6 +292,7 @@ export default function AuditLogPage() {
             <SelectItem value="category">Category</SelectItem>
             <SelectItem value="staff">Staff</SelectItem>
             <SelectItem value="transaction">Transaction</SelectItem>
+            <SelectItem value="loan_request">Loan Request</SelectItem>
           </SelectContent>
         </Select>
         <Select

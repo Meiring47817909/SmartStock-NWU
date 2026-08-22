@@ -33,8 +33,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (docSnap.exists()) {
             setProfile(docSnap.data() as Profile)
           } else {
-            // Default profile if none exists
-            setProfile({ id: currUser.uid, full_name: currUser.displayName || currUser.email || 'User', role: 'staff', created_at: new Date().toISOString() })
+            // No profiles/{uid} doc — this is exactly what a lending-portal
+            // borrower account looks like (see StaffPortalContext), among
+            // other cases. Do NOT synthesize a default role:'staff' Profile
+            // here: this app's Firebase Auth project is shared between BICS
+            // operators and portal borrowers, and a portal-only account
+            // must never be treated as a valid BICS user just because it
+            // authenticated successfully. (protected)/layout.tsx redirects
+            // to /login with an error when profile is null.
+            setProfile(null)
           }
         } catch (e) {
           console.error("Error fetching profile", e)

@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { signInWithEmailAndPassword } from 'firebase/auth'
 import { auth } from '@/lib/firebase/config'
 import { Card, CardContent } from '@/components/ui/card'
@@ -11,11 +11,16 @@ import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Separator } from '@/components/ui/separator'
 
-export default function LoginPage() {
+function LoginPageInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const [error, setError] = useState(
+    searchParams.get('error') === 'no-profile'
+      ? "Your account isn't set up for BICS access — contact an administrator."
+      : '',
+  )
   const [loading, setLoading] = useState(false)
 
   async function handleLogin(e: React.FormEvent) {
@@ -99,5 +104,13 @@ export default function LoginPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-background" />}>
+      <LoginPageInner />
+    </Suspense>
   )
 }

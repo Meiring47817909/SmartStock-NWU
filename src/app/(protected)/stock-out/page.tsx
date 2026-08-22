@@ -1,12 +1,13 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { genRef, cn, todayDateStr } from '@/lib/utils'
+import { genRef, cn, todayDateStr, formatDateOnly } from '@/lib/utils'
 import { CreditCard, Barcode, CheckCircle, X, Plus, Minus, Users, Search } from 'lucide-react'
 import { db } from '@/lib/firebase/config'
-import { collection, query, where, getDocs, addDoc, updateDoc, doc, orderBy, limit } from 'firebase/firestore'
+import { collection, query, where, getDocs, getDoc, addDoc, updateDoc, doc, orderBy, limit } from 'firebase/firestore'
 import { logAudit } from '@/lib/firebase/audit'
 import { findProductByBarcode } from '@/lib/firebase/products'
+import { getReservedQuantity } from '@/lib/firebase/loanRequests'
 import { useAuth } from '@/context/AuthContext'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
@@ -18,7 +19,13 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import type { StaffMember, Product, CartItem } from '@/types/database'
+import { ClipboardList } from 'lucide-react'
+import type { StaffMember, Product, CartItem, LoanRequest, LoanRequestLine } from '@/types/database'
+
+// A cart line sourced from an accepted loan request carries the id of the
+// request it fulfils, so handleConfirm knows which request(s) to mark
+// fulfilled. Walk-in barcode-scanned lines have no sourceRequestId.
+type StockOutCartItem = CartItem & { sourceRequestId?: string }
 
 // Falls back to the pre-multi-barcode singular `barcode` field for products
 // that haven't been edited since (see productBarcodes() in products/page.tsx
@@ -37,7 +44,7 @@ export default function StockOutPage() {
   const [step, setStep] = useState<Step>('staff')
   const [staff, setStaff] = useState<StaffMember | null>(null)
   const [manualOverride, setManualOverride] = useState(false)
-  const [cart, setCart] = useState<CartItem[]>([])
+  const [cart, setCart] = useState<StockOutCartItem[]>([])
   const [barcodeInput, setBarcodeInput] = useState('')
   const [uidInput, setUidInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -45,6 +52,14 @@ export default function StockOutPage() {
   const [reference, setReference] = useState('')
   const [lendFrom, setLendFrom] = useState(todayDateStr())
   const [lendTo, setLendTo] = useState('')
+
+  // Accepted, not-yet-fulfilled loan requests for the identified staff
+  // member (§7 of LENDING_PORTAL_SPEC.md) — selectable above the barcode
+  // input in step 2. Single-select: Transaction.linked_request_id is a
+  // single id, so one active request per confirm, walk-ins layered on top.
+  const [pendingPickups, setPendingPickups] = useState<LoanRequest[]>([])
+  const [activeRequest, setActiveRequest] = useState<LoanRequest | null>(null)
+  const [conflictWarnings, setConflictWarnings] = useState<string[]>([])
 
   // Manual staff selection state
   const [showStaffSearch, setShowStaffSearch] = useState(false)
@@ -81,6 +96,28 @@ export default function StockOutPage() {
     return () => document.removeEventListener('keydown', onKey, true)
   }, [handleHID])
 
+  // Walk-in conflict warning (decision #8 in LENDING_PORTAL_SPEC.md §1) —
+  // checked at step 3 rather than in lookupBarcode, since real lend
+  // dates don't exist for a walk-in until here. Non-blocking: Selouna can
+  // still proceed, this just makes sure she's not doing it blind.
+  useEffect(() => {
+    if (step !== 'confirm' || !lendTo) { setConflictWarnings([]); return }
+    let cancelled = false
+    async function checkConflicts() {
+      const warnings: string[] = []
+      for (const item of cart) {
+        if (item.sourceRequestId) continue
+        const reserved = await getReservedQuantity(item.product.id.toString(), lendFrom, lendTo)
+        if (reserved + item.quantity > item.product.quantity_on_hand) {
+          warnings.push(`${item.product.name} is reserved by ${reserved} unit(s) via active loan requests for these dates — issuing ${item.quantity} more may leave those requests short.`)
+        }
+      }
+      if (!cancelled) setConflictWarnings(warnings)
+    }
+    checkConflicts()
+    return () => { cancelled = true }
+  }, [step, cart, lendFrom, lendTo])
+
   async function lookupUID(uid: string) {
     setError(''); setLoading(true)
     const snap = await getDocs(query(collection(db, 'staff'), where('card_uid', '==', uid), where('is_active', '==', true)))
@@ -88,8 +125,53 @@ export default function StockOutPage() {
     const data = { id: snap.docs[0].id, ...snap.docs[0].data() } as unknown as StaffMember
     setStaff(data)
     setManualOverride(false)
+    await loadPendingPickups(data)
     setStep('items')
     setLoading(false)
+  }
+
+  // Broad read + client-side filter, same convention as the rest of this
+  // app's Firestore usage (see loanRequests.ts's getReservedQuantity).
+  async function loadPendingPickups(s: StaffMember) {
+    const snap = await getDocs(query(collection(db, 'loan_requests'), where('staff_id', '==', s.id.toString())))
+    const requests = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }) as LoanRequest)
+      .filter((r) => r.status === 'accepted' && r.fulfilled_txn_id === null)
+    setPendingPickups(requests)
+  }
+
+  // Selecting a request populates the cart from its lines using
+  // offered_quantity — what Selouna actually approved, never
+  // requested_quantity. Walk-in barcode scans can still be layered on top
+  // (they simply have no sourceRequestId) — only the request-sourced lines
+  // drive the fulfillment write in handleConfirm.
+  async function selectRequest(r: LoanRequest) {
+    setError(''); setLoading(true)
+    const linesSnap = await getDocs(query(collection(db, 'loan_request_lines'), where('request_id', '==', r.id)))
+    const lines = linesSnap.docs.map((d) => d.data() as LoanRequestLine).filter((l) => l.offered_quantity > 0)
+
+    const missing: string[] = []
+    const items: StockOutCartItem[] = []
+    for (const line of lines) {
+      const productSnap = await getDoc(doc(db, 'products', line.product_id))
+      if (!productSnap.exists()) { missing.push(line.product_name); continue }
+      const product = { id: productSnap.id, ...productSnap.data() } as unknown as Product
+      items.push({ product, quantity: Math.min(line.offered_quantity, product.quantity_on_hand), sourceRequestId: r.id })
+    }
+    if (missing.length > 0) setError(`Some items on this request no longer exist: ${missing.join(', ')}.`)
+
+    setActiveRequest(r)
+    setCart(items)
+    setLendFrom(r.from_date)
+    setLendTo(r.to_date)
+    setLoading(false)
+  }
+
+  function deselectRequest() {
+    setActiveRequest(null)
+    setCart((prev) => prev.filter((i) => !i.sourceRequestId))
+    setLendFrom(todayDateStr())
+    setLendTo('')
   }
 
   async function loadStaffList(qStr: string) {
@@ -114,10 +196,11 @@ export default function StockOutPage() {
     setShowStaffSearch(true)
   }
 
-  function selectStaffManually(s: StaffMember) {
+  async function selectStaffManually(s: StaffMember) {
     setStaff(s)
     setManualOverride(true)
     setShowStaffSearch(false)
+    await loadPendingPickups(s)
     setStep('items')
   }
 
@@ -165,6 +248,7 @@ export default function StockOutPage() {
         notes: manualOverride ? 'Staff selected manually (no card scan)' : '',
         lend_from: lendFrom,
         lend_to: lendTo,
+        linked_request_id: activeRequest?.id ?? null,
         created_at: new Date().toISOString()
       }
       const txnRef = await addDoc(collection(db, 'transactions'), txnPayload)
@@ -190,6 +274,18 @@ export default function StockOutPage() {
         })
       }
 
+      if (activeRequest) {
+        const now = new Date().toISOString()
+        await updateDoc(doc(db, 'loan_requests', activeRequest.id), {
+          status: 'fulfilled', fulfilled_txn_id: txnRef.id, updated_at: now,
+        })
+        logAudit({
+          userId: user?.uid, userName: profile?.full_name ?? user?.email,
+          action: 'update', entityType: 'loan_request', entityId: activeRequest.id,
+          before: { status: 'accepted' }, after: { status: 'fulfilled', fulfilled_txn_id: txnRef.id },
+        })
+      }
+
       setReference(ref)
       setStep('done')
     } catch (err: any) {
@@ -201,6 +297,7 @@ export default function StockOutPage() {
   function reset() {
     setStep('staff'); setStaff(null); setCart([]); setError(''); setReference(''); setManualOverride(false)
     setLendFrom(todayDateStr()); setLendTo('')
+    setPendingPickups([]); setActiveRequest(null); setConflictWarnings([])
   }
 
   const stepIndex = STEPS.indexOf(step) === -1 ? 3 : STEPS.indexOf(step)
@@ -287,6 +384,29 @@ export default function StockOutPage() {
               )}
             </CardContent>
           </Card>
+
+          {pendingPickups.length > 0 && (
+            <Card className="py-0">
+              <CardHeader className="border-b pt-4">
+                <CardTitle className="flex items-center gap-2"><ClipboardList className="size-4" /> Accepted Loan Requests</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-2 py-4">
+                {pendingPickups.map((r) => (
+                  <button key={r.id} onClick={() => (activeRequest?.id === r.id ? deselectRequest() : selectRequest(r))}
+                    className={cn(
+                      'flex items-center justify-between rounded-lg border p-3 text-left transition-colors',
+                      activeRequest?.id === r.id ? 'border-primary bg-accent' : 'hover:bg-muted',
+                    )}>
+                    <div>
+                      <div className="text-sm font-medium">Pickup {formatDateOnly(r.from_date)} – {formatDateOnly(r.to_date)}</div>
+                      <div className="text-xs text-muted-foreground">Requested via lending portal</div>
+                    </div>
+                    {activeRequest?.id === r.id && <Badge className="bg-primary text-primary-foreground">Selected</Badge>}
+                  </button>
+                ))}
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="py-0">
             <CardHeader className="border-b pt-4">
@@ -390,6 +510,13 @@ export default function StockOutPage() {
                 })}
               </TableBody>
             </Table>
+            {conflictWarnings.length > 0 && (
+              <div className="mb-4 flex flex-col gap-2">
+                {conflictWarnings.map((w) => (
+                  <Alert key={w}><AlertDescription>{w}</AlertDescription></Alert>
+                ))}
+              </div>
+            )}
             <div className="mb-4 grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
                 <Label htmlFor="lend-from">Lend From</Label>
