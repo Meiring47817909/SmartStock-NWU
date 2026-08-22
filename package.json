@@ -10,6 +10,7 @@
     "emulators": "firebase emulators:start",
     "seed:emulators": "node scripts/seed-emulator.mjs",
     "seed:lending": "node scripts/seed-lending-portal.mjs",
+    "seed:products": "node scripts/seed-products.mjs",
     "dev:emulators": "cross-env NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 FIREBASE_ADMIN_PROJECT_ID=demo-smartstock-nwu concurrently -p none \"serwist build --watch\" \"next dev\""
   },
   "dependencies": {
