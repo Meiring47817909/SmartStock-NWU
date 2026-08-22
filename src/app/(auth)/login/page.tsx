@@ -2,8 +2,9 @@
 
 import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { signInWithEmailAndPassword } from 'firebase/auth'
-import { auth } from '@/lib/firebase/config'
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth'
+import { auth, db } from '@/lib/firebase/config'
+import { doc, getDocFromServer, collection, query, where, getDocsFromServer } from 'firebase/firestore'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -28,12 +29,41 @@ function LoginPageInner() {
     setError('')
     setLoading(true)
     try {
-      await signInWithEmailAndPassword(auth, email, password)
-      router.push('/dashboard')
-      router.refresh()
+      const cred = await signInWithEmailAndPassword(auth, email, password)
+      await routeSignedInUser(cred.user.uid)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid email or password')
+      setLoading(false)
     }
+  }
+
+  // One shared login, two possible destinations — this account is either a
+  // BICS operator (has a profiles/{uid} doc) or a lending-portal borrower
+  // (linked via staff.uid). Resolved with a direct one-shot check right
+  // here, not by waiting on AuthContext/StaffPortalContext's own
+  // onAuthStateChanged-driven state — those still independently re-verify
+  // once the destination layout mounts (defense in depth), but routing
+  // decisions shouldn't depend on two separate contexts' async loading
+  // flags settling in the right order.
+  async function routeSignedInUser(uid: string) {
+    const profileSnap = await getDocFromServer(doc(db, 'profiles', uid))
+    if (profileSnap.exists()) {
+      router.push('/dashboard')
+      router.refresh()
+      return
+    }
+
+    const staffSnap = await getDocsFromServer(query(collection(db, 'staff'), where('uid', '==', uid)))
+    if (!staffSnap.empty) {
+      router.push('/lend')
+      return
+    }
+
+    // Neither a BICS profile nor a linked staff record — this account
+    // isn't provisioned for anything in this app. Sign back out rather
+    // than leaving them signed in with nowhere to go.
+    await signOut(auth)
+    setError("This account isn't set up for BICS or portal access — contact an administrator.")
     setLoading(false)
   }
 
@@ -49,10 +79,10 @@ function LoginPageInner() {
           {/* Header */}
           <div className="mb-8 text-center">
             <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-(--nwu-purple) to-(--nwu-turquoise)">
-              <span className="text-[1.1rem] font-extrabold text-white">B</span>
+              <span className="size-2.5 rounded-full bg-white" />
             </div>
-            <h1 className="text-xl font-bold text-foreground">BICS</h1>
-            <p className="mt-1 text-sm text-muted-foreground">NWU IT Store · Potchefstroom</p>
+            <h1 className="text-xl font-bold text-foreground">NWU IT Store</h1>
+            <p className="mt-1 text-sm text-muted-foreground">Potchefstroom Campus</p>
           </div>
 
           <form onSubmit={handleLogin} className="flex flex-col gap-4">
@@ -63,7 +93,7 @@ function LoginPageInner() {
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="admin@nwu.ac.za"
+                placeholder="you@nwu.ac.za"
                 required
                 autoFocus
               />

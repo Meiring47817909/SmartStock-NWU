@@ -16,17 +16,15 @@ function PortalShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
   useEffect(() => {
-    if (!loading && !user && pathname !== '/lend/login') {
-      router.push('/lend/login')
+    if (!loading && !user) {
+      router.push('/login')
     }
-  }, [loading, user, pathname, router])
+  }, [loading, user, router])
 
   async function handleSignOut() {
     await signOut(auth)
-    router.push('/lend/login')
+    router.push('/login')
   }
-
-  if (pathname === '/lend/login') return <>{children}</>
 
   if (loading || !user) {
     return <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Loading…</div>
