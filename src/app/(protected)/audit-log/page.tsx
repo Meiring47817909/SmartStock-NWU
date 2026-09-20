@@ -98,28 +98,45 @@ function activityKey(e: AuditLogEntry): string {
   return `action:${e.action}`
 }
 
-// Label + badge colour per activity key. Anything not listed falls back to
-// the raw key's suffix, so an unrecognised value still renders sensibly.
-const ACTIVITY: Record<string, { label: string; className: string }> = {
-  'txn:IN': { label: 'In', className: TXN_BADGE_CLASS.IN },
-  'txn:OUT': { label: 'Out', className: TXN_BADGE_CLASS.OUT },
-  'txn:RETURN': { label: 'Return', className: TXN_BADGE_CLASS.RETURN },
-  'txn:ADJUST': { label: 'Adjust', className: TXN_BADGE_CLASS.ADJUST },
+// Label, badge colour, and which entity types an activity can belong to.
+// `entities` is what lets the Activity dropdown narrow when an entity is
+// chosen — keeping it in THIS table rather than a separate entity-to-
+// activities map means there's only one list to update when something new
+// is logged. Anything not listed falls back to the raw key's suffix, so an
+// unrecognised value still renders sensibly.
+const RECORD_ENTITIES: AuditEntityType[] = ['product', 'category', 'staff']
 
-  'status:pending': { label: 'Pending', className: LOAN_REQUEST_BADGE_CLASS.pending },
-  'status:countered': { label: 'Countered', className: LOAN_REQUEST_BADGE_CLASS.countered },
-  'status:accepted': { label: 'Accepted', className: LOAN_REQUEST_BADGE_CLASS.accepted },
-  'status:fulfilled': { label: 'Fulfilled', className: LOAN_REQUEST_BADGE_CLASS.fulfilled },
-  'status:declined': { label: 'Declined', className: LOAN_REQUEST_BADGE_CLASS.declined },
-  'status:expired': { label: 'Expired', className: LOAN_REQUEST_BADGE_CLASS.expired },
-  'status:withdrawn': { label: 'Withdrawn', className: LOAN_REQUEST_BADGE_CLASS.withdrawn },
-  'status:no_show': { label: 'Not Picked Up', className: LOAN_REQUEST_BADGE_CLASS.no_show },
+const ACTIVITY: Record<string, {
+  label: string; className: string; entities: AuditEntityType[]
+}> = {
+  'txn:IN': { label: 'In', className: TXN_BADGE_CLASS.IN, entities: ['transaction'] },
+  'txn:OUT': { label: 'Out', className: TXN_BADGE_CLASS.OUT, entities: ['transaction'] },
+  'txn:RETURN': { label: 'Return', className: TXN_BADGE_CLASS.RETURN, entities: ['transaction'] },
+  'txn:ADJUST': { label: 'Adjust', className: TXN_BADGE_CLASS.ADJUST, entities: ['transaction'] },
+  // A resolved return is logged against the transaction it closes out.
+  'action:resolve': { label: 'Resolved', className: ACTION_BADGE_CLASS.resolve, entities: ['transaction'] },
 
-  'action:create': { label: 'Create', className: ACTION_BADGE_CLASS.create },
-  'action:update': { label: 'Update', className: ACTION_BADGE_CLASS.update },
-  'action:activate': { label: 'Activate', className: ACTION_BADGE_CLASS.activate },
-  'action:deactivate': { label: 'Deactivate', className: ACTION_BADGE_CLASS.deactivate },
-  'action:resolve': { label: 'Resolved', className: ACTION_BADGE_CLASS.resolve },
+  'status:pending': { label: 'Pending', className: LOAN_REQUEST_BADGE_CLASS.pending, entities: ['loan_request'] },
+  'status:countered': { label: 'Countered', className: LOAN_REQUEST_BADGE_CLASS.countered, entities: ['loan_request'] },
+  'status:accepted': { label: 'Accepted', className: LOAN_REQUEST_BADGE_CLASS.accepted, entities: ['loan_request'] },
+  'status:fulfilled': { label: 'Fulfilled', className: LOAN_REQUEST_BADGE_CLASS.fulfilled, entities: ['loan_request'] },
+  'status:declined': { label: 'Declined', className: LOAN_REQUEST_BADGE_CLASS.declined, entities: ['loan_request'] },
+  'status:expired': { label: 'Expired', className: LOAN_REQUEST_BADGE_CLASS.expired, entities: ['loan_request'] },
+  'status:withdrawn': { label: 'Withdrawn', className: LOAN_REQUEST_BADGE_CLASS.withdrawn, entities: ['loan_request'] },
+  'status:no_show': { label: 'Not Picked Up', className: LOAN_REQUEST_BADGE_CLASS.no_show, entities: ['loan_request'] },
+
+  'action:create': { label: 'Create', className: ACTION_BADGE_CLASS.create, entities: RECORD_ENTITIES },
+  'action:update': { label: 'Update', className: ACTION_BADGE_CLASS.update, entities: RECORD_ENTITIES },
+  // Only staff records can be activated or deactivated.
+  'action:activate': { label: 'Activate', className: ACTION_BADGE_CLASS.activate, entities: ['staff'] },
+  'action:deactivate': { label: 'Deactivate', className: ACTION_BADGE_CLASS.deactivate, entities: ['staff'] },
+}
+
+// Activity keys applicable to an entity filter ('' meaning "all entities").
+function activityKeysFor(entity: string): string[] {
+  return Object.keys(ACTIVITY).filter(
+    k => !entity || ACTIVITY[k].entities.includes(entity as AuditEntityType),
+  )
 }
 
 function activityLabel(key: string): string {
@@ -518,6 +535,23 @@ export default function AuditLogPage() {
     (!actionFilter || activityKey(e) === actionFilter)
   )
 
+  // Picking an entity narrows the Activity dropdown to the activities that
+  // entity can actually produce — no point offering "Out" under Staff.
+  const allowedActivityKeys = activityKeysFor(entityFilter)
+  const visibleActivityGroups = ACTIVITY_GROUPS
+    .map(g => ({ ...g, keys: g.keys.filter(k => allowedActivityKeys.includes(k)) }))
+    .filter(g => g.keys.length > 0)
+
+  // Changing entity can invalidate the current activity (e.g. Transaction +
+  // "Out", then switching to Staff). Clear it in the same update rather
+  // than leaving a selection that silently matches nothing.
+  function changeEntity(next: string) {
+    setEntityFilter(next)
+    if (actionFilter && !activityKeysFor(next).includes(actionFilter)) {
+      setActionFilter('')
+    }
+  }
+
   async function toggleExpand(e: AuditLogEntry) {
     if (expanded === e.id) { setExpanded(null); return }
     setExpanded(e.id)
@@ -558,7 +592,7 @@ export default function AuditLogPage() {
         <Select
           items={{ [ALL_ENTITIES]: 'All entities', product: 'Product', category: 'Category', staff: 'Staff', transaction: 'Transaction', loan_request: 'Loan Request' }}
           value={entityFilter || ALL_ENTITIES}
-          onValueChange={v => setEntityFilter(v && v !== ALL_ENTITIES ? v : '')}
+          onValueChange={v => changeEntity(v && v !== ALL_ENTITIES ? v : '')}
         >
           <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -574,7 +608,7 @@ export default function AuditLogPage() {
           items={{
             [ALL_ACTIONS]: 'All activity',
             ...Object.fromEntries(
-              ACTIVITY_GROUPS.flatMap(g => g.keys.map(k => [k, activityLabel(k)]))
+              visibleActivityGroups.flatMap(g => g.keys.map(k => [k, activityLabel(k)]))
             ),
           }}
           value={actionFilter || ALL_ACTIONS}
@@ -583,7 +617,7 @@ export default function AuditLogPage() {
           <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL_ACTIONS}>All activity</SelectItem>
-            {ACTIVITY_GROUPS.map(group => (
+            {visibleActivityGroups.map(group => (
               <SelectGroup key={group.label}>
                 <SelectLabel>{group.label}</SelectLabel>
                 {group.keys.map(k => (
