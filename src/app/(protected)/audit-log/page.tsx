@@ -322,6 +322,38 @@ function TransactionSummary({ after, lines }: { after: Record<string, unknown> |
   )
 }
 
+// A product update shows only the fields that changed, which on its own
+// never says WHICH product changed — the name is usually untouched, so
+// FieldDiff filters it out as unchanged. Same problem StaffStatusSummary
+// solves for activate/deactivate. The name is read straight off the
+// payload rather than diffed; if the name itself was edited, `after`
+// carries the new one and FieldDiff still shows the rename below.
+function ProductUpdateSummary({
+  before, after,
+}: {
+  before: Record<string, unknown> | null
+  after: Record<string, unknown> | null
+}) {
+  const name =
+    (typeof after?.name === 'string' && after.name) ||
+    (typeof before?.name === 'string' && before.name) ||
+    null
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {name && (
+        <div className="flex items-baseline gap-1.5 border-b pb-2">
+          <span className="text-[0.7rem] font-semibold tracking-wide text-muted-foreground uppercase">
+            Product
+          </span>
+          <span className="text-sm font-semibold text-foreground">{name}</span>
+        </div>
+      )}
+      <FieldDiff before={before} after={after} />
+    </div>
+  )
+}
+
 // A staff member's activate/deactivate toggle: before and after only ever
 // differ in `is_active` (name/surname/email are unchanged, logged purely as
 // identifying context — see toggleActive() in staff/page.tsx), so the
@@ -674,6 +706,8 @@ export default function AuditLogPage() {
                         <LoanRequestSummary before={e.before} after={e.after} lines={loanLines[e.entity_id]} />
                       ) : e.entity_type === 'staff' && (e.action === 'activate' || e.action === 'deactivate') ? (
                         <StaffStatusSummary after={e.after} />
+                      ) : e.entity_type === 'product' && e.action === 'update' ? (
+                        <ProductUpdateSummary before={e.before} after={e.after} />
                       ) : (
                         <FieldDiff before={e.before} after={e.after} />
                       )}
