@@ -68,7 +68,20 @@ Selouna needs to record a from/to date on the transaction itself when she hands 
 
 </details>
 
-## Stage B — Staff self-service lending + Scan Items integration
+## Stage B — Staff self-service lending + Scan Items integration — **DONE**
+Full negotiation-based lending portal: staff build a cart, pick one shared date range, Selouna reviews/counters/approves, staff accepts/declines, Stock Out fulfills. This ended up far more involved than the single-product `LoanRequest` sketch originally below (kept in the `<details>` block for history) — the actual design was worked out over several rounds of design review with the store manager before any code was written, captured in **`LENDING_PORTAL_SPEC.md`** (the spec, written first), then built by a second developer on branch `marco` and merged into `main`, with every deviation and bug fix recorded in **`LENDING_PORTAL_CHANGELOG.md`**. Read those two documents for the full detail — this section is a pointer + summary, not a duplicate.
+
+**Built as:** `LoanRequest` (header: `staff_id`/`staff_name`, `status` — `pending → countered → accepted/declined`, plus terminal `expired`/`withdrawn`/`fulfilled`/`no_show` — `from_date`/`to_date` (mutable, Selouna's counter can change them), `original_from_date`/`original_to_date` (immutable snapshot, powers the staff-facing "dates changed" diff), `message`, `fulfilled_txn_id`) + `LoanRequestLine` (`requested_quantity` immutable / `offered_quantity` mutable — Selouna's counter edits this per line, 0 = dropped) as two real Firestore collections, same header-plus-lines shape as `transactions`/`transaction_lines`. `src/lib/firebase/loanRequests.ts` is the shared logic library everything else depends on: a live reservation ledger (`getReservedQuantity` — no stored counter, scans active requests and checks date-range overlap, same "never persist what can drift" philosophy as everything else in this app), cart validation against each product's own `lend_from`/`lend_to` window plus a 1-week max, and the expiry formula `min(updated_at + 7 days, from_date)` (capped at the request's own pickup date so a near-term request can't be kept "pending" past the point where fulfilling it would even make sense — the reasoning is spelled out as decision #5 in the spec).
+
+New route group `src/app/(portal)/lend/` — a second, separate auth context (`StaffPortalContext`, resolving a `StaffMember` via `staff.uid`, not a BICS `Profile`) for staff to browse lendable products, build a cart, and manage their requests, entirely outside the `(protected)` BICS app. Selouna's side is `src/app/(protected)/loan-requests/page.tsx` (admin/manager, new `canManageLoanRequests` role gate) — a four-tab queue (Needs Review / Sent Counters / Incoming Pickups / History) with an inline line editor for countering. Stock Out (`stock-out/page.tsx`) now surfaces a staff member's accepted requests as selectable cards above the barcode scanner, prefills the Confirm step's dates from the request, and on confirm writes `linked_request_id` on the transaction and flips the request to `fulfilled` — walk-in barcode scans still work unchanged alongside it, and now show a non-blocking warning if they'd eat into stock already reserved by an active request.
+
+**Real bug found and fixed along the way, worth knowing about if you touch auth:** the spec (§2.4) flagged a latent gap — `AuthContext.tsx` used to synthesize a fake `role: 'staff'` `Profile` for any Firebase Auth account with no `profiles/{uid}` doc, which is exactly what a portal-only borrower account looks like, meaning a borrower could accidentally sign into the real BICS app. Fixed by having `AuthContext` set `profile: null` instead, with `(protected)/layout.tsx` redirecting to `/login?error=no-profile`. A second, harder bug (`onAuthStateChanged` firing more than once during a single sign-in and leaving a stale `loading:false` next to a not-yet-updated `profile`, causing a spurious redirect flash) was found and fixed afterward — see changelog §15 for the full investigation, it's a good read if a similar "loading flag doesn't match the data next to it" bug ever shows up elsewhere.
+
+**Deviations from this handout's original spec below**, both decided during implementation for the feature to actually work (documented in full in the changelog §17): Firestore rules for `loan_requests`/`loan_request_lines` had to be **read-open to any signed-in user**, not "own requests only" — the reservation ledger has to scan every active request across all borrowers for a product, not just the caller's own. And BICS `staff`-role till operators got a **narrow write right** (just the `accepted→fulfilled` transition Stock Out needs, plus the lazy expiry/no-show writes), not pure read-only, since `canManageStock` (which gates Stock Out) is true for every role. One post-build change at explicit request: login was unified into a single `/login` for both BICS operators and portal borrowers (one-shot post-auth lookup routes to `/dashboard` or `/lend`), so `LENDING_PORTAL_SPEC.md` §5.2's separate `/lend/login` page no longer reflects reality — that page was built, then deleted.
+
+<details>
+<summary>Original spec (superseded by "Built as" above and by <code>LENDING_PORTAL_SPEC.md</code>, kept for history)</summary>
+
 Now let staff request a product online ahead of time, using the lend window Selouna already configured on the product, and have Stock Out surface that request when she serves them.
 
 ### 1. New collection: `loan_requests`
@@ -145,11 +158,950 @@ When the cart contains items sourced from loan requests, prefill the From/To inp
 ### 6. Stock Out — fulfill the request
 Inside `handleConfirm`, after the transaction and its lines are written successfully, `updateDoc` each matched `loan_requests` doc to `status: 'fulfilled'`, `fulfilled_txn_id: txnRef.id`.
 
+</details>
+
 ## Suggested build order
 1. ~~Stage A end-to-end (type, UI, save, audit log)~~ — **done**, see Stage A above (Lend To ended up required, not optional — read the "Built as" note, not the struck-through spec below it, before touching this code).
-2. Stage B data model (`LoanRequest` type + Firestore collection, no UI yet).
+2. ~~Stage B data model~~ — **done**, see `LENDING_PORTAL_SPEC.md` §2 and the "Built as" note above (ended up as `LoanRequest`+`LoanRequestLine`, cart/negotiation-based, not the single-product sketch this list originally pointed at).
 3. ~~Staff login provisioning~~ — **done** (section 2 above). Re-test the conflict/refusal paths after merging (duplicate email on add/edit, email sync failure, reset-email collision) before building anything that depends on it — don't just trust that it still works untouched.
-4. Lending portal page, using the login flow from step 3.
-5. Stock Out Scan Items integration.
-6. Stock Out Confirm prefill + fulfillment write-back.
-7. Full walkthrough test: staff logs in and submits a request → Selouna identifies that staff member in Stock Out → sees the requested item in Scan Items → dates prefill in Confirm → confirms → request flips to `fulfilled`.
+4. ~~Lending portal page~~ — **done**, `src/app/(portal)/lend/` (Browse/Cart/My Requests), using the unified `/login` (see "Built as" above — the portal no longer has its own separate login page).
+5. ~~Stock Out Scan Items integration~~ — **done**, accepted requests surface as selectable cards above the barcode scanner in `stock-out/page.tsx`.
+6. ~~Stock Out Confirm prefill + fulfillment write-back~~ — **done**, same file — dates prefill from the request, confirm writes `linked_request_id` and flips the request to `fulfilled`.
+7. ~~Full walkthrough test~~ — **done**, verified live against the local emulator: submit → approve → Stock Out fulfillment (quantity decrement, `linked_request_id`, audit trail all correct), and separately submit → counter → decline. See `LENDING_PORTAL_CHANGELOG.md` §18 for exactly what's been exercised live vs. only implemented-per-spec (expiry/no-show lazy transitions and withdraw haven't been clicked through yet, logic-only).
+
+Stage B is complete. Anything further on the lending portal (e.g. exercising the not-yet-clicked-through paths in changelog §18, or reconciling `LENDING_PORTAL_SPEC.md` §5.2's now-stale separate-login description) is a follow-up, not a continuation of this build.
+
+---
+
+# Session Handoff — 7 September 2026
+**For whoever (human or Claude) picks this project up next.** Everything below happened *after* `LENDING_PORTAL_CHANGELOG.md` was written (that document covers the other developer's initial build on branch `marco`, already merged into `main`). This section covers a long run of follow-up fixes, UX refinements, and emulator-testing tooling done directly on top of that merge, in a single continuous session. Read this whole section before touching the lending portal or the Products/Staff/Dashboard pages — several small behavior changes here aren't reflected anywhere else yet.
+
+## ⚠️ Read this first: nothing below has been committed
+Every change described in this section exists only as **uncommitted working-directory changes on top of `main`** — no commits, no branch, nothing pushed. Run `git status` before doing anything else. As of this writing, the real (non-whitespace) diff touches exactly these tracked files:
+
+```
+LENDING_PORTAL_SPEC.md
+handout.md
+package.json
+scripts/seed-lending-portal.mjs
+scripts/seed-products.mjs
+src/app/(portal)/lend/cart/page.tsx
+src/app/(portal)/lend/page.tsx
+src/app/(protected)/dashboard/page.tsx
+src/app/(protected)/products/page.tsx
+src/app/(protected)/returns/page.tsx
+src/app/(protected)/staff/page.tsx
+src/app/(protected)/stock-out/page.tsx
+src/components/products/ProductPreviewDialog.tsx
+src/lib/firebase/loanRequests.ts
+src/lib/utils.ts
+```
+
+Plus two new **untracked** files: `scripts/seed-staff-roster.mjs` and `scripts/cleanup-borrower-test-data.mjs`.
+
+(`git status` on its own will also show nearly every other file in the repo as "modified" — that's a CRLF/LF line-ending artifact from the Windows checkout, not real content changes. Use `git diff -b` — the `-b` ignores whitespace — to see only the files that actually changed, which is the list above.)
+
+**Do not commit any of this without asking the user first** — nothing in this session included an explicit "commit this" instruction, and the user has been driving commits themselves throughout this project.
+
+## What changed this session, in detail
+
+### 1. Staff page — Status badge now means "currently lending," not "active/inactive"
+`src/app/(protected)/staff/page.tsx`. The Status column used to just mirror `is_active`. It now shows **Lending** (if the staff member has at least one OUT transaction line not yet fully returned) or **Active** (if not) — computed by a new `loadLendingStatus()` function using the same correctly-scoped issued-vs-returned logic as the Dashboard and Returns page (returns matched back to their specific originating OUT transaction via `linked_txn_id`, never a flat per-product total). The Deactivate/Activate button and the underlying `is_active` field are untouched — that's still a separate concept, just no longer what the badge displays.
+
+### 2. Stock Out / Returns manual staff search — name + email, not department
+`src/app/(protected)/stock-out/page.tsx` and `src/app/(protected)/returns/page.tsx`. The "Select Staff Member" modal's `loadStaffList` now filters on `full_name` and `email` (was `full_name` + `department` on Stock Out, `full_name` only on Returns — now consistent between the two). Each row also shows the email right next to the name (`Name Surname - email@domain`). Placeholder text on both search inputs changed to "Search name, email…".
+
+### 3. Emulator seed scripts — categories, real staff roster, fixed location, cleanup
+Four separate changes, all emulator-only (never touch the real Firebase project):
+
+- **Categories were never seeded.** `scripts/seed-products.mjs` now seeds all 7 real categories (Cables & Adapters, Consumables, Laptops & Computers, Networking, Peripherals, Power, Storage — exact names/descriptions from a screenshot the user provided of the real category list) via a new `upsertCategory()` helper, *before* seeding products, and assigns each seeded product's `category_id` accordingly. `scripts/seed-lending-portal.mjs`'s Test Projector product got the same treatment (its own small `upsertCategory` call, just for the one category it needs).
+  **Open question, not yet confirmed by the user:** neither seed script's projector product (Epson EB-108 Projector, Test Projector) has a clean category fit — there's no AV/presentation category in the real list. Both were mapped to **Peripherals** as the closest analog ("monitors" ≈ a projector's display function). Flag this to the user if it comes up again; it was a judgment call, not a confirmed decision.
+- **Fixed product location.** Both seed scripts now write `location: "NWU - Potchefstroom, Building G4, Room 28"` on every seeded product (was per-product placeholders like `"Cage B, Shelf 2"`).
+- **New file `scripts/seed-staff-roster.mjs`**, wired as `npm run seed:staff`. Seeds 20 real Computer Science and Information Systems staff members (name/surname/email given directly by the user) into the `staff` collection, upserted by email. All get `department: "Computer Science and Information Systems"`, `is_active: true`, `card_uid: null`, `uid: null` — a clean starting state, same as a freshly-added real staff member, so card-linking and "Send Login Email" can be exercised per person from scratch.
+- **New file `scripts/cleanup-borrower-test-data.mjs`**, wired as `npm run cleanup:borrower-test`. One-off cleanup for the seeded "Portal Borrower" test account's loan-request test data — deletes the `loan_requests` doc(s), their `loan_request_lines`, and (if the request had gone as far as Stock Out fulfillment) the fulfilling `transactions`/`transaction_lines` doc and restores the `quantity_on_hand` it had decremented. Safe to re-run.
+
+### 4. Products page — Availability now has real guardrails
+`src/app/(protected)/products/page.tsx`, Add/Edit Product dialog:
+
+- **New product default:** Availability now defaults to **Unavailable** on Add (was Available). Editing an existing product still shows whatever its actual saved value is — this only changes the blank-form default.
+- **Qty On Hand = 0 forces Unavailable.** Dropping Qty to 0 immediately flips Availability to Unavailable, and the "Available" dropdown option is disabled (with a hint explaining why) until Qty is above 0 again.
+- **No Lend From date also forces Unavailable**, same treatment — added this session at explicit user request, stacked on top of the Qty rule (both conditions gate "Available"; the hint text names whichever one, or both, are blocking it).
+- **Clearing Lend From also clears Lend To** (can't leave a To date with nothing to be "after").
+- **Lend To is now `disabled` until Lend From has a value**, with a small hint underneath ("Set a Lend From date first.").
+
+  **⚠️ Worth double-checking with the user:** the Lend-From-required rule for Availability applies to *every* product, including ones never meant for the portal at all — e.g. the seeded HDMI Cable and Logitech Mouse, which by design have no lend window (`lendable: false` in the seed spec) but are still perfectly normal walk-in-issuable, "Available" stock. As implemented, those products can now *never* be marked Available again unless someone also gives them a Lend From date, even though they were never meant to be portal-lendable. This was implemented exactly as the user asked, but the interaction with non-portal products wasn't explicitly discussed — surface it if it causes confusion (e.g. "why can't I mark this cable Available").
+
+### 5. Portal lending eligibility — `lend_to` is now optional ("indefinite"), not required
+This is the biggest semantic change this session, and it **contradicts what `LENDING_PORTAL_SPEC.md` and the original marco-branch build shipped** (both required `lend_from` *and* `lend_to` for a product to be portal-eligible). The user pointed out that a product with a Lend From set but no Lend To (e.g. the Logitech Mouse, once given a Lend From) should still show up on the portal — an unset Lend To should mean "lendable indefinitely, no end date decided yet," not "not lendable."
+
+Changed:
+- `src/app/(portal)/lend/page.tsx` — Browse page eligibility filter now only requires `lend_from` + stock > 0. `lend_to` is no longer checked.
+- `src/lib/firebase/loanRequests.ts` — `validateCartDates` now only requires `product.lend_from` to exist (still errors if missing — "isn't set up for portal lending"), and only checks the upper-bound (`toDate > product.lend_to`) when `product.lend_to` is actually set. The **1-week max loan length per request is untouched** — this only affects whether the *product* stays eligible over time, not how long any single request can run.
+- New shared helper `formatLendWindow(from, to)` in `src/lib/utils.ts` — returns `"27 Aug 2026 – no end date"` when only `from` is set, the normal range when both are set, or `"—"` when neither is set. Used in three places now: the Browse page card, the shared `ProductPreviewDialog` component (admin Products page + portal Browse, since they share this dialog), and a **new "Lendable" column added to the Cart page's item table** (`src/app/(portal)/lend/cart/page.tsx`) — added specifically so a borrower doesn't have to go back to Browse to check a product's window while filling out their cart.
+
+**`LENDING_PORTAL_SPEC.md` is now stale on this point** (its §3.2 description of `validateCartDates` still says both fields are required) — not yet corrected, unlike the earlier `/lend/login` staleness fix in §5.2. Worth fixing next time that file is touched.
+
+### 6. Dashboard — new "Incoming Pickups" card, plus a real no-show bug fix
+`src/app/(protected)/dashboard/page.tsx`. The "Outstanding Loan Requests" row is now a 2-column grid (was full-width 1-column) with a new **Incoming Pickups** card to its right: accepted loan requests, sorted by soonest pickup (`from_date`), columns Staff / Items / Pickup Window / Status (an "On Schedule" or "Possible No-show" badge, via `isNoShowCandidate`).
+
+Building this surfaced a real bug: the Dashboard's lazy expiry/no-show transition pass (the "check on read, write the transition right then" pattern used everywhere in this app instead of a cron job) previously only ran for requests with status `pending` or `countered` — **never** `accepted`. Only `loan-requests/page.tsx` (Selouna's queue) actually flipped a stale `accepted` request to `no_show` when its pickup date passed. That meant a no-show would sit as `accepted` indefinitely unless someone specifically opened that one page — and an `accepted` request still counts as reserved stock (`getReservedQuantity` sums `pending`/`countered`/`accepted`), so a real no-show could silently make a product look less available than it actually was, for as long as nobody visited that page. Fixed by extending the Dashboard's same transition loop to also cover `accepted` requests, matching the queue page. Loading the Dashboard (presumably visited far more than the queue page) is now enough on its own to catch and clean up a no-show.
+
+### 7. Things explained this session with no code change (still worth knowing)
+- **Turbopack stale dev-cache errors** (e.g. `todayDateStr is not a function` at runtime despite `tsc` passing clean) after a lot of file changes land — fix is `rm -rf .next` + restart the dev server, not a code bug. `.next/` is already gitignored (was from project init), so this was never a git problem.
+- **Cross-tab Firebase Auth errors** (`FirebaseError: false for 'get'`) when testing the BICS admin and a portal borrower in two tabs of the same browser at once: expected behavior, not a bug. Firebase Auth persists one session per browser *origin*, shared across every tab — signing into a second tab as a different account silently replaces the first tab's session too. Test both roles with two separate browser contexts (incognito + normal window, or two profiles), not two tabs.
+- Before this session's point-5 change, only 4 of the 7 seeded products showed on the portal Browse page (Dell Latitude, Epson Projector, Poly Studio Camera, Test Projector) — the other 3 (HDMI Cable, Logitech Mouse, a manually-created "My product") were correctly excluded for legitimate reasons (no lend window at all, or zero stock), not a bug.
+- Real BICS login credentials (`admin@nwu.ac.za` / `staff@nwu.ac.za`, mentioned in the very first section of this handout) are **not recorded anywhere in this repo** — Firebase Auth never stores plaintext passwords, and there's no real-project seed script (only the emulator ones, which have their own separate fake test accounts like `admin@nwu.test`/`password123`). If real access is needed, the user resets it via the Firebase Console.
+
+## Still open — nothing here has been done yet
+- **Firestore rules deployment status is unverified.** `firestore.rules` is a real, fairly detailed file now (see `LENDING_PORTAL_CHANGELOG.md` §2), but it's only ever been exercised against the local emulator in everything documented so far. Check whether `firebase deploy --only firestore:rules` has actually been run against the real project before assuming production is protected by it.
+- `LENDING_PORTAL_SPEC.md` §3.2 needs the same kind of staleness fix its §5.2 already got — it still describes `lend_to` as required (see point 5 above).
+- The Availability/Lend-From coupling (point 4) may need revisiting for non-portal products — not yet raised with the user as a potential problem, just flagged here.
+- The category mapping for both projector products (point 3) is an unconfirmed judgment call, not a user-approved decision.
+- Everything listed as "not yet exercised live" in `LENDING_PORTAL_CHANGELOG.md` §18 is still true as of this session: expiry lazy-transition on an actually-elapsed request, withdraw at any of its three stages, cart rejection for two products with non-overlapping lend windows, and the "neither BICS nor portal" branch of the unified `/login` (code-review-verified only).
+- Nothing in this section has been committed (see the warning at the top).
+
+## Quick orientation notes for a fresh agent
+- Build/verify workflow: `npx tsc --noEmit -p tsconfig.json` in a sandbox copy is the fast, reliable check used throughout — `npx next build` will fail in a sandbox with no real Firebase Admin/client credentials (missing-env-var errors on `/api/staff/*` and `/api/auth/cas/validate`), that's an environment limitation, not a code problem.
+- Key docs, in order of how specific they are: `LENDING_PORTAL_SPEC.md` (original design spec, written before any code), `LENDING_PORTAL_CHANGELOG.md` (what the other developer actually built on branch `marco`, plus their own bug fixes), this "Session Handoff" section (everything since). When they conflict, the changelog and this section win — the spec is the design intent, not necessarily the shipped behavior.
+- Emulator workflow is unchanged from Stage B's original documentation above — `npm run emulators`, then any combination of `npm run seed:emulators` / `seed:lending` / `seed:products` / `seed:staff` in a second terminal, then `npm run dev:emulators`. All are safe to re-run and never touch the real project.
+
+---
+
+# Session Handoff — 19 September 2026
+
+**Read this before touching auth, the Dashboard, Stock Out or the Staff page.** Two changes landed in one session. The second one **changes the security model**, which makes parts of `LENDING_PORTAL_SPEC.md` and `LENDING_PORTAL_CHANGELOG.md` actively wrong rather than merely stale — see "Documents this invalidates" at the end.
+
+## 1. Open-ended loans, and resolving them
+
+**Lend To on Stock Out is now optional.** Blank means no return date was agreed. `Transaction.lend_to` is written as `null`.
+
+Three date comparisons had to be guarded when this changed: `''` sorts *before* any `YYYY-MM-DD` string, so an unguarded `lendTo < lendFrom` reads a blank value as "before the from date". They were previously shielded by a `!lendTo` check that had to go. If you add a fourth comparison, guard it.
+
+The walk-in reservation-conflict check (`getReservedQuantity`) used to be skipped entirely when there was no Lend To. It now runs with `OPEN_ENDED_TO = '9999-12-31'` as the upper bound, because an open-ended issue overlaps *every* future reservation — that's the case most worth warning about, not least. The warning text differs for the two cases.
+
+Fulfilling an accepted loan request with a blanked Lend To shows an alert first: the request agreed a `to_date` and clearing it overrides what the borrower accepted.
+
+**Dashboard → Outstanding Returns has a Resolve button** (admin only) for writing off a line Selouna has agreed the staff member keeps.
+
+The important design point: `transactions` and `transaction_lines` are `allow update, delete: if false`, and that immutability is load-bearing — "outstanding" is never stored, it's replayed from the ledger as issued − returned. So Resolve does **not** flag the OUT line. It appends to a new `return_waivers` collection (`src/lib/firebase/waivers.ts`), which is subtracted as a third term in exactly the places returns are:
+
+- `(protected)/dashboard/page.tsx` — drops the row
+- `(protected)/returns/page.tsx` — a written-off line is no longer returnable
+- `(protected)/staff/page.tsx` — feeds the Lending badge and the expanded row
+- `(protected)/reports/page.tsx` — Partial rows no longer claim a resolved balance
+
+Waivers are append-only too. **There is no undo in the app** — reversing one means deleting the doc in the Firebase Console. A waiver never touches `quantity_on_hand`: the stock left the shelf at issue and isn't coming back, so on-hand is already correct.
+
+`ReturnWaiver.reason` exists in the schema and is always `null` — no note UI was built.
+
+**Staff rows are expandable**, showing Product / Qty / Expected / Status for everything that person holds — the same columns as Outstanding Returns, minus Staff. Written-off items stay listed here marked **No Return Due**; this list is deliberately the record that replaces Selouna writing the item down somewhere. It reuses the single data pass `loadLendingStatus()` already made, so expanding costs no extra reads.
+
+Judgment call worth revisiting: the **Lending** badge clears once a person's only remaining items are waived (nothing left to chase), even though they physically still hold them.
+
+`outstandingStatus(null)` used to return `null`, rendering an empty Status cell. It now returns **No Return Date**. Legacy pre-Stage A loans already had `lend_to: null`, so a batch of old rows suddenly became labelled and resolvable.
+
+## 2. The manager role is gone
+
+`Role` is now **`'admin' | 'staff'`**, and the two mean:
+
+- **admin** — every BICS page. The whole `(protected)` tree.
+- **staff** — the lending portal at `/lend`, and nothing else. No BICS access of any kind.
+
+There are no till operators any more. Stock Out, Stock In, Returns and the Dashboard were previously reachable by every BICS role; they are all admin-only now.
+
+**The single BICS gate is "is this profile role admin".** A portal borrower normally has no `profiles/{uid}` doc at all (identified by a `staff` record whose `uid` matches — `StaffPortalContext`). A profiles doc carrying role `'staff'` is treated identically: portal only. Both cases are one check.
+
+What changed, file by file:
+
+- `types/database.ts` — `Role` union narrowed.
+- `context/RoleContext.tsx` — `isManager` removed; every capability flag is now `isAdmin`. The flags were kept as separate named booleans rather than collapsed into an `isAdmin` check at each call site, so re-introducing a middle role later is one edit here. This is defense in depth, not the primary gate.
+- `(protected)/layout.tsx` — the `ADMIN_ONLY` / `MANAGER_PLUS` route arrays are gone; there's nothing left to differentiate. A non-admin is redirected to `/lend`, **not** to `/login?error=no-profile` as before — the portal's own "your account isn't linked" dead-end screen is a far clearer answer than a login-page error string.
+- `(auth)/login/page.tsx` — `routeSignedInUser` sends a profile-holder to `/dashboard` only if the role is `admin`; anything else falls through to the staff-record lookup. Without this the user sees a visible flash of the BICS shell before the layout bounces them.
+- `(auth)/cas-callback/page.tsx` — routes on the role the API returned instead of always pushing `/dashboard`.
+- `api/auth/cas/validate/route.ts` — an allowlist entry with no explicit role still defaults to `'staff'`, which now means portal-only. **Granting BICS is therefore a deliberate act: someone has to put `role: 'admin'` on the `cas_allowlist` doc.**
+- `components/layout/Sidebar.tsx` — manager badge colour removed.
+- `firestore.rules` — no `'manager'` anywhere. Every BICS collection is `hasBicsRole(['admin'])`. Two narrow staff-role clauses were **deleted**, not narrowed: the `products` update limited to `quantity_on_hand`/`updated_at` (Stock Out's decrement — admin has full update anyway), and the `loan_requests` block granting till operators the `accepted → fulfilled` transition plus lazy expire/no-show. Both existed only to serve a role that no longer has any pages.
+
+`hasBicsRole(roles)` was kept as a roles-list helper rather than reduced to a bare `isAdmin()`, so restoring a middle role is a change to call sites, not to the shape of every rule.
+
+### Consequences to be aware of
+
+**Existing accounts with role `'staff'` or `'manager'` lose BICS access.** This was a deliberate decision, not an oversight. That includes `staff@nwu.ac.za` from the original seed (§"User Seeding" at the top of this document). Such an account has no linked `staff` record, so it reaches neither BICS nor the portal — it is signed out at login with "This account isn't set up for BICS or portal access". If someone is actually using it, set `role: 'admin'` on its profiles doc in the Console, or link it to a staff record.
+
+**`firestore.rules` must be redeployed.** The emulator picks the file up automatically; the real project needs `firebase deploy --only firestore:rules`. Note the open item below — production rules deployment has never been verified, and these rules are now the *only* thing stopping a portal borrower from reading BICS data directly.
+
+`/login?error=no-profile` is now unreachable — nothing pushes it. The handler was left in place as a harmless fallback.
+
+## Documents this invalidates
+
+`LENDING_PORTAL_SPEC.md` §2.4, §3.2, §5.2 and its permissions tables, and `LENDING_PORTAL_CHANGELOG.md` §2's rules table, §4, and deviation #2 in §17, all describe the three-role model and the till-operator write clauses. **They are wrong now, not just imprecise.** Nothing was rewritten in either file — the convention in "Quick orientation notes" is that this section wins, but a reader who starts from the spec will build on a security model that no longer exists. Worth a proper reconciliation pass.
+
+## State at handoff
+
+`npx tsc --noEmit -p tsconfig.json` passes clean. ESLint introduces no new problem classes (the pre-existing `catch (err: any)` and setState-in-effect warnings are untouched).
+
+**Nothing in either change has been clicked through against the emulator** — it wasn't running during this session. Everything above is code-review-and-typecheck verified only. Start there: `npm run emulators` picks up the new rules automatically, and both seeded logins are role `admin`, so they still work.
+
+---
+
+# Session Handoff — 19 September 2026 (part 2)
+
+## Emulator seed: the portal borrower now has a password
+
+`npm run seed:emulators` changed. `test.borrower@example.com` gets a real Auth account with **password123**, and its `staff` doc is linked via `uid`, so you can sign straight into `/lend` as a borrower. That matters more than it used to: since the two-role change, that account is the only way to exercise what a non-admin can actually do.
+
+Its uid is `seed-test-borrower`, deliberately **not** `seed-borrower` — `seed-lending-portal.mjs` already claims that one for `borrower@nwu.test`, and `createUser()` with an existing uid throws `auth/uid-already-exists`. Both scripts are meant to run against the same emulator, so don't let those collide.
+
+Linking `test.borrower` means clicking "Send Login Email" on that row now takes the **resend** branch, not the create branch. So the seed also writes a second record, `new.borrower@example.com` (`seed-staff-2`, no account, `uid: null`), which is now the one to click for the create-account-and-send path. Without it, that path became untestable from a clean state.
+
+`npm run seed:staff` is unchanged — the 20 CS roster members still seed with `uid: null`.
+
+Three emulator logins now:
+
+| Account | Password | Lands on |
+|---|---|---|
+| `admin@nwu.test` | password123 | `/dashboard` — full BICS |
+| `test.borrower@example.com` | password123 | `/lend` — portal only |
+| `borrower@nwu.test` (from `seed:lending`) | password123 | `/lend` — portal only |
+
+## The PWA is gone
+
+Removed entirely, at the user's request. **Deleted:** `src/app/sw.ts`, `src/app/manifest.ts`, `serwist.config.js`, `public/sw.js`, `public/sw.js.map`, `src/context/InstallPromptContext.tsx`, `src/components/layout/InstallAppButton.tsx`, `src/components/layout/OfflineBanner.tsx`, `src/hooks/useOnlineStatus.ts`.
+
+**Changed:**
+
+- `src/app/layout.tsx` — `SerwistProvider` and `InstallPromptProvider` unwrapped; `appleWebApp` metadata dropped. The icons under `public/icons/` are kept and are now plain favicons.
+- `src/app/(protected)/layout.tsx` — the "You're offline" blocking screen and the reconnect banner are both gone. Note the blocking screen was already dead code: its condition was `!isOnline && !isAdmin`, and since the two-role change every user in that tree is an admin.
+- `src/context/RoleContext.tsx` — `canWorkOffline` removed. It existed only to drive that gate.
+- `src/components/layout/Sidebar.tsx` — install button removed.
+- `next.config.ts` — the Serwist/Turbopack note is gone; the config is now empty.
+- `tsconfig.json` — dropped `"types": ["@serwist/next/typings"]`, the `"webworker"` lib entry (both existed only for `sw.ts`'s service-worker globals) and the `public/sw.js` exclude. Worth knowing: `tsc` kept passing while `@serwist/next` was still in `node_modules` and only failed once `npm install` actually pruned it — so a typecheck run before the prune is not proof this is clean.
+- `package.json` — `dev` is plain `next dev`, `build` is plain `next build`, and `dev:emulators` no longer wraps anything in `concurrently`. Dependencies `@serwist/next`, `serwist`, `@serwist/cli` and `concurrently` removed (`concurrently` existed only to run the service-worker build alongside `next dev`). `cross-env` stays — `dev:emulators` still needs it.
+
+### One deliberate non-removal
+
+`src/lib/firebase/config.ts` still configures Firestore's **persistent local cache** (`persistentMultipleTabManager`). That's Firestore's own IndexedDB cache, not part of the PWA, and it still helps read performance. But be aware of what it no longer does: with the service worker gone, the app shell won't load without a network, so the cached data behind it is unreachable anyway. **The app is now online-only in practice.** If you want that cache gone too, it's a separate, deliberate change.
+
+The IndexedDB-cache gotcha from the earlier handoff still applies: it's origin-scoped, so switching between `dev` and `dev:emulators` in the same browser can show stale data from whichever you used last. Use a separate profile or an incognito window.
+
+### After pulling this
+
+Run `npm install` to prune the removed packages. Browsers that already installed the PWA will keep a registered service worker until it's unregistered — during testing, use a hard reload or clear site data, or the old worker may keep serving a cached shell.
+
+## State at handoff
+
+`npx tsc --noEmit` passes clean. Still **not click-tested against the emulator** — that's the next step, and the user's stated plan is to verify everything on the emulator before running `firebase deploy --only firestore:rules` against the real project.
+
+## Session Handoff — 2026-09-19: single-tab-lock removed, Lend To alignment fix, Staff-page Resolve, seed:outstanding
+
+### Single-tab lock removed
+
+Deleted entirely, at the user's request ("Remove the 1 tab restriction delete the functionality"):
+
+- `src/hooks/useSingleTabLock.ts`
+- `src/components/layout/TabConflictScreen.tsx`
+
+`src/app/(protected)/layout.tsx` no longer imports or calls either. Confirmed via grep that no other file references them. Opening the app in multiple tabs now just works in every tab; there is no more "Already open elsewhere" screen.
+
+### Lend From / Lend To alignment bug — root cause, not caching
+
+The user reported the Lend From / Lend To fields on Stock Out (and later Add Product) were visually misaligned — repeatedly, even after restarting the dev server, deleting `.next`, rebuilding, and disabling browser cache. It was **not** a caching issue. The actual cause:
+
+- The two fields sit in a `grid-cols-2` row. Default `align-items: stretch` stretches the *shorter* column's cell to match the taller one when the two columns don't have the same number of internal rows (e.g. one has an extra helper line or Clear button, the other doesn't).
+- `Label` (`src/components/ui/label.tsx`) is styled `flex items-center …`, so when its wrapping cell gets stretched taller than its own content, the label text visually sinks toward the middle of the stretched cell instead of staying flush with the input above it.
+
+Fix: add `items-start` to the **outer** grid container so cells size to their own content instead of stretching. Applied in two places:
+
+- `src/app/(protected)/stock-out/page.tsx` — `<div className="mb-4 grid grid-cols-2 items-start gap-3">`
+- `src/app/(protected)/products/page.tsx` (Add/Edit Product dialog, Lend From/Lend To row only — the Name/Category/Qty/Threshold/Availability grid above it was checked and doesn't have this bug, so it was left alone) — `<div className="grid grid-cols-2 items-start gap-3">`
+
+If a similar "still misaligned after every cache-clearing trick" report comes up elsewhere, check for this same stretch interaction before assuming it's a build/cache problem.
+
+### Add Product: Clear button for Lend To
+
+Same UX as Stock Out's existing Clear button, added to the Add/Edit Product dialog so a product can be marked as available indefinitely (no end date) without retyping the Lend From date. Shown only once both `lend_from` and `lend_to` are set (so it doesn't collide with the pre-existing "Set a Lend From date first" message):
+
+```jsx
+{form.lend_from && form.lend_to && (
+  <div className="flex items-center justify-between gap-2">
+    <p className="text-xs text-muted-foreground">
+      Clear this if the item is always available for future lending
+    </p>
+    <button type="button" onClick={() => setForm((f) => ({ ...f, lend_to: "" }))} className="shrink-0 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">
+      Clear
+    </button>
+  </div>
+)}
+```
+
+Clearing Lend To does **not** turn off Availability — that only depends on `lend_from`.
+
+### Staff page: Resolve button on expanded lending rows
+
+The Dashboard's Outstanding Returns table already had a "Resolve" button on every row (admin-only), which writes an append-only `return_waivers` doc via `createReturnWaiver()` (see `src/lib/firebase/waivers.ts`) — it never touches `quantity_on_hand`, it just excludes that quantity from future outstanding-balance calculations everywhere they're computed (Dashboard, Returns, Staff, Reports).
+
+The user asked for the same thing on the Staff page's expandable "currently lent" rows, so it's not just visible on the Dashboard's top-N list. Added in `src/app/(protected)/staff/page.tsx`:
+
+- `LentItem` now carries `txn_id` and `product_id` (needed to call `createReturnWaiver`) alongside the existing `product_name`, `qty`, `expected_date`, `waived`.
+- New state: `resolving: { staffId, staffName, item } | null`, `resolveBusy`.
+- Each expanded row that isn't already waived gets its own `isAdmin`-gated Resolve button, mirroring the Dashboard's.
+- Confirming opens the same style of warning dialog as the Dashboard's (append-only, no stock restored, will show "No Return Due" afterward), then calls `createReturnWaiver()` and reloads that staff member's lending status.
+
+Typechecks clean (`npx tsc --noEmit -p tsconfig.json` → exit 0). **Not yet click-tested against the emulator** — see the new seed script below, which exists specifically to make this testable.
+
+### New: `npm run seed:outstanding`
+
+`scripts/seed-outstanding.mjs` — seeds the emulators with OUT transactions covering every state the Dashboard's Resolve flow and the Staff page's expandable rows need:
+
+| Staff (search "Seed Outstanding") | Scenario |
+|---|---|
+| — No Date | Single item, no Lend To at all → "No Return Date" badge, Resolve visible |
+| — Overdue | Lend To 3 days ago → "Overdue" badge, Resolve visible |
+| — Due Today | Lend To = today → "Due Today" badge, Resolve visible |
+| — Not Due Yet | Lend To 14 days out → "Not Due Yet" badge, Resolve visible |
+| — Partly Resolved | Two separate OUT transactions: one pre-resolved (a `return_waivers` doc is written directly, so it already shows "No Return Due" with no click needed) and one still outstanding |
+| — Mixed (multiple items) | Three items across three different states at once, on one staff member — exercises the Staff page's multi-row expand |
+
+Run it after the emulators are up, in its own terminal: `npm run seed:outstanding`. It's **append-only like the real ledger** — re-running it adds a fresh batch on top rather than replacing anything, so quantities will look doubled if you run it more than once without clearing emulator data first. It uses its own product barcodes (`SEED-OUT-*`) so it never collides with `seed:products`' catalogue.
+
+Wired into `package.json`: `"seed:outstanding": "node scripts/seed-outstanding.mjs"`. Syntax-checked with `node --check` and confirmed it runs standalone against `127.0.0.1:8081` like the other seed scripts.
+
+## State at handoff
+
+`npx tsc --noEmit` passes clean. The single-tab-lock removal, alignment fixes, and Add Product Clear button have been visually confirmed by the user. The Staff-page Resolve button is code-complete and typechecked but **not yet click-tested** — next step is: start the emulators, run `npm run seed:outstanding`, then walk through the Dashboard and Staff pages to confirm each of the six seeded scenarios shows the right badge and that Resolve behaves the same in both places.
+
+## Session Handoff — 2026-09-19 (cont.): Dashboard Outstanding Returns was silently truncating at 8 rows
+
+While testing with `seed:outstanding`, the user manually created an extra Stock Out for a real staff member (Estelle Taylor) and noticed one no-return-date line showed up on the Staff page's expanded row but not on the Dashboard's Outstanding Returns table, even though the badge said "11 outstanding."
+
+Root cause: the card rendered `outstanding.slice(0, 8)` — a hard top-8 cap, same pattern as the other three dashboard cards (Low Stock Alerts, Outstanding Loan Requests, Incoming Pickups). The sort pushes undated rows (`No Return Date`) to the very end, so once there were more than 8 outstanding lines, any undated one past position 8 silently fell off the Dashboard's list while the badge count kept counting it. It was never missing data — it was fully present in Firestore and visible/resolvable from the Staff page the whole time.
+
+Fixed **only** on the Outstanding Returns card (the other three cards were left as intentional top-8 previews, since they don't have a "Resolve" action riding on completeness):
+
+- Removed `.slice(0, 8)` — every outstanding row now renders.
+- Wrapped the `<Table>` in `<div className="max-h-96 overflow-y-auto">` so the card scrolls instead of growing unbounded, and gave `<TableHeader>` `className="sticky top-0 z-10 bg-card"` so the column headers stay visible while scrolling.
+
+`npx tsc --noEmit` passes clean after this change. Worth remembering if a similar "shows in Staff/Returns but not on the Dashboard" report comes up for any of the *other* three capped cards — they still cap at 8 by design.
+
+## Session Handoff — 2026-09-19 (cont.): staff-search "invisible past 20" bug fixed
+
+Audited the app for other caps like the Outstanding Returns one above and found a more serious one: the manual staff-search modal (Stock Out's "Select Staff Member" dialog and Returns' equivalent) queried Firestore with `where('is_active', '==', true), orderBy('full_name'), limit(20)` **on every keystroke**, then filtered that 20-row page client-side by the typed text. Once there are more than 20 active staff, anyone alphabetically past the 20th became permanently unsearchable through that dialog — typing their name returned nothing, not because they don't match, but because they were never fetched. Scanning a card was unaffected (that's a direct `card_uid` lookup with no limit); this only broke the manual fallback.
+
+Fixed in both `src/app/(protected)/stock-out/page.tsx` and `src/app/(protected)/returns/page.tsx`:
+
+- Replaced `loadStaffList(qStr)` (re-queried Firestore every keystroke, capped at 20) with:
+  - `loadAllStaff()` — fetches the full active roster once, with no `limit`, when the dialog opens (`openStaffSearch()`), caching it in a new `staffAll` state.
+  - `filterStaffList(qStr)` — filters `staffAll` in memory on every keystroke; no more network calls while typing.
+- Removed the now-unused `limit` import from both files' `firebase/firestore` import line.
+- The dialog's list (`<div className="-mx-6 flex-1 overflow-y-auto border-t">` inside a `max-h-[80vh]` flex `DialogContent`) was already a scrollable panel, so no markup change was needed there — it already handles an arbitrarily long roster.
+
+`npx tsc --noEmit` passes clean. Still on the list from the same audit, not yet fixed: the Dashboard's Low Stock Alerts / Outstanding Loan Requests / Incoming Pickups cards (same badge-shows-total-but-table-caps-at-8 pattern as Outstanding Returns had), and the Audit Log / Reports → Transaction History pages (fetch a capped most-recent window, then filter by date/type client-side, so an older filtered range can silently come back empty).
+
+## Session Handoff — 2026-09-19 (cont.): every table in the app now fetches all data and scrolls
+
+Finished the cap audit end-to-end. Beyond the Dashboard's Outstanding Returns card and the staff-search dialogs fixed earlier this session, three more real caps were found and removed, and every remaining table in the app (whether or not it was ever capped) was given a consistent scrollable container so none of them can silently truncate again or push the page into an endless scroll as data grows.
+
+### Caps removed
+
+- **Audit Log** (`src/app/(protected)/audit-log/page.tsx`): was `limit(300)` on `audit_log`, with the From/To date filter applied client-side *after* that 300-row fetch — an older date range with 300+ more-recent entries in between would silently come back empty. Now fetches the full audit log (still `orderBy('created_at', 'desc')`) so date filtering is always correct.
+- **Reports → Transaction History** (`src/app/(protected)/reports/page.tsx`): same pattern, `limit(200)` on `transactions`, removed for the same reason.
+- **Dashboard**: Low Stock Alerts, Outstanding Loan Requests, and Incoming Pickups all had the exact badge-shows-total-but-table-shows-`slice(0, 8)` bug that Outstanding Returns had. All three now render every row.
+
+### Scrollable containers added everywhere
+
+Every `<Table>` in the app (11 files) is now wrapped in a `<div className="max-h-* overflow-y-auto">` with `<TableHeader className="sticky top-0 z-10 bg-card">` (or `bg-muted/40` where the table sits on a tinted background), so long lists scroll inside a fixed-height panel with the column headers pinned, instead of growing the whole page:
+
+| File | Table(s) |
+|---|---|
+| `dashboard/page.tsx` | Outstanding Returns, Low Stock Alerts, Outstanding Loan Requests, Incoming Pickups |
+| `audit-log/page.tsx` | Audit Log |
+| `reports/page.tsx` | Stock Levels, Low Stock, Issued Per Staff, Returns, Transaction History (all 5 tabs) |
+| `categories/page.tsx` | Categories |
+| `products/page.tsx` | Product catalogue |
+| `staff/page.tsx` | Staff roster (outer), and each staff member's "Currently held" expanded row (inner, nested) |
+| `returns/page.tsx` | "Items Currently Issued" (the per-staff outstanding-items list shown after picking a staff member) |
+| `loan-requests/page.tsx` | Needs Review, Sent Counters, Incoming Pickups, History tabs, and the inline per-request line-item editor |
+| `stock-in/page.tsx` | The scan cart |
+| `stock-out/page.tsx` | Step 2's scan cart, Step 3's confirm-issue review table |
+| `(portal)/lend/cart/page.tsx` | The borrower's cart |
+
+Heights used: `max-h-96` (24rem) for compact dashboard-style cards and carts, `max-h-[32rem]` for full data-listing pages (Products, Categories, Reports, Loan Requests tabs), `max-h-64`/`max-h-56` for small nested/inline tables. All are plain Tailwind, no new dependencies.
+
+The staff-search modals (Stock Out, Returns) already had their own `overflow-y-auto` panel from the earlier fix in this session and needed no further change there.
+
+`npx tsc --noEmit` passes clean after every step of this pass (checked incrementally, file group by file group, not just at the end). **Not yet click-tested against a live emulator** — worth spot-checking that no scroll container clips content awkwardly (e.g. a dropdown or dialog opening from inside a scrolled row) before calling this fully done.
+
+## Session Handoff — 2026-09-19 (cont.): Returns page's Items table was capped to 700px page width
+
+The whole Returns page (`src/app/(protected)/returns/page.tsx`) was wrapped in a single `<div className="max-w-[700px]">` around all three steps (Staff lookup, Items, Done). That's a sensible width for the compact "tap a card" staff-lookup step, but it also capped the "Items Currently Issued" table to 700px — with 6 columns (Product, Ref, Issued, Returnable, Expected, Status, Returning) that doesn't fit, forcing a horizontal scrollbar even on a normal-width screen.
+
+Fixed by moving the width cap off the shared outer wrapper and onto just the two steps that want to stay compact:
+
+- Outer `<div>` (return statement's root) no longer has `max-w-[700px]`.
+- `<Card>` for `step === 'staff'` now has `className="max-w-[700px]"`.
+- `<Card>` for `step === 'done'` now has `className="max-w-[700px]"`.
+- `step === 'items'` (the staff-summary card + "Items Currently Issued" table) is untouched and now naturally spans the page's full width, same as every other data table in the app.
+
+`npx tsc --noEmit` passes clean.
+
+## Session Handoff — 2026-09-19 (cont.): Dashboard's 4 tables converted to tabs
+
+Replaced the 2×2 grid of always-visible cards (Outstanding Returns, Low Stock Alerts, Outstanding Loan Requests, Incoming Pickups) with a single `Tabs` control, one table showing at a time — same pattern as the Reports page (`Tabs`/`TabsList`/`TabsTrigger`/`TabsContent` from `@/components/ui/tabs`).
+
+- New state: `dashboardTab: DashboardTab` (`'outstanding-returns' | 'low-stock' | 'loan-requests' | 'incoming-pickups'`), defaults to `'outstanding-returns'`.
+- Each `TabsTrigger` carries its own live count in the label (e.g. `Outstanding Returns (19)`), shown only when > 0 — same numbers the old per-card badges showed, so the "badge total must match what's rendered" fix from earlier this session still holds even with only one table on screen.
+- Each table kept its own scrollable `max-h-[28rem] overflow-y-auto` wrapper and sticky header from the earlier fix (bumped from `max-h-96` to `max-h-[28rem]` since a full-width single table can afford a bit more height than a half-width card could).
+- Dropped the per-card `CardHeader`/`CardTitle` (the tab label now carries the name) — removed the now-unused `CardHeader`/`CardTitle` imports too.
+- No data-fetching logic changed; `outstanding`, `lowItems`, `loanRequests`, `incomingPickups` all still load exactly as before, just render into whichever `TabsContent` is active.
+
+`npx tsc --noEmit` passes clean. Not yet click-tested against the emulator — worth confirming the tab switch feels instant (it should, since all four datasets are already loaded up front) and that the Resolve dialog still opens correctly from the Outstanding Returns tab.
+
+## Session Handoff — 2026-09-19 (cont.): visible count badges on Dashboard tabs and the sidebar
+
+Two follow-ups to the Dashboard tabs change above, both from user feedback:
+
+**1. Tab labels now show an actual badge pill, not "(19)" text.** Each `TabsTrigger` in `dashboard/page.tsx` renders a `<Badge>` next to its label instead of parenthesized text — same colors the old per-card badges used (`bg-accent` for Outstanding Returns/Loan Requests/Incoming Pickups, `bg-amber-100 text-amber-800` for Low Stock Alerts), just moved inline into the tab.
+
+**2. New: a combined count badge on the "Dashboard" sidebar nav item.** Added `src/lib/firebase/dashboardAlerts.ts` — a lean, counts-only version of the same four computations the Dashboard page already does (Outstanding Returns' issued-returned-waived math, Low Stock's `quantity_on_hand <= reorder_threshold` check, and the loan-requests `expireIfNeeded()` lazy-transition pass for both Outstanding Loan Requests and Incoming Pickups), returning just `{ outstandingReturns, lowStock, loanRequests, incomingPickups, total }` instead of full row data.
+
+`src/components/layout/Sidebar.tsx` calls `loadDashboardAlertCounts()` once on mount (the Sidebar stays mounted across the whole `(protected)` tree) and shows `total` as a turquoise `<Badge>` pushed to the right edge of the Dashboard nav button (`ml-auto`), hidden entirely when the total is 0. It re-fetches whenever the admin navigates to/from `/dashboard`, so resolving something on the Dashboard updates the sidebar badge without a full page reload. The fetch is best-effort — a failure just leaves the badge hidden rather than erroring, since the Dashboard page itself remains the source of truth.
+
+**Important for future edits:** `dashboardAlerts.ts`'s counting logic is intentionally a duplicate of the equivalent logic inside `dashboard/page.tsx`'s `getDashboardData()`, kept only for the sidebar's lightweight total (the Dashboard page still needs full row data for its tables, so it wasn't refactored to share this function). If the Dashboard's definition of "outstanding" or "low stock" or which loan-request statuses count ever changes, `dashboardAlerts.ts` needs the same change or the sidebar badge will drift out of sync with the Dashboard tabs.
+
+`npx tsc --noEmit` passes clean.
+
+## Session Handoff — 2026-09-19 (cont.): Loan Requests badges, and History tab folded into Audit Log
+
+### Badge bubbles — Loan Requests page and sidebar
+
+Same treatment as the Dashboard tabs/sidebar badge from earlier this session:
+
+- `loan-requests/page.tsx`'s three tabs (Needs Review, Sent Counters, Incoming Pickups) now show a `<Badge>` pill next to the label instead of "(N)" text — amber for Needs Review, sky for Sent Counters, accent for Incoming Pickups, matching each tab's own status-badge color.
+- New `loadLoanRequestsAlertCount()` in `src/lib/firebase/loanRequests.ts` — a lean, counts-only companion to the page's own `load()` — returns the combined total of pending + countered + accepted (after the same `expireIfNeeded()` lazy-transition pass), deliberately excluding whatever's terminal (declined/expired/withdrawn/no_show/fulfilled) since those aren't waiting on anyone.
+- `Sidebar.tsx` calls it on mount (gated on `canManageLoanRequests`, since staff-only accounts never see this nav item) and shows the total as a turquoise `<Badge>` on the "Loan Requests" nav button, same `ml-auto` placement as the Dashboard badge. Re-fetches on navigating to/from `/loan-requests`.
+- **Keep `loadLoanRequestsAlertCount()`'s status filter in sync** with `loan-requests/page.tsx`'s own `pending`/`countered`/`accepted` derivations if those ever change — same caveat as `dashboardAlerts.ts`.
+
+### History tab removed — its two gaps were closed in Audit Log first
+
+The user asked to delete the Loan Requests page's History tab on the assumption the Audit Log already captured everything it showed. Checked before touching anything: the Audit Log already logged every loan_request status transition (create/counter/accept/decline/expire/no-show/withdraw) with who and when — but it had two real gaps versus History:
+
+1. **No item list.** `submitLoanRequest()`'s audit entry only logged `reqPayload` (staff/dates/status/message) — never the requested products/quantities, which live in the separate `loan_request_lines` collection and were never audited at all.
+2. **Expanding a loan_request audit entry didn't fetch anything** — it just ran `FieldDiff` on the raw before/after, so even the message field would show but with no way to tell what was actually requested.
+
+Fixed both, then removed the tab:
+
+- `submitLoanRequest()` (`lib/firebase/loanRequests.ts`) now includes `line_count`/`total_qty` in its audit `after` payload — same pattern `stock-out`/`stock-in`/`returns` already use for their transaction audit entries (computed only for the audit record, not real fields on the loan_requests doc itself).
+- `audit-log/page.tsx` gained a `LoanRequestSummary` component (mirrors the existing `TransactionSummary`): for a loan_request's **create** entry (`before === null`) it shows Staff, Requested window, Message, and the actual item list (lazily fetched from `loan_request_lines` on expand, cached in a new `loanLines` state keyed by request id — same pattern as `lines`/`transaction_lines`). For any **update** entry (a status/date transition) it just falls back to the existing `FieldDiff`, since that already reads clearly for "status: pending → declined" etc.
+- The render switch (`entity_type === 'transaction' ? ... : entity_type === 'loan_request' ? <LoanRequestSummary /> : <FieldDiff />`) and `toggleExpand()` (fetches `loan_request_lines` only for create entries, to avoid a pointless fetch on every status-change row) were updated accordingly.
+- `loan-requests/page.tsx`: removed the `history` derived list, the `TERMINAL` status array, the History `TabsTrigger`/`TabsContent`, narrowed the `tab` state type to `'pending' | 'countered' | 'accepted'`, and dropped the now-unused `formatDate`/`CardHeader`/`CardTitle` imports. A completed request's full history (who touched it, when, what changed, and now what was actually requested) is fully visible from Audit Log → filter to "Loan Request" → expand any row.
+
+`npx tsc --noEmit` passes clean throughout this pass. Not yet click-tested against the emulator — worth walking through: submit a portal loan request, then check its Audit Log "create" entry shows the item list; decline/expire/withdraw one and check the Audit Log "update" entry still reads clearly via FieldDiff.
+
+## Session Handoff — 2026-09-19 (cont.): tables now fill the screen height instead of a fixed max-height
+
+The earlier scrollable-tables sweep (see above) wrapped every table in a fixed `max-h-[Nrem]` box. That fixed it, but left a lot of dead white space below the scrollbar on tall/large screens (visible on the Staff page screenshot) — the table stopped scrolling well short of the bottom of the browser window. This pass replaces those fixed heights with a flexbox chain so each table's scroll area stretches to whatever room is actually left on screen, on any monitor.
+
+**Mechanism (three links in a flex chain, from the outside in):**
+
+1. **`(protected)/layout.tsx`** — `<main>` gained `display: 'flex', flexDirection: 'column'` (it already had `flex: 1, overflowY: 'auto'` inside a `height: 100vh` ancestor chain, so its box already had a definite height — it just wasn't passing that height down to its child). `overflowY: 'auto'` was deliberately left in place as a safety net for pages that *don't* opt into this pattern (dialogs, forms, wizard steps) — those keep scrolling exactly as before.
+2. **Each page's root `<div>`** changed from bare `<div>` to `<div className="flex h-full min-h-0 flex-col">` — `h-full` claims all of `<main>`'s height, `flex-col` stacks the header/filters/tabs normally (natural height), and `min-h-0` is the standard fix that lets a flex child actually shrink/scroll instead of being clamped to its content's height.
+3. **The table's `Card`** (previously `<Card className="py-0">`) now also carries `flex-1 min-h-0` (when its parent is the flex-column page root or a `Tabs` root) or `h-full min-h-0` (when its parent is a `TabsContent` panel, which isn't itself a flex container) — either way it consumes exactly the space left after the header. Its inner wrapper div — previously `max-h-[Nrem] overflow-y-auto` — is now uniformly `min-h-0 flex-1 overflow-y-auto`, so the actual scrollbar appears right at the bottom of the browser window instead of stopping partway down.
+
+For pages with tabs (Dashboard, Reports, Loan Requests), the `<Tabs>` root itself got `className="min-h-0 flex-1"` (it's already `flex flex-col` by default) and every `<TabsContent>` got `className="min-h-0"` (it's already `flex-1` by default) — so the whole tab chain participates: TabsList keeps its natural height, and whichever tab's table is active fills the rest.
+
+**Files touched:** `dashboard/page.tsx` (4 tabs), `staff/page.tsx` (outer roster table only), `products/page.tsx`, `categories/page.tsx`, `audit-log/page.tsx`, `reports/page.tsx` (all 5 report tabs), `loan-requests/page.tsx` (3 tabs), `returns/page.tsx` ("Items Currently Issued" table).
+
+**Deliberately left as fixed-height** (secondary/nested tables, not the "browse a screen of data" tables the complaint was about): Staff's per-row "Currently held" expandable table (`max-h-56`), Loan Requests' inline per-request line-item editor (`max-h-64`), and the Stock In/Stock Out/portal-cart scan tables (`max-h-96`) — these size to their own content by nature (a handful of cart lines), not to the viewport.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean after every file. **Not yet visually verified in a browser** — this is a flexbox height cascade through several nested components (`main` → page root → `Tabs`/`TabsContent` → `Card` → scroll div), and while the structure follows the standard "fill remaining viewport height" pattern, it's worth an actual look at each changed page (especially one with a tab layout, like Dashboard or Reports) to confirm no double scrollbars appeared and that short-data tables don't look oddly stretched.
+
+## Session Handoff — 2026-09-20: resolved (written-off) items stay returnable on the Returns page
+
+The user noticed something the "Resolve" dialog explicitly warns about: it said resolving an item would make it "stop appearing here **and on the Returns page**." They confirmed they don't want that second part — a written-off item should still be processable as a real return later if it physically turns up (the write-off is "stop chasing it," not "it can never come back").
+
+**Decision (asked via AskUserQuestion, user picked):** keep the item fully returnable — Resolve now only affects what counts as *outstanding* (Dashboard's Outstanding Returns table, the Staff page's Lending badge), not what's *returnable* (the Returns page's "Items Currently Issued" list).
+
+**Changes:**
+
+- **`returns/page.tsx`** — the returnable-quantity calc for "Items Currently Issued" no longer subtracts waived quantity. It was `returnable = issued - alreadyReturned - waived`; it's now `returnable = issued - alreadyReturned`. Removed the now-unused `loadWaivedByTxn`/`waivedQty` import and the `waivedByTxn` fetch from this page entirely — this page no longer needs to know about waivers at all.
+- **`staff/page.tsx`** — this is the one place that fix could have introduced a stale-data bug: the "Currently held" table shows a separate "No Return Due" row for a fully-waived line, displaying the raw waived quantity unconditionally. Since a waived item can now actually be returned, that row needed to shrink/disappear once a real return comes in against it, instead of sitting there forever showing a quantity that's no longer accurate. Added the "effective waived" calc: any return beyond what the line's non-waived portion (`issued − waived`) already accounts for must have come out of the waived quantity, so that overflow is subtracted from what's still shown as written off (`effectiveWaived = max(0, waived − max(0, returned − (issued − waived)))`). Worked through by hand for full-return, partial-return, and no-return-yet cases before applying.
+- **`dashboard/page.tsx`** — updated the Resolve confirmation dialog's copy to match the new behavior (no longer claims it disappears from Returns; now says it can still be returned normally later).
+
+**Deliberately unchanged:** Dashboard's Outstanding Returns table, `dashboardAlerts.ts`'s sidebar badge count, and the Reports → Returns tab's outstanding-balance calc all still subtract waived quantity — those all only use it as a `> 0` boolean gate (never display the raw waived number after the fact), so they weren't at risk of the staleness bug above and correctly continue to exclude resolved items from "needs chasing" views.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean. **Worth testing against the emulator:** resolve an outstanding item, confirm it drops off Dashboard/Staff-lending-badge but still shows up on the Returns page for that staff member; process an actual return against it; confirm the Staff page's "No Return Due" row for it then disappears (rather than staying stuck showing an item that's already back).
+
+## Session Handoff — 2026-09-20 (cont.): Issued per Staff report — one row per item, not one comma-joined cell
+
+Reports → Issued per Staff, expanded transaction rows: a multi-item Stock Out (e.g. TXN-FDH1BA07: Logitech MX Master 3S Mouse ×1, Seed Test Drill ×1) previously rendered as a single row with all items squashed into one comma-joined cell. Changed to one row per line item — each product and its own quantity gets its own row, with the reference/date and expected-date repeated on each so every row still reads standalone. A transaction with no line items still renders one placeholder row ("No items recorded") so the group doesn't just vanish.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): deactivated staff can no longer sign into the lending portal
+
+The user asked two things: (1) confirm Deactivate already blocks a staff member from being picked for a Stock Out, and (2) whether it also blocks portal login with a specific error message, and whether that message was grammatically correct.
+
+**(1) Stock Out — already correct, no change needed.** `stock-out/page.tsx` filters `where('is_active', '==', true)` on both the card-UID lookup and the manual staff-search list, so a deactivated staff member is already invisible to Stock Out entirely.
+
+**(2) Portal login — this was a real gap, now fixed.** Neither `login/page.tsx`'s `routeSignedInUser()` nor `StaffPortalContext`/`lend/layout.tsx`'s `PortalShell` checked `is_active` at all — a deactivated staff member could still sign in and fully use the portal (browse, cart, submit loan requests). No "deactivated" message existed anywhere in the codebase yet.
+
+Fixed at the layout level (`(portal)/lend/layout.tsx`'s `PortalShell`), since that's the one place every sign-in path — password login *and* NWU-CAS — passes through before reaching Browse/Cart/My Requests: if `staffMember.is_active` is `false`, it now shows a dead-end screen (same pattern as the existing "Your account isn't linked" one) with a Sign Out button, instead of the normal portal shell. Also added the same check up front in `login/page.tsx`'s `routeSignedInUser()`, purely so the password-login path gets an immediate, specific error right on the login form instead of a "Loading…" flash before landing on the dead-end screen — the layout-level check is what actually enforces it either way, including for CAS (which has its own separate `cas_allowlist`/role system and wasn't touched).
+
+**Grammar note on the message the user proposed** ("Your account has been deactivated; please consult Selouna Visser for more information, Selouna.Visser@nwu.ac.za"): the trailing `, Selouna.Visser@nwu.ac.za` tacked on after a comma isn't valid — an email address can't just follow a comma like that, it needs a connector. Used instead: **"Your account has been deactivated. / Please contact Selouna Visser at Selouna.Visser@nwu.ac.za for more information."** — split into a heading + body to match the existing dead-end screen's style, "contact...at" instead of "consult...for more information, ", and "contact" also matches this app's existing microcopy elsewhere (login page's "contact an administrator", the portal's "Contact the IT Store"). The portal version also makes the address a clickable `mailto:` link.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean. **Worth testing against the emulator:** deactivate a staff member who has a linked portal account, then try signing in with their password — should get the error on the login form itself; also worth confirming an already-open portal session doesn't need a hard block (no live listener on `is_active` — it's re-checked on next sign-in/reload, same as the existing "not linked" dead-end, not on every render of an already-mounted session).
+
+## Session Handoff — 2026-09-20 (cont.): Staff page — Active/Deactivated toggle, normal row styling, Portal Access column
+
+Three related changes to the Staff page table:
+
+1. **Active/Deactivated toggle.** Previously every staff member showed in one list, with deactivated ones just greyed out (`opacity-50`). Added a `Tabs`/`TabsList` toggle (same visual pattern as Reports/Loan Requests, each tab carrying its own count badge) next to the search box — `statusTab` state filters the same in-memory `staff` array into `visibleStaff` (`is_active` for Active, `!is_active` for Deactivated); no new Firestore query, `load()` already fetches everyone. The header line changed from "N active members" to "N active · M deactivated" so it stays accurate regardless of which tab is open.
+2. **Deactivated rows now render normally.** Removed the `className={s.is_active ? '' : 'opacity-50'}` on the row. The Status column is what now carries the distinction: a deactivated staff member's Status cell shows a red `Deactivated` badge (`bg-red-100 text-red-800`) instead of falling through to the Lending/Active badge logic — that check now runs first, ahead of the existing Lending-vs-Active branch.
+3. **New "Portal Access" column**, between Card UID and Status: `Granted` (green text) if `s.uid` is set (a lending-portal login has been provisioned via Send/Resend Login Email), otherwise `Not Granted` (muted grey) — same visual language as the existing Card UID cell's linked/"Not linked" split. Removed the old inline "· portal linked" note that used to sit under the email, since it's now redundant with this column. Loading/empty-state `colSpan` bumped 6→7 and the expanded "Currently held by…" row's `colSpan` bumped 5→6 to match the new column count.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): resolving a return now logs against the Transaction entity, not a separate "Return Waiver" one
+
+The user was looking at the Audit Log and noticed a Resolve action showed up as its own `Return Waiver` entity with a generic `CREATE` badge — they wanted it to instead show up under the `Transaction` entity (so it's findable alongside that Stock Out's own audit entry) with an action badge that reads `Resolved`.
+
+- **`waivers.ts`'s `createReturnWaiver()`** — the audit entry it writes now uses `entityType: 'transaction'` and `entityId: input.transactionId` (the ORIGINATING OUT transaction's real doc id) instead of `entityType: 'return_waiver'` and the new waiver doc's own id. New `action: 'resolve'` (added to the `AuditAction` union in `types/database.ts`) replaces the generic `'create'` it used to log, since that's what actually distinguishes it from that same transaction's own create entry once both share an entity id.
+- **`audit-log/page.tsx`** — `resolve` got a violet badge color (`ACTION_BADGE_CLASS`, matching the existing "No Return Due" violet used elsewhere for waived items) and its own `actionBadge()` special case so it reads "Resolved" rather than the generic uppercased "RESOLVE". Added `resolve: 'Resolved'` to the Action filter dropdown. New `ResolveSummary` component renders the expanded view (Item/Qty, Held by, Reason, Resolved by) — a resolve entry's `after` payload doesn't match `TransactionSummary`'s shape (no reference/line-items/lend-window, it's the waiver's own fields), so the render switch now picks `ResolveSummary` specifically when `entity_type === 'transaction' && action === 'resolve'`, falling back to the existing `TransactionSummary` for every other transaction entry.
+- **Deliberately left alone:** `return_waiver` stays in `AuditEntityType`, `ENTITY_LABEL`, and the entity filter dropdown — existing historical audit entries already written with that entity type (from before this change) still need to filter/display correctly; only new resolves stop using it.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean. **Worth testing against the emulator:** resolve an outstanding item, then check its Audit Log entry now shows Entity = Transaction (same entity id as that Stock Out's own CREATE entry — filtering to that id should show both), Action = Resolved (violet badge), and expanding it shows the new Item/Held by/Reason/Resolved by summary instead of the old raw field-diff list.
+
+## Session Handoff — 2026-09-20 (cont.): optional Reason field on the Resolve dialog
+
+The Resolve dialog (Dashboard's Outstanding Returns table and the Staff page's per-row expanded list) always sent `reason: null` to `createReturnWaiver()` — there was no way to record why an item was written off, even though `waivers.ts`, the audit entry, and the new `ResolveSummary` view on Audit Log already had a `Reason` field ready to show one.
+
+Added an optional `Textarea` ("Reason (optional)", placeholder "e.g. Lost, damaged beyond repair, written off…") to both Resolve dialogs, right below the existing explanatory paragraphs. New `resolveReason` state per page, reset to `''` whenever the dialog opens or closes (Cancel, the dialog's own close, and after a successful Resolve) so stale text from a previous item never carries over. `createReturnWaiver()` now gets `reason: resolveReason.trim() || null` — blank stays `null`, exactly as before.
+
+**Bonus fix while in there:** the Staff page's copy of this dialog still said "It will stop appearing on the Dashboard and the Returns page" — the wording from before the "resolved items stay returnable" change earlier this session, which only got updated on the Dashboard's own copy of the dialog at the time. Staff page's now reads the same way: "...will stop counting as outstanding here and on the Dashboard — but it can still be returned normally from the Returns page later if it does turn up."
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): Staff page's "No Return Due" status renamed to "Resolved"
+
+Small consistency fix: the Staff page's "Currently held" table showed a violet `NO RETURN DUE` badge for written-off items, while the Audit Log's Resolve entries (added earlier this session) show the same violet color labeled `RESOLVED`. Changed `lentItemStatus()` in `staff/page.tsx` to return label `'Resolved'` instead of `'No Return Due'` (same `bg-violet-100 text-violet-800` styling — the app's uppercase Badge styling turns it into `RESOLVED` on screen). Also updated the two Resolve confirmation dialogs' own prose (`dashboard/page.tsx` and `staff/page.tsx`, both say "...marked *___*, so there's still a record...") to say `Resolved` instead of `No return due`/`No Return Due`, since they're describing this exact badge.
+
+Left alone: the toast success messages ("resolved — no return due") on both pages — those read as a plain sentence rather than naming the badge, so they weren't touched.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): a staff member with only resolved items still shows "Lending", not "Active"
+
+The Staff page's roster row Status badge (`lendingStaffIds` in `staff/page.tsx`) only counted a staff member as "Lending" if they had at least one still-owed (`remaining > 0`) item — a staff member whose every held item had been Resolved fell back to a plain "Active" badge in the roster row, even though their expanded "Currently held" list clearly showed items (all marked Resolved). Resolve only stops an item being chased, it doesn't hand it back, so the row should still read "Lending".
+
+Fixed by also adding the staff member to the `lending` set whenever they have `effectiveWaived > 0` (the same value that drives the Resolved row itself), not just when `remaining > 0`. Dashboard's Outstanding Returns is intentionally unaffected — it still only cares about `remaining > 0`, since a fully-resolved item genuinely isn't something to chase there; this fix is scoped to the Staff page's own "does this person still have something of ours" question, which resolved items still answer yes to.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): Card UID and Portal Access are now bubbles too
+
+Both columns switched from plain colored `<span>` text to `<Badge>` pills, matching the Status column's existing style:
+
+- **Card UID:** linked → green badge with the card-icon + UID (`bg-emerald-100 text-emerald-800`, mono font kept); unlinked → muted grey badge "Not Linked" (was "Not linked" as plain text).
+- **Portal Access:** unchanged wording, just badged — green "Granted" / muted grey "Not Granted".
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): Staff activate/deactivate audit entries now show who, and say "Deactivated"
+
+The Audit Log's expanded view for a staff activate/deactivate toggle used to show just "Active: Active → Inactive" via the generic `FieldDiff` — no indication of which staff member. Root cause: `toggleActive()` in `staff/page.tsx` only ever logged `{ is_active }` in before/after, and even if it had logged more, `FieldDiff` only shows fields that actually *changed* between before/after — name/surname/email don't change on an activate/deactivate, so they'd have been filtered out as "unchanged" anyway.
+
+Fixed both ends:
+
+- **`staff/page.tsx`'s `toggleActive()`** now also logs `name`, `surname`, `full_name`, and `email` in both `before` and `after` (identifying context, not something that's changing).
+- **`audit-log/page.tsx`** gained a `StaffStatusSummary` component (same pattern as `ResolveSummary`/`LoanRequestSummary`) that reads those fields straight off `after` rather than diffing them, and is picked in the render switch specifically for `entity_type === 'staff' && (action === 'activate' || action === 'deactivate')`. It shows Staff member / Email / Status (Active or Deactivated).
+- **"Inactive" → "Deactivated"** — renamed in `friendlyValue()`'s generic `is_active` formatter too (the fallback path any other `is_active` diff would still go through), for consistency with the wording used everywhere else in the app now.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): "Send/Resend Login Email" disabled for deactivated staff
+
+`staff/page.tsx`: the Send/Resend Login Email button is now also disabled when `!s.is_active` (alongside the existing "no email on file" check), with its tooltip explaining why ("Staff member is deactivated" takes priority over "No email on file" if somehow both are true). Added the same guard inside `sendLoginEmail()` itself as defense in depth (toasts "This staff member is deactivated — reactivate them first." and bails before calling the API) — a deactivated staff member shouldn't be handed a fresh portal login link while locked out of the portal itself.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): out-of-stock items shown as "Unavailable" on the portal, and Stock Out now hard-blocks issuing someone else's approved pickup
+
+Three changes, all from the same request:
+
+**1. Portal Browse page no longer hides sold-out items.** `(portal)/lend/page.tsx` used to filter to `quantity_on_hand > 0`, so a fully-checked-out product just vanished from the list — a staff member had no way to know it existed, let alone when it might come back. It's now kept in the list and shown as an "Unavailable" card (red label, qty controls and Add to Cart disabled) with an expected-return date underneath, e.g. "Unavailable — back 25 Sep 2026".
+
+That date isn't stored anywhere on the Product — it lives per-holder on the OUT `Transaction.lend_to` field set at Stock Out's Confirm step. New helper `getExpectedReturnDates()` in `lib/firebase/availability.ts` replays the same issued/returned/waived math used elsewhere (dashboardAlerts.ts) to find which OUT lines for a product are still outstanding, then takes the earliest `lend_to` among them. If every outstanding line for that product was issued with no return date (open-ended), the card says "return date not set" instead of guessing.
+
+**2. Stock Out now hard-blocks issuing a unit that belongs to someone else's approved pickup**, instead of only warning. Previously `checkConflicts()` only ever produced non-blocking `<Alert>`s; Selouna could always click Confirm regardless. New helper `getAcceptedReservationHolders()` in `loanRequests.ts` returns the holder-level breakdown (staff name, quantity, dates) of ACCEPTED (approved) reservations for a product/date range — `getReservedQuantity()`'s sibling, but named rather than summed. Stock Out now splits on this:
+
+- If issuing would eat into another staff member's **accepted** reservation → red blocking `Alert`, Confirm button disabled, message names the staff member and tells Selouna to cancel that accepted pickup on the Loan Requests page first.
+- If the only shortfall is against **pending/countered** proposals (not yet approved) → same soft warning as before, still non-blocking.
+- If there's enough stock for both, but another staff member does have an accepted pickup overlapping the window → new blue "Heads up" FYI panel naming them, purely informational.
+
+A staff member's own accepted request is never counted against them (that's what "Select from Accepted Loan Requests" is for) — only *other* staff members' accepted reservations trigger the block or the FYI panel.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): new seed script for today's features
+
+Added `scripts/seed-conflict-scenarios.mjs` (`npm run seed:conflicts`) covering test data for everything built today:
+
+- **Staff badges:** 5 "Seed Badges — …" staff covering every Card UID / Portal Access combination, plus a deactivated one (Send Login Email should show disabled/greyed out on that row). Also writes one `activate` and one `deactivate` audit_log entry directly so `/audit-log` has example entries to expand immediately.
+- **Portal Browse "Unavailable":** two "Seed Portal — Sold Out …" products, fully issued out to a dedicated holder — one with a Lend To date (shows "Unavailable — back {date}"), one without (shows "Unavailable — return date not set").
+- **Stock Out conflict handling:** three "Seed Conflict — …" products, each with a different reservation already in place — an ACCEPTED request (hard block), a PENDING request (soft warning only), and an ACCEPTED request against a product with plenty of spare stock (informational "Heads up" panel only). Console output at the end spells out exactly which staff/product pair to use for each case.
+
+I could not run this myself — this session's device shell is a separate network namespace from wherever the emulators are actually running on your machine, so it can't reach `127.0.0.1:8081`/`9099`. Run it yourself, in a terminal that has the emulators up:
+
+```
+npm run dev:emulators   (in one terminal, if not already running)
+npm run seed:conflicts  (in another terminal)
+```
+
+Re-running it is safe for the staff/product upserts, but NOT for the OUT transaction / loan_requests writes — same append-only caveat as `seed-outstanding.mjs`. Clear the emulator data first (http://127.0.0.1:4000) if you want a clean re-seed.
+
+## Session Handoff — 2026-09-20 (cont.): fixed a firestore.rules permission error on the portal Browse page
+
+The "Unavailable" feature added earlier today broke the portal Browse page for real (non-admin) borrowers with a rules evaluation error (`evaluation error ... for 'list' @ L61 ... false for 'list' @ L140`). Root cause: `getExpectedReturnDates()` queried `transactions`, `transaction_lines`, and `return_waivers` directly from the client — all three are admin-only in `firestore.rules` (`allow read, create: if hasBicsRole(['admin'])`), and rightly so: `transactions` is every staff member's full borrow history, not something a portal borrower should be able to query broadly just to find out when one product is back in stock. A BICS admin session wouldn't have hit this; only a real portal borrower login would, which is presumably how you ran into it.
+
+Fixed by moving the computation server-side instead of loosening the rules:
+
+- **`lib/server/availability.ts`** (new) — the same issued/returned/waived replay, now using the Admin SDK (`adminDb`), which bypasses `firestore.rules` entirely. `lib/firebase/availability.ts` (the broken client-side version) is deleted.
+- **`/api/products/expected-return-dates`** (new route) — `POST { productIds: string[] }`, returns `{ expectedReturn: Record<string, string | null> }`. Requires a valid signed-in session (any Firebase Auth user, BICS or portal — see new `requireSignedIn()` in `lib/server/staffAdmin.ts`, factored out of the existing `requireAdmin()`), but no admin role, since portal borrowers are exactly who needs to call this. It only ever returns a single date per product — never transaction/staff details — so it doesn't reopen the privacy concern the rules are protecting.
+- **`(portal)/lend/page.tsx`** — now calls that route with the signed-in staff member's own ID token (`useStaffPortal()`) instead of querying Firestore directly. Fails soft: if the call errors, the card still shows "Unavailable", just without a specific date.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean. This wasn't caught earlier because I only reasoned through the data model, not the security rules boundary between BICS admin and portal-borrower sessions — worth remembering: anything a portal page reads has to clear `firestore.rules` under a portal borrower's own auth, not an admin's.
+
+## Session Handoff — 2026-09-20 (cont.): preview dialog also now reflects stock, not just the admin toggle
+
+Clicking a card on the portal Browse page opens `ProductPreviewDialog` — shared with the admin Products page — which showed "Available" for a fully-checked-out product, contradicting the card right behind it ("Unavailable — back {date}"). Cause: the dialog's badge only ever read `product.available`, the admin's own on/off toggle for whether an item is offered for lending at all. That toggle does NOT track live stock — Stock Out decrements `quantity_on_hand` without ever touching `available` (confirmed: `handleConfirm()` in stock-out/page.tsx only writes the quantity, and the admin Products *form* only auto-flips `available` to false on zero stock when Selouna is actively editing that product there — Stock Out issuing the last unit doesn't go through that form at all). So `available: true, quantity_on_hand: 0` is a perfectly normal, common state, and the dialog was blind to it.
+
+Fixed by giving the dialog its own out-of-stock check, layered on top of the existing toggle (admin-disabled still wins and still just says "Unavailable" — that's a deliberate decision, not a stock fact): a new optional `expectedReturnDate` prop, passed by `(portal)/lend/page.tsx` from the `expectedReturn` map it already fetches for the cards. Out of stock but not admin-disabled now shows the same "Unavailable — back {date}" / "Unavailable — return date not set" wording as the card, badge colored red like any other unavailable state. The admin Products page's own use of this same dialog is unaffected — it doesn't pass the new prop, so a product it previews falls back to "return date not set" wording if it's ever out of stock there too (an improvement over silently saying "Available", not a regression).
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): preview dialog gets its own Add to Cart, badge shows a count
+
+Two small follow-ups to the preview dialog on the portal Browse page:
+
+- **Badge:** an in-stock product now shows `{quantity_on_hand} Available` (e.g. "22 Available") instead of the bare word "Available" — matches the card's own "22 available" line right below it, just as a badge. Only applies to the genuinely-in-stock case; the admin-disabled and out-of-stock badges are unchanged.
+- **Footer:** `ProductPreviewDialog` takes a new optional `cart` prop (`{ quantity, onIncrement, onDecrement, onAddToCart }`). When it's passed AND the product is actually available and in stock, the footer swaps the plain "Close" button for the same qty stepper + "Add to Cart" button the Browse card has — no more closing the preview just to go add the item from the card underneath. Clicking Add to Cart in the dialog adds it and closes the dialog. `(portal)/lend/page.tsx` wires this to its existing `qtyFor()`/`setQty()`/`handleAdd()` (same functions the card already uses, so quantity picked in the dialog is the same state as the card's own stepper). Unavailable/out-of-stock products still just get "Close", same as before.
+
+The admin Products page's own use of this dialog is untouched — it doesn't pass `cart`, so its footer is unaffected either way.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): Cancel button on Incoming Pickups rows
+
+The Loan Requests page's Incoming Pickups tab (accepted requests) had no way to cancel one — no button anywhere, admin or otherwise. This is also the exact gap Stock Out's new hard-block message points Selouna at ("cancel that accepted pickup on the Loan Requests page first") — it didn't actually exist yet.
+
+Added a "Cancel" button directly on each row's summary line (right next to the expand ▲/▼, `stopPropagation`'d so clicking it doesn't also toggle the row open) in the Incoming Pickups tab specifically — the other two tabs (Needs Review, Sent Counters) are untouched, their actions still live inside the expanded row where the offered-quantity editing happens.
+
+It calls the existing `withdrawRequest()` from `loanRequests.ts` — the same function the portal's own "Withdraw" button already uses — writing status `withdrawn` (audit-logged as an `update`) rather than inventing a separate admin-only status: cancelled-by-Selouna and withdrawn-by-the-staff-member are the same "not happening" outcome from every other page's point of view (Dashboard, Stock Out's reservation check, the staff member's own My Requests page). No confirmation dialog, matching this page's existing Decline button.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): Incoming Pickups consolidated onto the Dashboard, Loan Requests page trimmed to open requests only
+
+Per request: Incoming Pickups (accepted loan requests) no longer appears on the Loan Requests page at all — it was duplicated there and on the Dashboard, and the Cancel button added earlier this session belongs on whichever page actually keeps the feature. It now lives only on the Dashboard.
+
+**Dashboard (`dashboard/page.tsx`):**
+- Tabs reordered to **Outstanding Returns → Incoming Pickups → Low Stock Alerts**.
+- **Outstanding Loan Requests tab removed** — it's redundant with the Loan Requests page's own "Needs Review"/"Sent Counters" tabs, which are the actual place to act on those.
+- **Incoming Pickups gained the Cancel button** (moved from Loan Requests page), gated on `isAdmin` like Resolve already is. Uses the same `withdrawRequest()` call, drops the row locally on success rather than refetching the whole dashboard (same convention as Resolve's own success handler).
+- Data loading simplified to match: the `loan_requests` fetch is now scoped to `status === 'accepted'` only (previously fetched and lazily transitioned pending/countered/accepted together for two separate tabs) — pending/countered expiry transitions are the Loan Requests page's own job now.
+
+**Loan Requests page (`loan-requests/page.tsx`):**
+- Incoming Pickups tab, its `accepted` list, `ReadOnlyRow`, and the Cancel button/handler added earlier this session are all removed.
+- `requestRows()` no longer takes an `editable` flag (there's only one row-detail component now — `EditableRow` — since both remaining tabs use it).
+- The summary row's "possible no-show" badge and its `tab === 'accepted'` date-column branch are gone too — dead code once accepted requests never appear on this page.
+- Page now only has **Needs Review** and **Sent Counters** tabs.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean on both files.
+
+## Session Handoff — 2026-09-20 (cont.): Cancel pickup now confirms via a dialog, same shape as Resolve
+
+The Dashboard's Incoming Pickups "Cancel" button fired immediately with no confirmation. Now matches the Resolve dialog's pattern exactly: clicking Cancel opens a dialog naming the staff member/items/pickup window, an explanatory note (reservation released, staff member isn't auto-notified, can't be undone), an optional Reason textarea, and "Close" / "Cancel pickup" buttons.
+
+- `withdrawRequest()` in `loanRequests.ts` gained an optional third `reason` parameter — when given, it's logged on the audit entry as `cancel_reason` alongside the status transition (the portal's own "Withdraw" button still doesn't pass one — a staff member cancelling their own request doesn't need to explain it, only the admin-side dialog collects a reason). The generic `FieldDiff` on the Audit Log page picks this up automatically as a new field, same as any other diffed change — no dedicated summary component needed.
+- Dashboard state: `cancellingId` replaced with `cancelling` (the row being confirmed, or null) + `cancelReason` + `cancelBusy`, mirroring `resolving`/`resolveReason`/`resolveBusy` exactly.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): Incoming Pickups rows are expandable
+
+Dashboard's Incoming Pickups table rows now expand on click (▲/▼ indicator, same pattern as the Loan Requests page's own rows) to show a plain product × quantity list for that request — previously the table only showed an aggregate item count with no way to see what was actually in it.
+
+The product/quantity breakdown (`pickupLines`, keyed by request id) is built in the same `loan_request_lines` read the item count already came from — no extra fetch, no lazy-load-on-expand needed. The Cancel button's click is `stopPropagation`'d so it still opens the confirmation dialog without also toggling the row's expand state.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): "Offering" quantity auto-clamps to live availability on Loan Requests
+
+Reported: after a Stock Out drops a product's on-hand quantity below what a pending loan request had offered, expanding that request on the Loan Requests page correctly showed the "Availability changed since this request was submitted..." warning (both toast and inline) and correctly disabled Approve as-is/Send Counter — but the "Offering" stepper itself kept showing the stale, no-longer-available number instead of reflecting what's actually available now.
+
+Root cause: `refreshAvailability()` (called on row expand and whenever the draft's from/to dates change) only ever wrote into the `availability` state used for the warning/cap math — it never touched `drafts`, which is what the "Offering" stepper actually renders. So the live availability number and the displayed offered quantity could disagree indefinitely.
+
+Fix, in `refreshAvailability()` (`loan-requests/page.tsx`): right after computing `availabilityMap`, also walk that request's draft lines and clamp any line whose `offered_quantity` exceeds `Math.min(requested_quantity, availabilityMap[product_id])` down to that cap — the exact same formula `updateOfferedQty` already uses for manual stepper edits, just applied automatically. Only ever reduces, never bumps a value back up, and no-ops (skips the `setDrafts` update) when nothing needs clamping.
+
+This has the correct knock-on effect through the existing dirty-check: the auto-clamped draft now differs from the originally-stored line, so `isDirty(r)` flips true — "Approve as-is" (which always checks the stored offered_quantity via `assertStillAvailable`, not the draft, so it would keep failing regardless) becomes disabled, and "Send Counter" (which submits the draft's — now corrected — quantity) becomes enabled, since sending a counter with the reduced amount is the actual way to resolve the conflict.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): "Send Counter" disabled when nothing is actually being offered
+
+Following straight on from the auto-clamp fix above: once a product's availability drops to 0, the Offering stepper correctly clamps down to 0 — but "Send Counter" was still clickable, letting staff send a counteroffer of 0 units, which isn't a real counteroffer (it's a de facto decline dressed up as one).
+
+Fix: "Send Counter" is now also disabled whenever every line in the draft has `offered_quantity <= 0` (in addition to the existing dirty-check), with a `title` tooltip explaining why ("Offer at least 1 unit of a product to send a counter."). For a multi-line request this only blocks sending when *all* lines are zeroed out — offering 0 of one item while still offering a real quantity of another remains valid, since that's a legitimate partial counter.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): Stock Out now hard-blocks against pending/countered requests too, not just accepted
+
+Follow-up to the "Offering auto-clamps to 0" fix above. Root question raised: if a walk-in Stock Out can still eat into a *pending* loan request's stock (previously only a soft, dismissible warning), the loan-requests page has no way to recover — the Offering just clamps to 0 and stays there once returned stock isn't tracked forward. The better fix is upstream: don't let that walk-in go through at all while it would conflict with an unresolved request.
+
+**`src/lib/firebase/loanRequests.ts`:** `getAcceptedReservationHolders()` (accepted-only) is replaced by `getReservationHolders(productId, fromDate, toDate, statuses = ACTIVE_STATUSES)` — same per-holder breakdown (who, how much, what date range), but now covers pending/countered/accepted by default, and each `ReservationHolder` carries its `status`. `ACTIVE_STATUSES` (`['pending', 'countered', 'accepted']`) is now exported for reuse. The old `getReservedQuantity()`-based soft-warning path (which summed reserved units without naming holders) is no longer used by Stock Out.
+
+**`src/app/(protected)/stock-out/page.tsx`:** The three-tier hard-block / soft-warning / FYI system from earlier this session collapses to two tiers — hard-block and FYI — because pending/countered now carry the same weight as accepted:
+- **Blocking** (`blockingConflicts`): any other staff member's active reservation (any status) that would push demand over on-hand disables Confirm, same as accepted-only did before. The alert names each holder's actual status ("pending request" / "countered offer" / "approved pickup" via `reservationStatusLabel()`) and, via a new `resolutionInstruction()` helper, points Selouna at the *correct* page per status — an approved pickup can only be cancelled from the Dashboard's Incoming Pickups tab (that Cancel button doesn't live on the Loan Requests page any more, per the earlier "Incoming Pickups consolidated onto the Dashboard" change this session), while pending/countered is resolved on the Loan Requests page itself. A mixed set of holders gets both instructions in one sentence rather than sending Selouna to the wrong page for half of them.
+- **FYI** (`incomingPickups`): unchanged in spirit — enough stock for everyone, just surfaced so Selouna knows who else has a stake — but now includes pending/countered holders too, each labeled with its status.
+- A staff member's own reservations are still excluded from both (same as before) — this only fires for *other* people's stake in the product.
+
+Net effect: a walk-in Stock Out can no longer silently strip stock out from under a pending loan request. Selouna has to resolve the conflicting request (approve/counter/decline it, or cancel an accepted pickup) before the issue can proceed — closing the gap that caused the earlier "Offering stuck at 0 with no path back" scenario in the first place.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): Products page now guards against a quantity edit breaking an active loan request
+
+Closing the last known gap from the Stock Out hardening above: editing `quantity_on_hand` directly on the Products page (a stocktake correction, writing off damaged/lost units) wrote straight to Firestore with zero reservation check — unlike Stock Out, which now hard-blocks a conflicting walk-in. An admin lowering a count by hand could silently drop stock below what an active loan request already had a claim on.
+
+**`src/lib/firebase/loanRequests.ts`:** `reservationStatusLabel()` and `resolutionInstruction()` (previously local to `stock-out/page.tsx`) are now exported from here instead, so both pages share one copy — `stock-out/page.tsx` imports them rather than redefining them. New `findQuantityReductionConflicts(productId, newQuantity)`: unlike Stock Out or a portal submission, a flat quantity edit has no date window of its own, so instead of checking one range's reserved total, it walks every currently active reservation on the product (any status, any date — via new `OPEN_ENDED_TO`/`ALL_TIME_FROM` sentinels) and re-runs the same per-request "is my own window still satisfiable" check `assertStillAvailable`/`refreshAvailability` already use, against the proposed new quantity. This avoids over-counting: two active requests for non-overlapping weeks don't both count against the same unit just because they're both "active" today.
+
+**`src/app/(protected)/products/page.tsx`:** While editing an existing product (not on Add — a brand-new product can't have requests against it yet), `handleSave` runs `findQuantityReductionConflicts` on Save — same timing as every other validation already on this form (barcode conflict, lend-date ordering), none of which are live-checked either. `formatQuantityConflictError()` turns the offending holders into one message (same holder-naming + `resolutionInstruction()` pattern as Stock Out's alert) shown in the form's existing bottom error box, rather than a separate inline alert — kept consistent with how every other error on this dialog is surfaced.
+
+(First pass had this as a debounced live check with its own inline alert under the Qty field and a disabled Save button — reverted after testing showed it just added a second, redundant message on top of the bottom error box; the plain submit-time check reads the same as the rest of the form.)
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont.): Per-product Lending Interval, enforced on the portal — including a genuinely indefinite loan
+
+Requested: relabel Products' "Lend From"/"Lend To" to "Available From"/"Available To (or Until)", add a "Lending Interval" drag bar (1 Week / 2 Weeks / 3 Weeks / 1 Month / Indefinitely) below it, and enforce that cap on the lending portal when staff pick their dates — with "Indefinitely" meaning the staff member genuinely doesn't have to give a return date at all, the same convenience Stock Out's blank "Lend To" already offers.
+
+This replaces the previous flat, app-wide `MAX_LOAN_DAYS = 7` cap (used to be the same for every product) with a per-product setting, and — because "Indefinitely" has to mean an actually-blank return date, not just "no day-count cap" — required widening `LoanRequest.to_date`/`original_to_date` to `string | null` throughout the codebase, mirroring how `Product.lend_to`/`Transaction.lend_to` already represent "no end date." This touched every file that reads or writes a loan request's dates; `tsc --noEmit` was used after each step to make sure nothing was missed, and passes clean end to end.
+
+**Mixed-cart policy (confirmed with the user):** the portal cart shares one From/To date pair across every item in it. When items with different intervals are in the same cart, the **tightest cap wins** and a To date is required whenever *any* item in the cart isn't Indefinitely — a mixed cart behaves like its most restrictive item, not its most lenient one.
+
+**`src/types/database.ts`:** new `LendingInterval = 'week_1' | 'week_2' | 'week_3' | 'month_1' | 'indefinite'` type. `Product.lending_interval?: LendingInterval` (optional — a product saved before this feature existed has none, treated as `'week_1'` everywhere it's read, preserving the old flat 7-day behavior exactly). `LoanRequest.to_date`/`original_to_date` widened to `string | null`.
+
+**`src/lib/firebase/loanRequests.ts`:**
+- `LENDING_INTERVALS` (the 5 stops with day-counts and labels), `lendingIntervalDays()`, `lendingIntervalLabel()`, `tightestLendingCap(cartItems)` (the shared tightest-cap-wins logic, used by both `validateCartDates` and the cart page itself for live UI feedback) — all exported for reuse across pages.
+- `effectiveToDate(to)` — resolves a null/blank "to" into the existing `OPEN_ENDED_TO` sentinel (`'9999-12-31'`) so every date-overlap comparison in this file keeps working unchanged; used everywhere a *stored* request's `to_date` (now nullable) or a caller's own blank toDate needs to compare against another date.
+- `getReservationHolders`/`getReservedQuantity`: overlap checks now resolve a stored request's `to_date` through `effectiveToDate()` before comparing. `ReservationHolder.toDate` is now `string | null`.
+- `validateCartDates`: rewritten around `tightestLendingCap()`. A blank To date is accepted only when every cart item is Indefinitely; otherwise it's required and capped at the tightest interval among the cart's items. Also guards a fringe case: a product with its own `lend_to` cutoff (the window during which it can be borrowed at all) still requires a real To date even if its lending interval is Indefinitely — an indefinite loan can't be promised past a hard availability cutoff the admin explicitly set.
+- `submitLoanRequest` stores `to_date`/`original_to_date` as `null` (not `''`) for a blank submission. `assertStillAvailable` and `sendCounter` accept/pass a nullable toDate through the same `effectiveToDate()` path. `findQuantityReductionConflicts` (from the earlier Products-quantity-edit fix) updated the same way.
+- `MAX_LOAN_DAYS` is kept, but now used only for `computeExpiryDate`'s unrelated 7-day pending-response SLA — not conflated with the new per-product interval even though both happened to be 7 days before this change.
+
+**`src/app/(protected)/products/page.tsx`:** Labels changed to "Available From" / "Available To (or Until)" (error messages and hint text updated to match — the underlying `lend_from`/`lend_to` field names are unchanged, this is a copy-only rename). New "Lending Interval" control below the date fields: a native 5-stop range slider (`<input type="range">`, no new dependency) with tick labels underneath, plus a one-line summary ("Up to 2 Weeks" / "Staff won't be required to set a return date…"). Saved as `lending_interval` on the product, included in the audit-log before/after snapshot.
+
+**`src/app/(protected)/audit-log/page.tsx`:** `lending_interval` gets a friendly label ("Lending interval") and its value is rendered via `LENDING_INTERVALS` (e.g. "2 Weeks" instead of the raw `week_2`) rather than falling through to the generic string display.
+
+**Portal — `src/app/(portal)/lend/cart/page.tsx`:** The To-date field's live validation now runs even when it's blank (previously skipped entirely). Its `max` is computed from `tightestLendingCap(cart)` instead of the old hardcoded `+7 days`, its label shows "(optional)" when every cart item is Indefinitely, and a one-line hint above the date fields explains the current cap ("this loan can run for up to 2 weeks" / "you don't need to set a To date"). The cart table gained a "Max loan" column per item. Submit is enabled with a blank To date only when nothing in the cart requires one.
+
+**Portal — `src/app/(portal)/lend/page.tsx` (Browse) and `src/components/products/ProductPreviewDialog.tsx`:** both now show the product's lending interval alongside its existing "Lendable" window, so staff see the cap before they even add something to their cart.
+
+**Display polish:** `formatDateOnly(from) – formatDateOnly(to)` join patterns (Dashboard's Incoming Pickups table and Cancel dialog, Stock Out's pickup selector, the portal's My Requests card title) were swapped for the existing `formatLendWindow()` helper, so a null `to_date` now reads "20 Sep 2026 – no end date" instead of "20 Sep 2026 – —".
+
+**Not changed / explicitly out of scope:** the admin Loan Requests page's counter-offer date editing still uses plain string state for its date inputs (blank string, converted to/from `null` at the read/write boundary) — Selouna wasn't asked for a way to *toggle* a request to indefinite from that page, only for the portal to enforce what staff can request in the first place; she can still counter with any dates she likes, same as before.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean across every file touched.
+
+## Session Handoff — 2026-09-20 (cont. 2): Add/Edit Product modal — relabel + two-column layout
+
+Two small follow-ups requested right after the Lending Interval feature above:
+
+1. **"Available To (or Until)" → "Available To"** — shortened per feedback; no behavior change, label text only.
+2. **Add/Edit Product modal restructured into two columns** for a wider, more scannable form (modal widened `sm:max-w-[480px]` → `sm:max-w-[820px]`, single column below `md` breakpoint):
+   - **Left — "Product details":** Name, Category, Qty On Hand + Reorder Threshold (paired), Description, Location, Photos.
+   - **Right — "Product availability":** Available From + Available To (paired), Lending Interval slider, Availability (own line) — then, still on the right, a **"Barcodes"** section beneath it.
+   - Purely a layout change — every field keeps its existing id, state binding, validation and disabled/hint logic untouched; only the grouping and column placement moved.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont. 3): Fix — Sidebar badge counts didn't match their own pages
+
+User caught this by comparing the Sidebar's badge numbers against what each page actually showed: Dashboard badge said 8 but Outstanding Returns (2) + Incoming Pickups (2) + Low Stock Alerts (3) = 7; Loan Requests badge said 3 but Needs Review (1) + Sent Counters (0) = 1.
+
+Root cause — both badges were counting a status bucket that has no tab on the page they're badging:
+- `dashboardAlerts.ts`'s `loadDashboardAlertCounts()` was adding a `pending + countered` loan-request count into the Dashboard's `total`, even though the Dashboard page only has three tabs (Outstanding Returns, Incoming Pickups, Low Stock Alerts) — there's no "Outstanding Loan Requests" tab on the Dashboard anymore (that's the Loan Requests page). Removed the `loanRequests` field and its contribution to `total` entirely; `total` is now exactly `outstandingReturns + lowStock + incomingPickups`, matching the three tabs one-for-one.
+- `loanRequests.ts`'s `loadLoanRequestsAlertCount()` was counting `pending + countered + accepted`, but the Loan Requests page only has two tabs (Needs Review = pending, Sent Counters = countered) — `accepted` requests become an Incoming Pickup, which is the Dashboard's job to track, not this page's. Worse, this meant an accepted request was being counted in *both* sidebar badges at once. Dropped `accepted` from this count so it's now `pending + countered` only.
+
+Both functions' doc comments (which described a stale "four tabs" / "three tabs" shape that no longer matches either page) were rewritten to describe the current tabs and explicitly call out the double-counting trap for future changes.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont. 4): Fix — Sidebar badges didn't refresh for in-place actions
+
+Right after the counting-math fix above, the user found a second bug: resolving an Outstanding Return on the Dashboard updated that tab's own count immediately (2 → 1) but the Sidebar's Dashboard badge stayed at the old total until the page was reloaded.
+
+Root cause: the Sidebar loads its two badge counts in a `useEffect` keyed on `pathname === '/dashboard'` / `pathname === '/loan-requests'` — a boolean that only flips when the admin *navigates* to or away from that page. That's enough to pick up a change made elsewhere (e.g. issuing stock on Stock Out, then navigating back to the Dashboard). It's not enough for an action taken **without leaving the page**, which is exactly how Dashboard's Resolve/Cancel-pickup and Loan Requests' Approve/Counter/Decline all work — each patches its own local list in place (`setOutstanding(prev => prev.filter(...))` etc.) rather than doing a full navigation, so the pathname boolean never changes and the Sidebar's effect never re-fires.
+
+Fix: added a tiny pub/sub, `src/lib/alertsBus.ts` (`notifyAlertsChanged()` / `subscribeToAlertsChanged()`), used only for this — no new state library, just a `Set<Listener>` module singleton. The Sidebar subscribes to it alongside its two existing pathname-keyed effects (doesn't replace them — the pathname effects still matter for cross-page navigation). Every in-place mutation that changes a badge's count now calls `notifyAlertsChanged()` right after updating its own local state:
+- Dashboard: Resolve (Outstanding Returns), Cancel pickup (Incoming Pickups).
+- Loan Requests: Approve, Send Counter, Decline (all three move a request between pending/countered/accepted, which both Sidebar badges partly key on).
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont. 5): Fix — stray vertical scrollbar on the tab strip (Dashboard, Reports, Loan Requests)
+
+All three pages' `TabsList` had `overflow-x-auto` (so the tab strip can scroll horizontally on a narrow screen instead of wrapping) but no `overflow-y` set. Per the CSS spec, once one axis is set to anything other than `visible`, a `visible` value on the other axis computes to `auto` instead — so `overflow-x-auto` alone silently turns `overflow-y` into `auto` too, and the fixed-height (`h-8`) tab row shows a vertical scrollbar (with up/down step arrows) the instant its content is even a pixel taller than the box, which badge padding/borders reliably trigger.
+
+Fix: added `overflow-y-hidden` alongside the existing `overflow-x-auto` on all three `TabsList`s — `dashboard/page.tsx`, `loan-requests/page.tsx`, `reports/page.tsx`. Horizontal scroll-on-overflow behavior is unchanged; only the unintended vertical scrollbar is gone.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont. 6): Fix — no-show fired the day after "From", ignoring "To" entirely
+
+User caught this by walking through a real scenario: an item accepted for a whole week (say From Mon, To the following Mon) that a staff member picked up on the Tuesday instead of the Monday was getting flagged a "possible no-show" and pulled from Incoming Pickups the very next day — even though the reservation ledger was still correctly holding those units for that staff member across the whole week and nobody else could have taken them anyway.
+
+Root cause: `isNoShowCandidate()` only ever checked `todayDateStr() > request.from_date` — the "To" date (or Indefinite) played no part in it at all, even though every other part of the system (`getReservedQuantity`/`getReservationHolders`) treats an accepted request as occupying its entire From-To window, not just its first day.
+
+Confirmed with the user (three options offered: trigger after To passes / a grace period after From / leave as-is) — chose **trigger after the whole window passes**. Fix, in `loanRequests.ts`:
+
+```ts
+export function isNoShowCandidate(request: LoanRequest): boolean {
+  return request.status === 'accepted' && !request.fulfilled_txn_id && todayDateStr() > effectiveToDate(request.to_date)
+}
+```
+
+Reusing `effectiveToDate()` (already in this file, from the Lending Interval work) meant the Indefinite case needed no special-casing at all: a null `to_date` resolves to the open-ended sentinel, so an Indefinite pickup never auto-flags as a no-show — consistent with "no forced return date" also meaning no forced pickup deadline. An admin can still manually Cancel it from the Dashboard at any time regardless of the no-show badge.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont. 7): Incoming Pickups — new "Insufficient" status, cross-checked against overdue returns
+
+New Dashboard feature, walked through with the user step by step before building: an accepted Incoming Pickup's offered quantity was only ever validated against live stock at the moment it was approved/countered (`assertStillAvailable`). Nothing re-checks it afterwards — so if the shelf ends up short by pickup time (most plausibly because a same-product Outstanding Return that was due back hasn't come in), the pickup would still calmly show "ON SCHEDULE" even though there isn't actually enough stock to hand over.
+
+**The check** (`dashboard/page.tsx`, inside the existing data-load effect): for every still-`accepted` request, for each of its lines, `available = quantity_on_hand − getReservedQuantity(productId, fromDate, effectiveToDate(toDate), excludeThisRequestId)` — the exact same live-availability arithmetic the rest of the app already validates against (Approve/Counter, Stock Out, the Products quantity-edit guard), just re-run here instead of assumed still valid. `shortBy = max(0, offered_quantity − available)`. A pickup is **Insufficient** if any of its lines comes up short.
+
+**Badge:** a new amber "INSUFFICIENT" badge, ranked below "NOT PICKED UP" (no-show still takes priority and removes the row entirely) but distinct from green "ON SCHEDULE".
+
+**Expandable detail:** the row's existing expand-on-click behavior now shows, per short line, "Short by N — only X of Y on hand right now", plus a "likely cause" list of any **overdue** (not merely outstanding — a return that isn't due yet is expected to still be out, so it isn't a "problem") return of that same product, each showing who has it, the expected date, and the transaction reference. If no overdue return of that product explains the gap (a rarer case — e.g. two accepted pickups racing each other), it says so plainly rather than guessing.
+
+**"Goes away" automatically**, per the user's requirement — no special-casing needed, since this is recomputed live from `quantity_on_hand` on every Dashboard load, the same as everything else on this page:
+- Selouna manually raises the product's Qty On Hand on the Products page → next load, `available` goes up, `shortBy` clears.
+- A Stock In receipt raises Qty On Hand → same.
+- Any Return of that product (from a *different* loan, or the same overdue one finally coming back) raises Qty On Hand via `returns/page.tsx` → same.
+
+**Resolving** an overdue return (writing it off) doesn't fix the shelf shortage — the unit is still physically gone — but the now-resolved item is stripped out of the "likely cause" list right when Resolve succeeds, alongside the existing local patch to Outstanding Returns, so the explanation never keeps pointing at something already written off.
+
+**Known scope limit:** this is computed fresh once per Dashboard page load, same as Outstanding Returns/Incoming Pickups/Low Stock already are — cancelling one pickup or resolving a return doesn't retroactively re-check every *other* row's insufficiency within the same session; a fresh load (navigating away and back, or a manual refresh) picks it up.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont. 8): Dashboard reloads its Insufficient check on Cancel, Resolve, and tab switch
+
+Follow-up to the Insufficient-status feature above — the user asked for the "recompute on next load" limitation to be tightened: rather than requiring a navigate-away-and-back, trigger a fresh check right on the actions that can actually change it.
+
+`getDashboardData()` was pulled out of the mount `useEffect` into a normal component function, taking an optional `{ silent?: boolean }` — `silent: true` skips the full-page "Loading dashboard..." replacement (`setLoading(true)`) so a background re-check doesn't blank the screen the admin is looking at; the initial mount call stays non-silent since that's the one real "still loading" moment.
+
+Wired to call `getDashboardData({ silent: true })` from three places:
+- **Tab switch** (`Tabs onValueChange`) — catches anything that changed elsewhere while this page sat idle.
+- **Cancel pickup** — genuinely can change other rows: withdrawing a request frees its hold on the product, which `getReservedQuantity` subtracts for every other accepted pickup of the same item too, potentially clearing an Insufficient elsewhere.
+- **Resolve return** — doesn't actually change `quantity_on_hand` today (a waiver is a write-off, not a physical return), so it can't currently un-block an Insufficient pickup, but wired anyway so this doesn't quietly become a trap if Resolve's behavior ever changes.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont. 9): Pending/Countered response SLA widened from 1 week to 1 month
+
+`MAX_LOAN_DAYS` in `loanRequests.ts` (used only by `computeExpiryDate` — the auto-expiry clock on a pending/countered request that Selouna hasn't acted on) changed from `7` to `30`. A request still expires at `min(updated_at + 30 days, from_date)` — capped at its own pickup date so a near-term request still can't outlive its own pickup window — just with a full month's grace instead of a week before that cap kicks in.
+
+This is unrelated to the per-product Lending Interval feature (1 Week/2 Weeks/3 Weeks/1 Month/Indefinite) added earlier this session — that governs how long a staff member can KEEP a borrowed item; this SLA governs how long Selouna has to Approve/Counter/Decline before the request itself goes stale.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont. 10): Optional message on Counter and Decline
+
+New `LoanRequest.admin_message: string | null` field — a note from Selouna, shown to the staff member, sent along with either a counter or a decline. Reused across both (they're mutually exclusive transitions for a given request, so there's never a case where a "counter message" and a "decline reason" both need to be visible for the same request at once).
+
+**Send Counter** (`loan-requests/page.tsx`): the expanded row's editing area got a new "Message to {staff_name} (optional)" `Textarea`, right below the From/To dates. `Draft` gained a `message` field, pre-filled from `r.admin_message` when re-opening an already-countered request (so re-editing shows what staff already saw, not a blank box). `isDirty()` now also treats a message-only change as dirty — typing a note with otherwise-unchanged terms is a deliberate act, not a no-op, and disables "Approve as-is" the same way any other edit would (Approve carries no message of its own).
+
+**Decline**: previously a single-click ghost button with no confirmation at all. Now opens a confirmation dialog — same shape as the Dashboard's existing Resolve/Cancel-pickup dialogs — with its own optional message `Textarea`, and a destructive "Decline" button to confirm. `declineRequest()` gained a `message` parameter between `request` and `actor`.
+
+**`loanRequests.ts`**: `sendCounter()` gained a `message: string | null | undefined` parameter (before `actor`); both it and `declineRequest()` trim and null-coalesce the message, write it to `admin_message` on the request doc, and include it in the audit log's `after` diff only when non-empty (mirroring how `withdrawRequest`'s optional `reason` is handled). `submitLoanRequest()` now explicitly sets `admin_message: null` at creation for consistency with the rest of the doc's nullable fields.
+
+**Portal — `lend/requests/page.tsx`**: `RequestCard` now shows Selouna's message in its own bordered callout ("Message from Selouna") wherever `admin_message` is set — countered, declined, wherever — right after the staff member's own note (now labeled "Your note" for clarity now that there are two messages on the same card).
+
+**Audit Log**: `admin_message` gets a friendly label ("Message to staff") instead of falling through to the generic snake_case-to-title-case fallback.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont. 11): Counter message moved from inline to its own modal
+
+Revised the previous entry per feedback — Send Counter's optional message wasn't wanted inline in the expanded row; both Send Counter and Decline now open a confirmation modal instead, matching each other exactly:
+
+- Clicking **Send Counter** (still only enabled once qty/dates actually differ from the original ask — that check is unchanged) opens "Send counter to {staff}?" with an optional message box, **Close** and **Send Counter** buttons. Confirming calls `sendCounter()` with the row's already-edited draft lines/dates plus whatever was typed in the modal.
+- Clicking **Decline** opens "Decline this request?" with an optional message box, **Close** and a destructive **Decline** button. (Renamed its dismiss button from "Cancel" to "Close" to match.)
+
+The inline "Message to {staff}" `Textarea` that used to sit in the expanded row is gone — `Draft` no longer carries a `message` field, and `isDirty()` is back to checking only qty/date changes (a message no longer affects whether Send Counter is enabled; it's decided in the modal at send-time instead). Two new bits of local state carry the modal's own message: `countering`/`counterMessage`/`counterBusy` alongside the existing `declining`/`declineMessage`/`declineBusy`.
+
+Everything from the previous entry underneath this (the `admin_message` field itself, both functions' signatures, the portal display, the audit-log label) is unchanged — only how the message gets typed changed.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont. 12): Sent Counters tab is now read-only, decline-only, with a full audit snapshot
+
+The "Sent Counters" tab (`loan-requests/page.tsx`) previously reused the exact same fully-editable expanded row as "Needs Review" — Selouna could still adjust quantities/dates and re-send another counter, or Approve as-is, on a request she'd already countered. That's gone: expanding a countered row now shows a new read-only `CounteredRow` instead of the editable one, and the only action left is **Decline**.
+
+**`CounteredRow`** shows, in order: the staff member's original message (`r.message`) if any; the countered window (`formatLendWindow(r.from_date, r.to_date)`, with a note underneath if it differs from `r.original_from_date`/`r.original_to_date`); a per-line table of Requested vs. Counter Offer (an item Selouna zeroed out shows as "Removed" instead of a quantity); and her own counter message (`r.admin_message`) if any — then just the Decline button. `toggleExpand()` no longer builds a `Draft`/fetches availability for a 'countered' request at all (nothing there to edit), only for 'pending' ones.
+
+**Audit trail on decline of a counter**: declining wipes out the whole counter offer from the live document the moment status flips to 'declined' — so `declineRequest()` (`loanRequests.ts`) now takes the request's `LoanRequestLine[]` as a new parameter and, only when `request.status === 'countered'` at the moment of decline, freezes `staff_message`, `counter_message` (the admin_message as it stood *before* this decline overwrites it), and `countered_lines` (product name + requested vs. offered qty per line) into the audit entry's `after` payload, alongside the decline's own new `admin_message`. A decline of a still-*pending* request is unaffected — nothing to freeze yet, so none of these extra fields get added.
+
+**Audit Log page**: `LoanRequestSummary` gained a second rich-rendering branch (alongside the existing 'create' entry summary) that fires whenever `after.countered_lines` is an array — rendering staff's message, the requested/offered/removed line list, Selouna's counter message, and her decline message all together, instead of falling through to the generic `FieldDiff` (which would've shown the lines array as unreadable `[object Object]` text). Every other loan_request update entry (accept, expire, no-show, withdraw, decline of a still-pending request) is untouched and still uses `FieldDiff` as before.
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont. 13): Comprehensive demo-data seed script
+
+Added `scripts/seed-comprehensive-demo.mjs` (`npm run seed:comprehensive`) — a single script that populates the emulator with essentially every distinct status/badge/label the app can show, so the whole thing can be inspected in one sitting rather than piecing it together from the six narrower `seed:*` scripts:
+
+- **Dashboard**: all Outstanding Returns badges (No Return Date/Overdue/Due Today/Not Due Yet/Partly Resolved/Mixed, plus a still-overdue partial return), all Incoming Pickups badges (On Schedule, Insufficient ×2 — one with a correlated overdue "likely cause", one hitting the fallback message — and Not Picked Up, both a live-transition example and an already-recorded one), and both Low Stock Alerts badges.
+- **Loan Requests**: every `LoanRequestStatus` with a realistic audit trail behind it — pending (fresh + near its 30-day expiry), countered (a rich one with a removed line, both sides' optional messages, and a date change; a plain one with none of that), accepted, fulfilled (a full pending → countered → accepted-by-staff → fulfilled history on one request, linked to its Stock Out via `linked_request_id`), declined (by Selouna from pending, by Selouna from an already-sent counter — exercising the decline-of-a-counter rich audit snapshot built earlier this session — and by the staff member themselves via the portal's `declineCounter`), expired, no_show, and withdrawn (staff, no reason; Selouna cancelling an accepted pickup, with one).
+- **Reports**: IN/OUT/RETURN/ADJUST transactions (ADJUST has no real UI flow today, seeded directly for the filter dropdown's sake — see below) across ~20 "Demo —" staff members, plus a fully-returned and a partially-returned OUT pair.
+- **Audit Log**: at least one entry for every entity_type/action combination any real code path in the app actually produces — product/category/staff create+update+activate+deactivate, transaction create+resolve, and the full loan_request lifecycle above.
+
+Deliberately NOT seeded: `AuditAction` `'delete'` and `AuditEntityType` `'return_waiver'` — both are declared in `types/database.ts` but no button anywhere in the app triggers either one today (no product/category delete flow exists; a resolved return is always logged against the *transaction* it originated from, per `waivers.ts`, never as its own `return_waiver` entity) — there's nothing real to fabricate for them.
+
+Every helper (`recordTxn`, `writeWaiver`, `createLoanRequest`, `writeLoanUpdate`) writes the exact same shape the real `logAudit()` call sites in `loanRequests.ts`/`waivers.ts`/the stock-in/out/returns pages produce, cross-checked line-by-line against those files rather than guessed — including the subtlety that a loan request's `create` audit entry always shows `status: 'pending'` and its *original* dates, even when this script drops the live document straight into a later status. Quantities were hand-traced through `getReservedQuantity`'s actual formula (sums `offered_quantity` across `pending`/`countered`/`accepted` lines, per-window) to make sure the Insufficient-pickup and On-Schedule scenarios land exactly where intended, and the Insufficient-with-cause product's overdue OUT transaction is deliberately the same product as its accepted pickup so the "likely cause" correlation has something real to point at.
+
+Verified with `node --check` and `npx eslint` (both clean) — running it end-to-end against a live emulator wasn't possible from this session (the local `firebase-tools` install is broken/incomplete on this machine, unrelated to this change), so give it a run yourself the first time rather than assuming it's flawless.
+
+## Session Handoff — 2026-09-20 (cont. 14): removed the two unused AuditAction/AuditEntityType values
+
+Following up on the comprehensive seed script above, which needed to explain why it didn't seed examples for `AuditAction`'s `'delete'` and `AuditEntityType`'s `'return_waiver'` — the user asked to just remove both from the app if nothing uses them.
+
+**`'delete'` (AuditAction):** never used anywhere — no product/category/staff/transaction delete flow exists in this app at all, and nothing in the codebase or `handout.md`'s history shows it ever having been wired up. Removed outright.
+
+**`'return_waiver'` (AuditEntityType):** more nuanced — an earlier session (see "resolving a return now logs against the Transaction entity, not a separate 'Return Waiver' one" above) explicitly *kept* this value in the type/`ENTITY_LABEL`/filter dropdown after moving new resolves onto the `transaction` entity, specifically so any historical audit entries already written with `entity_type: 'return_waiver'` would still show a friendly label and stay filterable. Flagged this history to the user before touching it — confirmed there's no real/production data depending on it (dev/emulator only), so removed it too. If that ever turns out to be wrong, the fix is to re-add `'return_waiver'` to the `AuditEntityType` union and the two lookups below — nothing else references it.
+
+**Changes:**
+- `types/database.ts` — `AuditAction`/`AuditEntityType` unions no longer include `'delete'`/`'return_waiver'`.
+- `audit-log/page.tsx` — removed both from `ACTION_BADGE_CLASS`/`ENTITY_LABEL`, and their entries from the Action/Entity filter dropdowns (both the `Select`'s `items` map and the corresponding `SelectItem`).
+- `scripts/seed-comprehensive-demo.mjs` — updated its doc comment and closing summary, which previously explained why these two were deliberately left unseeded (they're gone now, so there's nothing left to explain).
+
+`npx tsc --noEmit -p tsconfig.json` passes clean.
+
+## Session Handoff — 2026-09-20 (cont. 15): seed:comprehensive now provisions Auth logins too
+
+User hit `Firebase: Error (auth/user-not-found)` logging into the BICS login page as `admin@nwu.test` after running only `npm run seed:comprehensive`. Root cause: unlike `seed-emulator.mjs`/`seed-lending-portal.mjs`, the comprehensive script only ever wrote Firestore documents — it never created any Firebase Auth accounts, so there was no login for the app's client-side Firebase Auth to find. Products/categories/staff/loan requests/audit log were never the gap; it was purely the Auth side. Asked to fix this so `npm run seed:comprehensive` alone is sufficient to run the whole app — no other seed script needed first.
+
+**Changes to `scripts/seed-comprehensive-demo.mjs`:**
+- Added `FIREBASE_AUTH_EMULATOR_HOST` env default (`127.0.0.1:9099`) alongside the existing Firestore one, and imported/initialized `getAuth(app)`.
+- Added an `upsertUser(email, password, uid)` helper (get-or-create against the Auth emulator, same pattern as the other seed scripts).
+- New **Section 0: LOGINS**, first thing `main()` does:
+  - Creates `admin@nwu.test` / `password123` (uid `seed-admin`) and writes its `profiles/{uid}` doc with `role: 'admin'` — this is the BICS admin login.
+  - Creates `demo.portallinked@example.com` / `password123` (uid `seed-demo-portallinked-uid`) — a portal-borrower login with no `profiles` doc, matching the two-role model (a portal borrower is just a `staff` record whose `uid` matches their Auth uid).
+- Right after the existing `S.PortalLinked` staff record is set up (Section 2), added `.update({ uid: portalBorrowerUser.uid })` on that staff doc so it's genuinely linked to a real Auth account — previously that scenario's "portal access granted" audit entry recorded a `uid` string that didn't correspond to any real login.
+- Console summary now prints both credential sets and their sign-in URLs first, before the existing per-tab walkthrough notes.
+
+Verified with `node --check` and `npx eslint` (both clean) — same live-emulator caveat as cont. 13: this session can't run the emulator itself (broken local `firebase-tools` install, pre-existing and unrelated to this work), so this hasn't been exercised end-to-end. `upsertUser`'s get-or-create means re-running the script is still safe for the Auth accounts themselves, though re-running will add a second batch of ledger/loan-request/audit data same as before.
+
+`node --check scripts/seed-comprehensive-demo.mjs` and `npx eslint scripts/seed-comprehensive-demo.mjs` both pass clean.

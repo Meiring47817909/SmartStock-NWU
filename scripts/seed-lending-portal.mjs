@@ -49,6 +49,22 @@ async function upsertUser(email, password, uid) {
   }
 }
 
+// Same 7-category list as seed-products.mjs, kept duplicated here rather
+// than factored into a shared helper — matches this project's existing
+// convention of small, self-contained seed scripts. Only the one category
+// this script's product actually needs is upserted (not all 7) — run
+// seed:products too if you want the full set for the Categories page.
+async function upsertCategory(name, description) {
+  const existingSnap = await db.collection('categories').where('name', '==', name).get()
+  if (!existingSnap.empty) {
+    const ref = existingSnap.docs[0].ref
+    await ref.set({ description }, { merge: true })
+    return ref.id
+  }
+  const ref = await db.collection('categories').add({ name, description, created_at: new Date().toISOString() })
+  return ref.id
+}
+
 async function main() {
   // BICS admin — signs into /login, approves/counters requests at /loan-requests.
   const admin = await upsertUser('admin@nwu.test', 'password123', 'seed-admin')
@@ -73,13 +89,18 @@ async function main() {
   )
 
   // A lendable product with an open window and a few units on hand.
+  // No dedicated AV/presentation category exists in the current category
+  // list — Peripherals ("Keyboards, mice, monitors, webcams") is the
+  // closest fit as a display/output device, same call made for the Epson
+  // projector in seed-products.mjs.
+  const peripheralsCategoryId = await upsertCategory('Peripherals', 'Keyboards, mice, monitors, webcams')
   const today = todayStr()
   const existing = await db.collection('products').where('barcodes', 'array-contains', 'TESTPROJ001').get()
   const productId = existing.empty ? undefined : existing.docs[0].id
   const productPayload = {
-    category_id: null, name: 'Test Projector', description: 'Seed product for lending portal testing',
+    category_id: peripheralsCategoryId, name: 'Test Projector', description: 'Seed product for lending portal testing',
     barcodes: ['TESTPROJ001'], quantity_on_hand: 3, reorder_threshold: 1, available: true,
-    location: 'Shelf A1', lend_from: today, lend_to: addDays(today, 30),
+    location: 'NWU - Potchefstroom, Building G4, Room 28', lend_from: today, lend_to: addDays(today, 30),
     updated_at: new Date().toISOString(),
   }
   let productRef

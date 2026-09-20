@@ -92,6 +92,17 @@ export function formatDateOnly(value: string | null | undefined): string {
   return `${day} ${monthNames[monthIdx]} ${year}`
 }
 
+// Formats a product's lend window for display. A set lend_from with no
+// lend_to means the product remains lendable indefinitely — no end date has
+// been decided yet — distinct from neither field being set at all (not
+// opened up for lending). See loanRequests.ts's validateCartDates for the
+// matching "no upper bound" logic on the portal-request side.
+export function formatLendWindow(from: string | null | undefined, to: string | null | undefined): string {
+  if (!from && !to) return '—'
+  if (from && !to) return `${formatDateOnly(from)} – no end date`
+  return `${formatDateOnly(from)} – ${formatDateOnly(to)}`
+}
+
 export function stockStatusColor(qty: number, threshold: number): string {
   if (qty === 0) return 'text-red-600 bg-red-50'
   if (qty <= threshold) return 'text-amber-600 bg-amber-50'

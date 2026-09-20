@@ -88,7 +88,7 @@ export default function CategoriesPage() {
   }
 
   return (
-    <div>
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Categories</h1>
@@ -97,9 +97,10 @@ export default function CategoriesPage() {
         <Button onClick={openAdd}><Plus className="size-4" /> Add Category</Button>
       </div>
 
-      <Card className="py-0">
+      <Card className="min-h-0 flex-1 py-0">
+        <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
               <TableHead>Name</TableHead>
               <TableHead>Description</TableHead>
@@ -126,6 +127,7 @@ export default function CategoriesPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </Card>
 
       <Dialog open={showModal} onOpenChange={setShowModal}>

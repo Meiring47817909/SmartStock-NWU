@@ -45,6 +45,29 @@ function PortalShell({ children }: { children: React.ReactNode }) {
     )
   }
 
+  // Deactivated on the Staff page (Deactivate button) — locked out of the
+  // portal the same way they're already locked out of Stock Out's staff
+  // picker. Every sign-in path (password login, NWU-CAS) ends up here
+  // before reaching Browse/Cart/My Requests, so this is the one place that
+  // needs to enforce it to cover both. login/page.tsx also checks this up
+  // front for the password path, purely so that one gets an immediate,
+  // specific error on the login form itself instead of a moment on
+  // "Loading…" before landing here — this check is what actually keeps
+  // them out either way.
+  if (!staffMember.is_active) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center">
+        <h1 className="text-lg font-bold text-foreground">Your account has been deactivated</h1>
+        <p className="max-w-[360px] text-sm text-muted-foreground">
+          Please contact Selouna Visser at{' '}
+          <a href="mailto:Selouna.Visser@nwu.ac.za" className="underline">Selouna.Visser@nwu.ac.za</a>{' '}
+          for more information.
+        </p>
+        <Button variant="outline" onClick={handleSignOut}>Sign out</Button>
+      </div>
+    )
+  }
+
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/')
 
   return (

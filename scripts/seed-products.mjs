@@ -58,6 +58,36 @@ function placeholderSvg(name, bgColor, glyph) {
 
 const today = todayStr()
 
+// All seeded products live at the same physical location.
+const LOCATION = 'NWU - Potchefstroom, Building G4, Room 28'
+
+// Mirrors the real category list Selouna has set up on the live app (see
+// LENDING_PORTAL_CHANGELOG.md-adjacent seeding notes) — kept here rather than
+// in a shared scripts helper, matching this project's existing convention of
+// small, self-contained seed scripts (todayStr/addDays are duplicated the
+// same way rather than factored out). Safe to run multiple times — upserted
+// by name, same as products are upserted by barcode below.
+const CATEGORIES = [
+  { name: 'Cables & Adapters', description: 'USB, HDMI, DisplayPort, network cables' },
+  { name: 'Consumables', description: 'Toner, paper, labels, cleaning kits' },
+  { name: 'Laptops & Computers', description: 'Portable and desktop computers' },
+  { name: 'Networking', description: 'Switches, routers, access points' },
+  { name: 'Peripherals', description: 'Keyboards, mice, monitors, webcams' },
+  { name: 'Power', description: 'UPS units, power strips, surge protectors' },
+  { name: 'Storage', description: 'SSDs, HDDs, USB drives' },
+]
+
+async function upsertCategory(name, description) {
+  const existingSnap = await db.collection('categories').where('name', '==', name).get()
+  if (!existingSnap.empty) {
+    const ref = existingSnap.docs[0].ref
+    await ref.set({ description }, { merge: true })
+    return ref.id
+  }
+  const ref = await db.collection('categories').add({ name, description, created_at: new Date().toISOString() })
+  return ref.id
+}
+
 const PRODUCTS = [
   {
     name: 'Dell Latitude 5440 Laptop',
@@ -65,10 +95,10 @@ const PRODUCTS = [
     barcode: 'SEED-LAPTOP-001',
     quantity_on_hand: 8,
     reorder_threshold: 2,
-    location: 'Cage B, Shelf 2',
     lendable: true,
     color: '#2563eb',
     glyph: '💻',
+    category: 'Laptops & Computers',
   },
   {
     name: 'Epson EB-108 Projector',
@@ -76,10 +106,13 @@ const PRODUCTS = [
     barcode: 'SEED-PROJ-001',
     quantity_on_hand: 4,
     reorder_threshold: 1,
-    location: 'Cage A, Shelf 1',
     lendable: true,
     color: '#7c3aed',
     glyph: '📽️',
+    // No dedicated AV/presentation category exists in the current list —
+    // Peripherals ("Keyboards, mice, monitors, webcams") is the closest fit
+    // as a display/output device. Move this if a better category shows up.
+    category: 'Peripherals',
   },
   {
     name: 'Logitech MX Master 3S Mouse',
@@ -87,10 +120,10 @@ const PRODUCTS = [
     barcode: 'SEED-MOUSE-001',
     quantity_on_hand: 25,
     reorder_threshold: 5,
-    location: 'Cage B, Shelf 4',
     lendable: false,
     color: '#059669',
     glyph: '🖱️',
+    category: 'Peripherals',
   },
   {
     name: 'HDMI Cable (2m)',
@@ -98,10 +131,10 @@ const PRODUCTS = [
     barcode: 'SEED-CABLE-001',
     quantity_on_hand: 40,
     reorder_threshold: 10,
-    location: 'Cage A, Bin 7',
     lendable: false,
     color: '#d97706',
     glyph: '🔌',
+    category: 'Cables & Adapters',
   },
   {
     name: 'Poly Studio USB Conference Camera',
@@ -109,26 +142,26 @@ const PRODUCTS = [
     barcode: 'SEED-CAM-001',
     quantity_on_hand: 3,
     reorder_threshold: 1,
-    location: 'Cage A, Shelf 3',
     lendable: true,
     color: '#db2777',
     glyph: '📷',
+    category: 'Peripherals',
   },
 ]
 
-async function upsertProduct(spec) {
+async function upsertProduct(spec, categoryIdByName) {
   const existingSnap = await db.collection('products').where('barcodes', 'array-contains', spec.barcode).get()
   const now = new Date().toISOString()
 
   const payload = {
-    category_id: null,
+    category_id: categoryIdByName[spec.category] ?? null,
     name: spec.name,
     description: spec.description,
     barcodes: [spec.barcode],
     quantity_on_hand: spec.quantity_on_hand,
     reorder_threshold: spec.reorder_threshold,
     available: true,
-    location: spec.location,
+    location: LOCATION,
     lend_from: spec.lendable ? today : null,
     lend_to: spec.lendable ? addDays(today, 30) : null,
     updated_at: now,
@@ -154,9 +187,15 @@ async function upsertProduct(spec) {
 }
 
 async function main() {
+  const categoryIdByName = {}
+  for (const c of CATEGORIES) {
+    categoryIdByName[c.name] = await upsertCategory(c.name, c.description)
+  }
+  console.log(`Seeded ${CATEGORIES.length} categories.`)
+
   const results = []
   for (const spec of PRODUCTS) {
-    results.push(await upsertProduct(spec))
+    results.push(await upsertProduct(spec, categoryIdByName))
   }
 
   console.log('Seeded products with images:')

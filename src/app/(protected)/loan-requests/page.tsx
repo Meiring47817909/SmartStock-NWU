@@ -7,16 +7,22 @@ import { collection, doc, getDoc, getDocs } from 'firebase/firestore'
 import { useAuth } from '@/context/AuthContext'
 import {
   approveAsIs, sendCounter, declineRequest, expireIfNeeded,
-  computeExpiryDate, isNoShowCandidate, getReservedQuantity,
+  computeExpiryDate, getReservedQuantity, effectiveToDate,
 } from '@/lib/firebase/loanRequests'
-import { formatDate, formatDateOnly, todayDateStr } from '@/lib/utils'
-import { Card, CardHeader, CardTitle } from '@/components/ui/card'
+import { formatDateOnly, formatLendWindow, todayDateStr } from '@/lib/utils'
+import { notifyAlertsChanged } from '@/lib/alertsBus'
+import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog'
 import type { LoanRequest, LoanRequestLine, LoanRequestStatus } from '@/types/database'
 
 const STATUS_BADGE_CLASS: Record<LoanRequestStatus, string> = {
@@ -29,8 +35,6 @@ const STATUS_BADGE_CLASS: Record<LoanRequestStatus, string> = {
   withdrawn: 'bg-muted text-muted-foreground',
   no_show: 'bg-red-100 text-red-800',
 }
-
-const TERMINAL: LoanRequestStatus[] = ['declined', 'expired', 'withdrawn', 'fulfilled', 'no_show']
 
 interface DraftLine {
   id: string
@@ -64,12 +68,22 @@ export default function LoanRequestsPage() {
   const [requests, setRequests] = useState<LoanRequest[]>([])
   const [linesByRequest, setLinesByRequest] = useState<Record<string, LoanRequestLine[]>>({})
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<'pending' | 'countered' | 'accepted' | 'history'>('pending')
+  const [tab, setTab] = useState<'pending' | 'countered'>('pending')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [availability, setAvailability] = useState<Record<string, Record<string, number>>>({})
   const [busy, setBusy] = useState<string | null>(null)
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({})
+  // The request Selouna has clicked Send Counter or Decline on, held
+  // while that action's own confirmation modal (with an optional message)
+  // is open — same pattern as the Dashboard's Resolve/Cancel-pickup
+  // dialogs. Only one of the two is ever non-null at a time.
+  const [countering, setCountering] = useState<LoanRequest | null>(null)
+  const [counterMessage, setCounterMessage] = useState('')
+  const [counterBusy, setCounterBusy] = useState(false)
+  const [declining, setDeclining] = useState<LoanRequest | null>(null)
+  const [declineMessage, setDeclineMessage] = useState('')
+  const [declineBusy, setDeclineBusy] = useState(false)
 
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -104,23 +118,47 @@ export default function LoanRequestsPage() {
     const entries = await Promise.all(uniqueProductIds.map(async (pid) => {
       const productSnap = await getDoc(doc(db, 'products', pid))
       const onHand = (productSnap.data() as { quantity_on_hand?: number } | undefined)?.quantity_on_hand ?? 0
-      const reserved = await getReservedQuantity(pid, fromDate, toDate, requestId)
+      const reserved = await getReservedQuantity(pid, fromDate, effectiveToDate(toDate), requestId)
       return [pid, Math.max(0, onHand - reserved)] as const
     }))
-    setAvailability((prev) => ({ ...prev, [requestId]: Object.fromEntries(entries) }))
+    const availabilityMap = Object.fromEntries(entries)
+    setAvailability((prev) => ({ ...prev, [requestId]: availabilityMap }))
+
+    // Stock can have moved since this line's offered_quantity was last set
+    // (a walk-in Stock Out issue, another request getting approved, etc.) —
+    // if what's actually available now is less than what's currently
+    // offered, pull the offered quantity down to match rather than leaving
+    // it showing a number that's no longer real. This is exactly what
+    // "Approve as-is" would otherwise fail on (assertStillAvailable checks
+    // the stored offered_quantity, not the draft), so clamping here also
+    // correctly nudges staff toward Send Counter with the reduced amount.
+    setDrafts((prev) => {
+      const draft = prev[requestId]
+      if (!draft) return prev
+      let changed = false
+      const nextLines = draft.lines.map((l) => {
+        const cap = Math.min(l.requested_quantity, availabilityMap[l.product_id] ?? l.requested_quantity)
+        if (l.offered_quantity > cap) { changed = true; return { ...l, offered_quantity: Math.max(0, cap) } }
+        return l
+      })
+      return changed ? { ...prev, [requestId]: { ...draft, lines: nextLines } } : prev
+    })
   }
 
   function toggleExpand(r: LoanRequest) {
     if (expanded === r.id) { setExpanded(null); return }
     setExpanded(r.id)
-    if (r.status !== 'pending' && r.status !== 'countered') return
+    // Only a 'pending' request gets an editable draft — a 'countered' one
+    // renders read-only (CounteredRow below) straight from linesByRequest,
+    // since she can no longer re-edit or re-send it.
+    if (r.status !== 'pending') return
     if (drafts[r.id]) return
     const lines: DraftLine[] = (linesByRequest[r.id] ?? []).map((l) => ({
       id: l.id, product_id: l.product_id, product_name: l.product_name,
       requested_quantity: l.requested_quantity, offered_quantity: l.offered_quantity,
     }))
-    setDrafts((prev) => ({ ...prev, [r.id]: { lines, fromDate: r.from_date, toDate: r.to_date } }))
-    refreshAvailability(r.id, lines, r.from_date, r.to_date)
+    setDrafts((prev) => ({ ...prev, [r.id]: { lines, fromDate: r.from_date, toDate: r.to_date ?? '' } }))
+    refreshAvailability(r.id, lines, r.from_date, r.to_date ?? '')
   }
 
   function updateOfferedQty(requestId: string, lineId: string, qty: number) {
@@ -148,10 +186,11 @@ export default function LoanRequestsPage() {
     })
   }
 
+
   function isDirty(r: LoanRequest): boolean {
     const draft = drafts[r.id]
     if (!draft) return false
-    if (draft.fromDate !== r.from_date || draft.toDate !== r.to_date) return true
+    if (draft.fromDate !== r.from_date || (draft.toDate || null) !== r.to_date) return true
     const original = linesByRequest[r.id] ?? []
     return draft.lines.some((dl) => {
       const orig = original.find((o) => o.id === dl.id)
@@ -166,6 +205,10 @@ export default function LoanRequestsPage() {
       toast.success(`Approved ${r.staff_name}'s request.`)
       setExpanded(null)
       await load()
+      // Approving moves this request out of Needs Review and into an
+      // Incoming Pickup — both this page's own Sidebar badge and the
+      // Dashboard's need to know (see alertsBus.ts).
+      notifyAlertsChanged()
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to approve request.'
       setRowErrors((prev) => ({ ...prev, [r.id]: message }))
@@ -174,48 +217,77 @@ export default function LoanRequestsPage() {
     setBusy(null)
   }
 
-  async function handleSendCounter(r: LoanRequest) {
+  // Opens the confirmation modal below rather than sending straight off
+  // the row's button — same reasoning as Decline: this is a staff-visible
+  // action, and the optional message belongs in the modal that actually
+  // sends it, not sitting inline in the row waiting to be forgotten about.
+  function startCounter(r: LoanRequest) {
+    setCountering(r)
+    setCounterMessage(r.admin_message ?? '')
+  }
+
+  async function confirmSendCounter() {
+    if (!countering) return
+    const r = countering
     const draft = drafts[r.id]
     if (!draft) return
-    setBusy(r.id); setRowErrors((prev) => ({ ...prev, [r.id]: '' }))
+    setCounterBusy(true)
     try {
       await sendCounter(
         r,
         draft.lines.map((l) => ({ lineId: l.id, product_id: l.product_id, offered_quantity: l.offered_quantity })),
-        draft.fromDate, draft.toDate, actor,
+        draft.fromDate, draft.toDate || null, counterMessage, actor,
       )
       toast.success(`Counter sent to ${r.staff_name}.`)
       setExpanded(null)
+      setCountering(null)
+      setCounterMessage('')
       await load()
+      // Same nudge as Approve above.
+      notifyAlertsChanged()
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to send counter.'
-      setRowErrors((prev) => ({ ...prev, [r.id]: message }))
-      toast.error(message)
+      toast.error(err instanceof Error ? err.message : 'Failed to send counter.')
     }
-    setBusy(null)
+    setCounterBusy(false)
   }
 
-  async function handleDecline(r: LoanRequest) {
-    setBusy(r.id); setRowErrors((prev) => ({ ...prev, [r.id]: '' }))
+  // Opens the confirmation dialog below rather than declining straight
+  // off the row's button — same reasoning as Dashboard's Resolve/Cancel:
+  // this is a one-way, staff-visible action, and now that there's an
+  // optional message to type, a dialog is the natural place to type it.
+  function startDecline(r: LoanRequest) {
+    setDeclining(r)
+    setDeclineMessage('')
+  }
+
+  async function confirmDecline() {
+    if (!declining) return
+    const r = declining
+    setDeclineBusy(true)
     try {
-      await declineRequest(r, actor)
+      await declineRequest(r, declineMessage, linesByRequest[r.id], actor)
       toast.success(`Declined ${r.staff_name}'s request.`)
       setExpanded(null)
+      setDeclining(null)
+      setDeclineMessage('')
       await load()
+      // Same nudge as Approve above.
+      notifyAlertsChanged()
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to decline request.'
-      setRowErrors((prev) => ({ ...prev, [r.id]: message }))
-      toast.error(message)
+      toast.error(err instanceof Error ? err.message : 'Failed to decline request.')
     }
-    setBusy(null)
+    setDeclineBusy(false)
   }
 
   const pending = requests.filter((r) => r.status === 'pending').sort(byExpirySoonestFirst)
   const countered = requests.filter((r) => r.status === 'countered').sort(byExpirySoonestFirst)
-  const accepted = requests.filter((r) => r.status === 'accepted').sort((a, b) => a.from_date.localeCompare(b.from_date))
-  const history = requests.filter((r) => TERMINAL.includes(r.status)).sort((a, b) => b.updated_at.localeCompare(a.updated_at))
 
   function EditableRow({ r }: { r: LoanRequest }) {
+    // A 'countered' request is read-only from here on — Selouna already
+    // sent her offer; she can only Decline it now (see CounteredRow below),
+    // never re-edit quantities/dates or send another counter/approve-as-is.
+    if (r.status === 'countered') return <CounteredRow r={r} />
+
     const draft = drafts[r.id]
     const dirty = isDirty(r)
     return (
@@ -244,8 +316,9 @@ export default function LoanRequestsPage() {
                 )}
               </div>
 
+              <div className="max-h-64 overflow-y-auto">
               <Table>
-                <TableHeader>
+                <TableHeader className="sticky top-0 z-10 bg-card">
                   <TableRow>
                     <TableHead>Product</TableHead>
                     <TableHead>Requested</TableHead>
@@ -274,6 +347,7 @@ export default function LoanRequestsPage() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
 
               {rowErrors[r.id] && (
                 <Alert variant="destructive"><AlertDescription>{rowErrors[r.id]}</AlertDescription></Alert>
@@ -283,10 +357,15 @@ export default function LoanRequestsPage() {
                 <Button disabled={busy === r.id || dirty} onClick={() => handleApprove(r)}>
                   {busy === r.id ? '…' : 'Approve as-is'}
                 </Button>
-                <Button variant="outline" disabled={busy === r.id || !dirty} onClick={() => handleSendCounter(r)}>
-                  {busy === r.id ? '…' : 'Send Counter'}
+                <Button
+                  variant="outline"
+                  disabled={busy === r.id || !dirty || draft.lines.every((l) => l.offered_quantity <= 0)}
+                  onClick={() => startCounter(r)}
+                  title={draft.lines.every((l) => l.offered_quantity <= 0) ? 'Offer at least 1 unit of a product to send a counter.' : undefined}
+                >
+                  Send Counter
                 </Button>
-                <Button variant="ghost" disabled={busy === r.id} onClick={() => handleDecline(r)} className="ml-auto text-destructive hover:text-destructive">
+                <Button variant="ghost" disabled={busy === r.id} onClick={() => startDecline(r)} className="ml-auto text-destructive hover:text-destructive">
                   Decline
                 </Button>
               </div>
@@ -297,34 +376,91 @@ export default function LoanRequestsPage() {
     )
   }
 
-  function ReadOnlyRow({ r }: { r: LoanRequest }) {
+  // Read-only summary for the "Sent Counters" tab: the staff member's
+  // original message, a requested-vs-countered line comparison (an item
+  // Selouna zeroed out shows as "Removed"), and her own counter message —
+  // then just a Decline action. She can no longer re-edit quantities/dates
+  // or send another counter/approve-as-is once a counter has gone out;
+  // declining here freezes all of this into one audit entry (see
+  // declineRequest's countered-aware snapshot in loanRequests.ts).
+  function CounteredRow({ r }: { r: LoanRequest }) {
     const lines = linesByRequest[r.id] ?? []
+    const datesChanged = r.from_date !== r.original_from_date || (r.to_date ?? null) !== (r.original_to_date ?? null)
     return (
       <TableRow className="bg-muted/50">
         <TableCell colSpan={5} className="p-4">
-          <div className="flex flex-col gap-2 text-sm">
-            {r.message && <p className="text-muted-foreground">&ldquo;{r.message}&rdquo;</p>}
-            <ul className="ml-4 list-disc">
-              {lines.map((l) => (
-                <li key={l.id}>{l.product_name} <span className="text-muted-foreground">× {l.offered_quantity}</span></li>
-              ))}
-            </ul>
-            {r.status === 'accepted' && r.fulfilled_txn_id === null && (
-              <div className="text-xs text-muted-foreground">Awaiting pickup {formatDateOnly(r.from_date)} – {formatDateOnly(r.to_date)}</div>
+          <div className="flex flex-col gap-4">
+            {r.message && (
+              <div className="grid gap-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Staff&apos;s message</span>
+                <p className="max-w-[480px] text-sm text-foreground">&ldquo;{r.message}&rdquo;</p>
+              </div>
             )}
+
+            <div className="grid gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">Counter offered</span>
+              <p className="text-sm text-foreground">{formatLendWindow(r.from_date, r.to_date)}</p>
+              {datesChanged && (
+                <p className="text-xs text-muted-foreground">
+                  Originally requested {formatLendWindow(r.original_from_date, r.original_to_date)}
+                </p>
+              )}
+            </div>
+
+            <div className="max-h-64 overflow-y-auto">
+              <Table>
+                <TableHeader className="sticky top-0 z-10 bg-card">
+                  <TableRow>
+                    <TableHead>Product</TableHead>
+                    <TableHead>Requested</TableHead>
+                    <TableHead>Counter Offer</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {lines.map((l) => (
+                    <TableRow key={l.id}>
+                      <TableCell className="font-medium">{l.product_name}</TableCell>
+                      <TableCell className="text-muted-foreground">{l.requested_quantity}</TableCell>
+                      <TableCell>
+                        {l.offered_quantity > 0 ? (
+                          <span className="font-bold text-primary">{l.offered_quantity}</span>
+                        ) : (
+                          <span className="font-bold text-destructive">Removed</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            {r.admin_message && (
+              <div className="grid gap-1.5">
+                <span className="text-xs font-medium text-muted-foreground">Your counter message</span>
+                <p className="max-w-[480px] text-sm text-foreground">&ldquo;{r.admin_message}&rdquo;</p>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-muted-foreground">
+                Waiting on {r.staff_name} to respond — you can decline this counter, or wait for them to accept or decline it themselves.
+              </p>
+              <Button variant="ghost" disabled={busy === r.id} onClick={() => startDecline(r)} className="ml-auto text-destructive hover:text-destructive">
+                Decline
+              </Button>
+            </div>
           </div>
         </TableCell>
       </TableRow>
     )
   }
 
-  function requestRows(list: LoanRequest[], editable: boolean) {
+  function requestRows(list: LoanRequest[]) {
     if (loading) return <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>
     if (list.length === 0) return <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Nothing here ✓</TableCell></TableRow>
     return list.map((r) => {
       const itemCount = (linesByRequest[r.id] ?? []).length
       const expiry = computeExpiryDate(r)
-      const noShow = r.status === 'accepted' && isNoShowCandidate(r)
       return (
         <Fragment key={r.id}>
           <TableRow className="cursor-pointer" onClick={() => toggleExpand(r)}>
@@ -332,42 +468,40 @@ export default function LoanRequestsPage() {
             <TableCell className="text-muted-foreground">{itemCount} item{itemCount === 1 ? '' : 's'}</TableCell>
             <TableCell>
               <Badge className={`${STATUS_BADGE_CLASS[r.status]} uppercase`}>{r.status.replace('_', ' ')}</Badge>
-              {noShow && <Badge className="ml-1.5 bg-red-100 text-red-800">Possible no-show</Badge>}
             </TableCell>
-            <TableCell className="text-muted-foreground">
-              {tab === 'accepted'
-                ? `${formatDateOnly(r.from_date)} – ${formatDateOnly(r.to_date)}`
-                : tab === 'history'
-                  ? formatDate(r.updated_at)
-                  : (expiry ? formatDateOnly(expiry) : '—')}
-            </TableCell>
+            <TableCell className="text-muted-foreground">{expiry ? formatDateOnly(expiry) : '—'}</TableCell>
             <TableCell className="text-xs text-muted-foreground">{expanded === r.id ? '▲' : '▼'}</TableCell>
           </TableRow>
-          {expanded === r.id && (editable ? <EditableRow r={r} /> : <ReadOnlyRow r={r} />)}
+          {expanded === r.id && <EditableRow r={r} />}
         </Fragment>
       )
     })
   }
 
   return (
-    <div>
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground">Loan Requests</h1>
         <p className="mt-1 text-sm text-muted-foreground">Review, counter, and track portal lending requests from NWU staff.</p>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-        <TabsList variant="line" className="mb-6 w-full justify-start overflow-x-auto border-b">
-          <TabsTrigger value="pending">Needs Review{pending.length > 0 ? ` (${pending.length})` : ''}</TabsTrigger>
-          <TabsTrigger value="countered">Sent Counters{countered.length > 0 ? ` (${countered.length})` : ''}</TabsTrigger>
-          <TabsTrigger value="accepted">Incoming Pickups{accepted.length > 0 ? ` (${accepted.length})` : ''}</TabsTrigger>
-          <TabsTrigger value="history">History</TabsTrigger>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="min-h-0 flex-1">
+        <TabsList variant="line" className="mb-6 w-full justify-start overflow-x-auto overflow-y-hidden border-b">
+          <TabsTrigger value="pending">
+            Needs Review
+            {pending.length > 0 && <Badge className="bg-amber-100 text-amber-800">{pending.length}</Badge>}
+          </TabsTrigger>
+          <TabsTrigger value="countered">
+            Sent Counters
+            {countered.length > 0 && <Badge className="bg-sky-100 text-sky-800">{countered.length}</Badge>}
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="pending">
-          <Card className="py-0">
+        <TabsContent value="pending" className="min-h-0">
+          <Card className="h-full min-h-0 py-0">
+            <div className="min-h-0 flex-1 overflow-y-auto">
             <Table>
-              <TableHeader>
+              <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
                   <TableHead>Staff</TableHead>
                   <TableHead>Items</TableHead>
@@ -376,15 +510,17 @@ export default function LoanRequestsPage() {
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>{requestRows(pending, true)}</TableBody>
+              <TableBody>{requestRows(pending)}</TableBody>
             </Table>
+            </div>
           </Card>
         </TabsContent>
 
-        <TabsContent value="countered">
-          <Card className="py-0">
+        <TabsContent value="countered" className="min-h-0">
+          <Card className="h-full min-h-0 py-0">
+            <div className="min-h-0 flex-1 overflow-y-auto">
             <Table>
-              <TableHeader>
+              <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
                   <TableHead>Staff</TableHead>
                   <TableHead>Items</TableHead>
@@ -393,45 +529,77 @@ export default function LoanRequestsPage() {
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>{requestRows(countered, true)}</TableBody>
+              <TableBody>{requestRows(countered)}</TableBody>
             </Table>
+            </div>
           </Card>
         </TabsContent>
 
-        <TabsContent value="accepted">
-          <Card className="py-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Staff</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Pickup window</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>{requestRows(accepted, false)}</TableBody>
-            </Table>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="history">
-          <Card className="py-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Staff</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Updated</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>{requestRows(history, false)}</TableBody>
-            </Table>
-          </Card>
-        </TabsContent>
       </Tabs>
+
+      {/* Send Counter confirmation — the optional message lives here,
+          not inline in the row, so it's the last thing typed right before
+          it actually goes out. Same shape as Decline's dialog below. */}
+      <Dialog open={countering !== null} onOpenChange={(open) => { if (!open) { setCountering(null); setCounterMessage('') } }}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>Send counter to {countering?.staff_name}?</DialogTitle>
+            <DialogDescription>
+              This sends the updated dates and quantities set on this request, plus an optional message below.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-1.5">
+            <Label htmlFor="counter-message">Message to {countering?.staff_name} <span className="font-normal text-muted-foreground">(optional)</span></Label>
+            <Textarea
+              id="counter-message"
+              rows={2}
+              placeholder="Sent to the staff member along with this counter…"
+              value={counterMessage}
+              onChange={(e) => setCounterMessage(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setCountering(null); setCounterMessage('') }} disabled={counterBusy}>Close</Button>
+            <Button disabled={counterBusy} onClick={confirmSendCounter}>
+              {counterBusy ? 'Sending…' : 'Send Counter'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Decline confirmation — same shape as the Dashboard's Resolve/
+          Cancel-pickup dialogs: a one-way, staff-visible action gets an
+          explicit confirm step, with an optional message typed here. */}
+      <Dialog open={declining !== null} onOpenChange={(open) => { if (!open) { setDeclining(null); setDeclineMessage('') } }}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>Decline this request?</DialogTitle>
+            <DialogDescription>
+              {declining && (
+                <>
+                  <strong className="text-foreground">{declining.staff_name}</strong>&apos;s request will be declined — they&apos;ll see it in their My Requests history.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-1.5">
+            <Label htmlFor="decline-message">Message to {declining?.staff_name} <span className="font-normal text-muted-foreground">(optional)</span></Label>
+            <Textarea
+              id="decline-message"
+              rows={2}
+              placeholder="e.g. Out of stock for the dates requested, item retired…"
+              value={declineMessage}
+              onChange={(e) => setDeclineMessage(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setDeclining(null); setDeclineMessage('') }} disabled={declineBusy}>Close</Button>
+            <Button variant="destructive" disabled={declineBusy} onClick={confirmDecline}>
+              {declineBusy ? 'Declining…' : 'Decline'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

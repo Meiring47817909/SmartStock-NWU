@@ -4,12 +4,14 @@ import { useEffect, useState } from 'react'
 import { db } from '@/lib/firebase/config'
 import { collection, query, where, getDocs } from 'firebase/firestore'
 import { storageDownloadUrl } from '@/lib/firebase/storage'
-import { formatDateOnly } from '@/lib/utils'
+import { formatLendWindow, formatDateOnly } from '@/lib/utils'
+import { lendingIntervalLabel } from '@/lib/firebase/loanRequests'
 import { usePortalCart } from '@/context/PortalCartContext'
+import { useStaffPortal } from '@/context/StaffPortalContext'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import ProductPreviewDialog from '@/components/products/ProductPreviewDialog'
-import { Package } from 'lucide-react'
+import { Package, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Product } from '@/types/database'
 
@@ -18,7 +20,9 @@ export default function LendBrowsePage() {
   const [loading, setLoading] = useState(true)
   const [quantities, setQuantities] = useState<Record<number, number>>({})
   const [previewProduct, setPreviewProduct] = useState<Product | null>(null)
+  const [expectedReturn, setExpectedReturn] = useState<Record<string, string | null>>({})
   const { addToCart } = usePortalCart()
+  const { user } = useStaffPortal()
 
   useEffect(() => {
     async function load() {
@@ -27,15 +31,47 @@ export default function LendBrowsePage() {
       // Product.id is typed `number` but products are created via addDoc,
       // so the runtime value is actually the Firestore string doc ID — same
       // "cast through any" convention as products/page.tsx's own load().
+      // lend_to is optional — unset means the product is lendable
+      // indefinitely (no end date decided yet), not "not lendable". Only
+      // lend_from (the window has actually opened) is required — a
+      // fully-checked-out item (quantity_on_hand === 0) is still shown, just
+      // as "Unavailable" with its expected return date, rather than being
+      // hidden entirely (see formatLendWindow()/validateCartDates() for the
+      // matching lend-window logic).
       const items = (snap.docs.map((d) => ({ id: d.id, ...d.data() })) as unknown as Product[])
-        .filter((p) => p.lend_from && p.lend_to && p.quantity_on_hand > 0)
+        .filter((p) => p.lend_from)
       setProducts(items)
+
+      const outOfStockIds = items.filter((p) => p.quantity_on_hand <= 0).map((p) => String(p.id))
+      // `transactions` is admin-only in firestore.rules (it's every staff
+      // member's full borrow history) — a portal borrower's own client
+      // can't query it directly, so this goes through an API route running
+      // with Admin SDK privileges instead of a direct Firestore read. See
+      // lib/server/availability.ts for why.
+      if (outOfStockIds.length > 0 && user) {
+        try {
+          const idToken = await user.getIdToken()
+          const res = await fetch('/api/products/expected-return-dates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+            body: JSON.stringify({ productIds: outOfStockIds }),
+          })
+          if (res.ok) {
+            const data = await res.json()
+            setExpectedReturn(data.expectedReturn ?? {})
+          }
+        } catch {
+          // Non-critical — the card still shows "Unavailable" either way,
+          // just without a specific date.
+        }
+      }
       setLoading(false)
     }
-    load()
-  }, [])
+    if (user) load()
+  }, [user])
 
   function qtyFor(p: Product) {
+    if (p.quantity_on_hand <= 0) return 0
     return Math.min(quantities[p.id] ?? 1, p.quantity_on_hand)
   }
 
@@ -79,24 +115,49 @@ export default function LendBrowsePage() {
             <CardContent className="flex flex-col gap-2 pb-4">
               <div className="font-semibold text-foreground">{p.name}</div>
               <div className="text-xs text-muted-foreground">
-                Lendable {formatDateOnly(p.lend_from)} – {formatDateOnly(p.lend_to)}
+                Lendable {formatLendWindow(p.lend_from, p.lend_to)}
               </div>
-              <div className="text-xs text-muted-foreground">{p.quantity_on_hand} available</div>
+              <div className="text-xs text-muted-foreground">
+                {p.lending_interval === 'indefinite' ? 'No return date required' : `Borrow for up to ${lendingIntervalLabel(p.lending_interval).toLowerCase()}`}
+              </div>
+              {p.quantity_on_hand > 0 ? (
+                <div className="text-xs text-muted-foreground">{p.quantity_on_hand} available</div>
+              ) : (
+                <div className="flex items-center gap-1 text-xs font-medium text-red-600">
+                  <Clock className="size-3" />
+                  Unavailable
+                  {expectedReturn[String(p.id)]
+                    ? <span className="font-normal text-muted-foreground">&nbsp;— back {formatDateOnly(expectedReturn[String(p.id)])}</span>
+                    : <span className="font-normal text-muted-foreground">&nbsp;— return date not set</span>}
+                </div>
+              )}
               {/* stopPropagation on every control here — the card itself opens
                   the preview modal on click, and these need to keep working
                   without also popping that open underneath them. */}
               <div className="mt-1 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                <Button variant="ghost" size="icon-sm" onClick={() => setQty(p.id, qtyFor(p) - 1, p.quantity_on_hand)}>−</Button>
+                <Button variant="ghost" size="icon-sm" disabled={p.quantity_on_hand <= 0} onClick={() => setQty(p.id, qtyFor(p) - 1, p.quantity_on_hand)}>−</Button>
                 <span className="min-w-6 text-center font-bold text-primary">{qtyFor(p)}</span>
-                <Button variant="ghost" size="icon-sm" onClick={() => setQty(p.id, qtyFor(p) + 1, p.quantity_on_hand)}>+</Button>
-                <Button size="sm" className="ml-auto" onClick={() => handleAdd(p)}>Add to Cart</Button>
+                <Button variant="ghost" size="icon-sm" disabled={p.quantity_on_hand <= 0} onClick={() => setQty(p.id, qtyFor(p) + 1, p.quantity_on_hand)}>+</Button>
+                <Button size="sm" className="ml-auto" disabled={p.quantity_on_hand <= 0} onClick={() => handleAdd(p)}>
+                  {p.quantity_on_hand > 0 ? 'Add to Cart' : 'Unavailable'}
+                </Button>
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      <ProductPreviewDialog product={previewProduct} onClose={() => setPreviewProduct(null)} />
+      <ProductPreviewDialog
+        product={previewProduct}
+        onClose={() => setPreviewProduct(null)}
+        expectedReturnDate={previewProduct ? (expectedReturn[String(previewProduct.id)] ?? null) : null}
+        cart={previewProduct ? {
+          quantity: qtyFor(previewProduct),
+          onIncrement: () => setQty(previewProduct.id, qtyFor(previewProduct) + 1, previewProduct.quantity_on_hand),
+          onDecrement: () => setQty(previewProduct.id, qtyFor(previewProduct) - 1, previewProduct.quantity_on_hand),
+          onAddToCart: () => { handleAdd(previewProduct); setPreviewProduct(null) },
+        } : undefined}
+      />
     </div>
   )
 }

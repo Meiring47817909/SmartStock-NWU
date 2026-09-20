@@ -1,13 +1,13 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { genRef, cn, todayDateStr, formatDateOnly } from '@/lib/utils'
-import { CreditCard, Barcode, CheckCircle, X, Plus, Minus, Users, Search } from 'lucide-react'
+import { genRef, cn, todayDateStr, formatDateOnly, formatLendWindow } from '@/lib/utils'
+import { CreditCard, Barcode, CheckCircle, X, Plus, Minus, Users, Search, Info } from 'lucide-react'
 import { db } from '@/lib/firebase/config'
-import { collection, query, where, getDocs, getDoc, addDoc, updateDoc, doc, orderBy, limit } from 'firebase/firestore'
+import { collection, query, where, getDocs, getDoc, addDoc, updateDoc, doc, orderBy } from 'firebase/firestore'
 import { logAudit } from '@/lib/firebase/audit'
 import { findProductByBarcode } from '@/lib/firebase/products'
-import { getReservedQuantity } from '@/lib/firebase/loanRequests'
+import { getReservationHolders, reservationStatusLabel, resolutionInstruction, OPEN_ENDED_TO, type ReservationHolder } from '@/lib/firebase/loanRequests'
 import { useAuth } from '@/context/AuthContext'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
@@ -59,7 +59,20 @@ export default function StockOutPage() {
   // single id, so one active request per confirm, walk-ins layered on top.
   const [pendingPickups, setPendingPickups] = useState<LoanRequest[]>([])
   const [activeRequest, setActiveRequest] = useState<LoanRequest | null>(null)
-  const [conflictWarnings, setConflictWarnings] = useState<string[]>([])
+  // Hard blocks (2026-09-20 request, widened 2026-09-20 follow-up): a
+  // walk-in issue that would eat into another staff member's ACTIVE
+  // reservation — pending, countered, or accepted — for the same
+  // product/date window. Originally only accepted (already-approved)
+  // pickups blocked and pending/countered were just an advisory warning,
+  // but that let a walk-in silently strip a pending request's stock with
+  // no way to recover it later. Now all three block identically, disabling
+  // the Confirm button entirely rather than just flagging the issue.
+  const [blockingConflicts, setBlockingConflicts] = useState<{ product: string; holders: ReservationHolder[] }[]>([])
+  // FYI only, never blocks — other staff with an active reservation
+  // (of any status) overlapping this window for a product in the current
+  // cart, surfaced even when there's enough stock for everyone, so Selouna
+  // isn't caught by surprise later.
+  const [incomingPickups, setIncomingPickups] = useState<{ product: string; holders: ReservationHolder[] }[]>([])
 
   // Manual staff selection state
   const [showStaffSearch, setShowStaffSearch] = useState(false)
@@ -96,27 +109,48 @@ export default function StockOutPage() {
     return () => document.removeEventListener('keydown', onKey, true)
   }, [handleHID])
 
-  // Walk-in conflict warning (decision #8 in LENDING_PORTAL_SPEC.md §1) —
-  // checked at step 3 rather than in lookupBarcode, since real lend
-  // dates don't exist for a walk-in until here. Non-blocking: Selouna can
-  // still proceed, this just makes sure she's not doing it blind.
+  // Walk-in conflict check (decision #8 in LENDING_PORTAL_SPEC.md §1,
+  // widened 2026-09-20) — checked at step 3 rather than in lookupBarcode,
+  // since real lend dates don't exist for a walk-in until here. A walk-in
+  // that would eat into another staff member's active reservation of any
+  // status (pending/countered/accepted) hard-blocks Confirm; one that
+  // doesn't cause a shortfall just gets a non-blocking FYI so Selouna isn't
+  // caught by surprise later.
   useEffect(() => {
-    if (step !== 'confirm' || !lendTo) { setConflictWarnings([]); return }
+    if (step !== 'confirm') {
+      setBlockingConflicts([]); setIncomingPickups([])
+      return
+    }
     let cancelled = false
     async function checkConflicts() {
-      const warnings: string[] = []
+      const blocking: { product: string; holders: ReservationHolder[] }[] = []
+      const fyi: { product: string; holders: ReservationHolder[] }[] = []
       for (const item of cart) {
         if (item.sourceRequestId) continue
-        const reserved = await getReservedQuantity(item.product.id.toString(), lendFrom, lendTo)
-        if (reserved + item.quantity > item.product.quantity_on_hand) {
-          warnings.push(`${item.product.name} is reserved by ${reserved} unit(s) via active loan requests for these dates — issuing ${item.quantity} more may leave those requests short.`)
+        // An open-ended loan (no Lend To) has no upper bound, so it
+        // overlaps every future reservation — check it against an effective
+        // infinity rather than skipping the check entirely, which would let
+        // an indefinite issue silently strip a reserved unit.
+        const effectiveTo = lendTo || OPEN_ENDED_TO
+        const holders = await getReservationHolders(item.product.id.toString(), lendFrom, effectiveTo)
+        // Only someone else's active reservation is grounds to block — a
+        // staff member never blocks against their own request (that's what
+        // "Select from Accepted Loan Requests" above is for).
+        const otherHolders = holders.filter((h) => h.staffId !== staff?.id.toString())
+        const otherReserved = otherHolders.reduce((sum, h) => sum + h.quantity, 0)
+        if (otherReserved + item.quantity > item.product.quantity_on_hand) {
+          blocking.push({ product: item.product.name, holders: otherHolders })
+        } else if (otherHolders.length > 0) {
+          // Plenty of stock for everyone — not a conflict — but still worth
+          // naming who else has a stake in this product during the window.
+          fyi.push({ product: item.product.name, holders: otherHolders })
         }
       }
-      if (!cancelled) setConflictWarnings(warnings)
+      if (!cancelled) { setBlockingConflicts(blocking); setIncomingPickups(fyi) }
     }
     checkConflicts()
     return () => { cancelled = true }
-  }, [step, cart, lendFrom, lendTo])
+  }, [step, cart, lendFrom, lendTo, staff])
 
   async function lookupUID(uid: string) {
     setError(''); setLoading(true)
@@ -163,7 +197,7 @@ export default function StockOutPage() {
     setActiveRequest(r)
     setCart(items)
     setLendFrom(r.from_date)
-    setLendTo(r.to_date)
+    setLendTo(r.to_date ?? '')
     setLoading(false)
   }
 
@@ -174,25 +208,35 @@ export default function StockOutPage() {
     setLendTo('')
   }
 
-  async function loadStaffList(qStr: string) {
-    setStaffLoading(true)
-    const snap = await getDocs(query(collection(db, 'staff'), where('is_active', '==', true), orderBy('full_name'), limit(20)))
-    let data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as StaffMember[]
+  // Fetched once per dialog-open, not per keystroke — previously this
+  // re-queried Firestore with `limit(20)` on every character typed, so a
+  // staff member outside the first 20 active staff (alphabetically) could
+  // never be found by typing their name. Now the full active roster is
+  // fetched once and every keystroke just filters that in-memory list, so
+  // no one can be searched into invisibility as the roster grows.
+  const [staffAll, setStaffAll] = useState<StaffMember[]>([])
 
-    if (qStr) {
-      const s = qStr.toLowerCase()
-      data = data.filter(st =>
-        (st.full_name && st.full_name.toLowerCase().includes(s)) ||
-        (st.department && st.department.toLowerCase().includes(s))
-      )
-    }
+  async function loadAllStaff() {
+    setStaffLoading(true)
+    const snap = await getDocs(query(collection(db, 'staff'), where('is_active', '==', true), orderBy('full_name')))
+    const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as StaffMember[]
+    setStaffAll(data)
     setStaffList(data)
     setStaffLoading(false)
   }
 
+  function filterStaffList(qStr: string) {
+    if (!qStr) { setStaffList(staffAll); return }
+    const s = qStr.toLowerCase()
+    setStaffList(staffAll.filter(st =>
+      (st.full_name && st.full_name.toLowerCase().includes(s)) ||
+      (st.email && st.email.toLowerCase().includes(s))
+    ))
+  }
+
   function openStaffSearch() {
     setStaffSearch('')
-    loadStaffList('')
+    loadAllStaff()
     setShowStaffSearch(true)
   }
 
@@ -230,8 +274,12 @@ export default function StockOutPage() {
 
   async function handleConfirm() {
     if (!staff || cart.length === 0) return
-    if (!lendTo) { setError('Select a return (To) date.'); return }
-    if (lendTo < lendFrom) { setError("Return (To) date can't be before the From date."); return }
+    // Lend To is optional — blank means "no return date agreed", which is a
+    // deliberate choice Selouna makes, not a missing field. Every date
+    // comparison below has to be guarded, because '' sorts BEFORE any real
+    // YYYY-MM-DD string: an unguarded `lendTo < lendFrom` reads an empty
+    // value as "before the from date" and blocks the issue.
+    if (lendTo && lendTo < lendFrom) { setError("Return (To) date can't be before the From date."); return }
     setLoading(true); setError('')
     const ref = genRef()
     try {
@@ -247,7 +295,7 @@ export default function StockOutPage() {
         manual_override: manualOverride,
         notes: manualOverride ? 'Staff selected manually (no card scan)' : '',
         lend_from: lendFrom,
-        lend_to: lendTo,
+        lend_to: lendTo || null,
         linked_request_id: activeRequest?.id ?? null,
         created_at: new Date().toISOString()
       }
@@ -297,7 +345,7 @@ export default function StockOutPage() {
   function reset() {
     setStep('staff'); setStaff(null); setCart([]); setError(''); setReference(''); setManualOverride(false)
     setLendFrom(todayDateStr()); setLendTo('')
-    setPendingPickups([]); setActiveRequest(null); setConflictWarnings([])
+    setPendingPickups([]); setActiveRequest(null)
   }
 
   const stepIndex = STEPS.indexOf(step) === -1 ? 3 : STEPS.indexOf(step)
@@ -398,7 +446,7 @@ export default function StockOutPage() {
                       activeRequest?.id === r.id ? 'border-primary bg-accent' : 'hover:bg-muted',
                     )}>
                     <div>
-                      <div className="text-sm font-medium">Pickup {formatDateOnly(r.from_date)} – {formatDateOnly(r.to_date)}</div>
+                      <div className="text-sm font-medium">Pickup {formatLendWindow(r.from_date, r.to_date)}</div>
                       <div className="text-xs text-muted-foreground">Requested via lending portal</div>
                     </div>
                     {activeRequest?.id === r.id && <Badge className="bg-primary text-primary-foreground">Selected</Badge>}
@@ -420,8 +468,9 @@ export default function StockOutPage() {
                   autoFocus />
               </div>
               {cart.length > 0 && (
+                <div className="max-h-96 overflow-y-auto">
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="sticky top-0 z-10 bg-card">
                     <TableRow>
                       <TableHead>Product</TableHead>
                       <TableHead>Barcode</TableHead>
@@ -462,6 +511,7 @@ export default function StockOutPage() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
               )}
               {cart.length > 0 && (
                 <div className="mt-4 flex justify-end">
@@ -486,8 +536,9 @@ export default function StockOutPage() {
               </div>
               <div className="font-semibold">{staff.full_name} <span className="font-normal text-muted-foreground">({staff.department})</span></div>
             </div>
-            <Table className="mb-4">
-              <TableHeader>
+            <div className="mb-4 max-h-96 overflow-y-auto">
+            <Table>
+              <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
                   <TableHead>Product</TableHead>
                   <TableHead>Qty</TableHead>
@@ -510,29 +561,83 @@ export default function StockOutPage() {
                 })}
               </TableBody>
             </Table>
-            {conflictWarnings.length > 0 && (
+            </div>
+            {blockingConflicts.length > 0 && (
               <div className="mb-4 flex flex-col gap-2">
-                {conflictWarnings.map((w) => (
-                  <Alert key={w}><AlertDescription>{w}</AlertDescription></Alert>
+                {blockingConflicts.map((b) => (
+                  <Alert key={b.product} variant="destructive">
+                    <X className="size-4" />
+                    <AlertDescription>
+                      <strong>{b.product}</strong> can&apos;t be issued — it&apos;s fully reserved by{' '}
+                      {b.holders.map((h, i) => (
+                        <span key={h.requestId}>
+                          {i > 0 && ', '}
+                          {h.staffName}&apos;s {reservationStatusLabel(h.status)} ({formatDateOnly(h.fromDate)}–{formatDateOnly(h.toDate)}, {h.quantity} unit(s))
+                        </span>
+                      ))}
+                      . Resolve {b.holders.length > 1 ? 'these' : 'this'} first — {resolutionInstruction(b.holders)} — before this issue can go ahead.
+                    </AlertDescription>
+                  </Alert>
                 ))}
               </div>
             )}
-            <div className="mb-4 grid grid-cols-2 gap-3">
+            {incomingPickups.length > 0 && (
+              <div className="mb-4 flex flex-col gap-2">
+                {incomingPickups.map((f) => (
+                  <Alert key={f.product} className="border-sky-200 bg-sky-50 text-sky-900">
+                    <Info className="size-4" />
+                    <AlertDescription className="text-sky-900/90">
+                      Heads up — <strong>{f.product}</strong> also has {f.holders.length > 1 ? 'other active loan requests' : 'an active loan request'} during this window for{' '}
+                      {f.holders.map((h, i) => (
+                        <span key={h.requestId}>
+                          {i > 0 && ', '}
+                          {h.staffName} ({reservationStatusLabel(h.status)}, {formatDateOnly(h.fromDate)}–{formatDateOnly(h.toDate)}, {h.quantity} unit(s))
+                        </span>
+                      ))}
+                      . There&apos;s enough stock for everyone right now.
+                    </AlertDescription>
+                  </Alert>
+                ))}
+              </div>
+            )}
+            {activeRequest && !lendTo && (
+              <Alert className="mb-4">
+                <AlertDescription>
+                  This issue fulfils {activeRequest.staff_name}&apos;s accepted request, which agreed a
+                  return by {formatDateOnly(activeRequest.to_date)}. Leaving Lend To blank overrides
+                  that — the item won&apos;t appear in Outstanding Returns.
+                </AlertDescription>
+              </Alert>
+            )}
+            <div className="mb-4 grid grid-cols-2 items-start gap-3">
               <div className="grid gap-1.5">
                 <Label htmlFor="lend-from">Lend From</Label>
                 <Input id="lend-from" type="date" value={lendFrom} min={todayDateStr()}
                   onChange={e => setLendFrom(e.target.value)} />
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="lend-to">Lend To *</Label>
-                <Input id="lend-to" type="date" value={lendTo} min={lendFrom || todayDateStr()} required
+                <Label htmlFor="lend-to">Lend To</Label>
+                <Input id="lend-to" type="date" value={lendTo} min={lendFrom || todayDateStr()}
                   onChange={e => setLendTo(e.target.value)} />
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    {lendTo
+                      ? 'Clear this if the item does not need to come back.'
+                      : 'No return date — this item will not be chased on the Dashboard.'}
+                  </p>
+                  {lendTo && (
+                    <button type="button" onClick={() => setLendTo('')}
+                      className="shrink-0 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setStep('items')}>← Back</Button>
               <Button
-                disabled={loading || !lendTo || lendTo < lendFrom || cart.some(i => i.product.quantity_on_hand < i.quantity)}
+                disabled={loading || blockingConflicts.length > 0 || (!!lendTo && lendTo < lendFrom) || cart.some(i => i.product.quantity_on_hand < i.quantity)}
                 onClick={handleConfirm}
               >
                 {loading ? 'Processing…' : 'Confirm Issue'}
@@ -564,9 +669,9 @@ export default function StockOutPage() {
           </DialogHeader>
           <div className="relative">
             <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-8" placeholder="Search name, department…"
+            <Input className="pl-8" placeholder="Search name, email…"
               value={staffSearch} autoFocus
-              onChange={e => { setStaffSearch(e.target.value); loadStaffList(e.target.value) }} />
+              onChange={e => { setStaffSearch(e.target.value); filterStaffList(e.target.value) }} />
           </div>
           <div className="-mx-6 flex-1 overflow-y-auto border-t">
             {staffLoading && <div className="p-6 text-center text-sm text-muted-foreground">Loading…</div>}
@@ -574,7 +679,10 @@ export default function StockOutPage() {
             {staffList.map(s => (
               <button key={s.id} onClick={() => selectStaffManually(s)}
                 className="block w-full border-b px-6 py-3 text-left hover:bg-muted">
-                <div className="font-medium text-foreground">{s.full_name}</div>
+                <div className="font-medium text-foreground">
+                  {s.full_name}
+                  {s.email && <span className="font-normal text-muted-foreground"> - {s.email}</span>}
+                </div>
                 <div className="text-xs text-muted-foreground">{s.department ?? 'No department'}</div>
               </button>
             ))}

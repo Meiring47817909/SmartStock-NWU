@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
@@ -8,6 +9,9 @@ import {
 } from 'lucide-react'
 import { signOut } from 'firebase/auth'
 import { auth } from '@/lib/firebase/config'
+import { loadDashboardAlertCounts } from '@/lib/firebase/dashboardAlerts'
+import { loadLoanRequestsAlertCount } from '@/lib/firebase/loanRequests'
+import { subscribeToAlertsChanged } from '@/lib/alertsBus'
 import { useRole } from '@/context/RoleContext'
 import {
   Sidebar as SidebarPrimitive, SidebarContent, SidebarFooter, SidebarGroup,
@@ -16,13 +20,14 @@ import {
 } from '@/components/ui/sidebar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import InstallAppButton from './InstallAppButton'
 import type { Profile } from '@/types/database'
 
-// Role badges use NWU brand colours: purple (admin) / turquoise (manager) / grey (staff)
+// Role badges use NWU brand colours: purple (admin) / grey (staff). A
+// 'staff' badge should never actually render here — the portal has its own
+// shell and non-admins never reach this sidebar — but the entry is kept so
+// the lookup can't come back undefined.
 const ROLE_BADGE_CLASS: Record<string, string> = {
   admin: 'bg-[#EDE3F2] text-[#522E6E]',
-  manager: 'bg-[#DFF3F6] text-[#026A79]',
   staff: 'bg-white/15 text-white',
 }
 
@@ -30,6 +35,53 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
   const pathname = usePathname()
   const router = useRouter()
   const { canManageProducts, canManageStaff, canViewReports, canManageLoanRequests } = useRole()
+  // Combined total of the Dashboard's four "needs attention" widgets
+  // (Outstanding Returns, Low Stock Alerts, Outstanding Loan Requests,
+  // Incoming Pickups) - see lib/firebase/dashboardAlerts.ts. Loaded once
+  // on mount (the Sidebar stays mounted across the whole protected app) and
+  // refreshed whenever the admin navigates back to the Dashboard itself,
+  // so resolving something there updates the badge without a full reload.
+  const [alertCount, setAlertCount] = useState<number | null>(null)
+  // Combined total of Loan Requests' three actionable tabs (Needs Review,
+  // Sent Counters, Incoming Pickups) — History is excluded, see
+  // lib/firebase/loanRequests.ts's loadLoanRequestsAlertCount().
+  const [loanRequestCount, setLoanRequestCount] = useState<number | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    loadDashboardAlertCounts().then(counts => {
+      if (!cancelled) setAlertCount(counts.total)
+    }).catch(() => {
+      // Best-effort: the badge just stays hidden if this fails, the
+      // Dashboard page itself is still the source of truth.
+    })
+    return () => { cancelled = true }
+  }, [pathname === '/dashboard'])
+
+  useEffect(() => {
+    if (!canManageLoanRequests) return
+    let cancelled = false
+    loadLoanRequestsAlertCount().then(count => {
+      if (!cancelled) setLoanRequestCount(count)
+    }).catch(() => {
+      // Best-effort, same reasoning as the Dashboard badge above.
+    })
+    return () => { cancelled = true }
+  }, [pathname === '/loan-requests', canManageLoanRequests])
+
+  // Catches a count-changing mutation made in place on the Dashboard or
+  // Loan Requests page itself (e.g. resolving an Outstanding Return),
+  // where the pathname never changes so the two effects above never
+  // re-fire on their own — see alertsBus.ts for why this is needed
+  // alongside them rather than instead of them.
+  useEffect(() => {
+    return subscribeToAlertsChanged(() => {
+      loadDashboardAlertCounts().then(counts => setAlertCount(counts.total)).catch(() => {})
+      if (canManageLoanRequests) {
+        loadLoanRequestsAlertCount().then(setLoanRequestCount).catch(() => {})
+      }
+    })
+  }, [canManageLoanRequests])
 
   async function handleLogout() {
     await signOut(auth)
@@ -59,6 +111,9 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
                 <SidebarMenuButton render={<Link href="/dashboard" />} isActive={isActive('/dashboard')}>
                   <LayoutDashboard className="size-4" />
                   Dashboard
+                  {!!alertCount && (
+                    <Badge className="ml-auto bg-(--nwu-turquoise) text-white">{alertCount}</Badge>
+                  )}
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -131,6 +186,9 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
                   <SidebarMenuItem>
                     <SidebarMenuButton render={<Link href="/loan-requests" />} isActive={isActive('/loan-requests')}>
                       <ClipboardList className="size-4" /> Loan Requests
+                      {!!loanRequestCount && (
+                        <Badge className="ml-auto bg-(--nwu-turquoise) text-white">{loanRequestCount}</Badge>
+                      )}
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 )}
@@ -154,7 +212,6 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
         <Badge className={`mb-3 ${ROLE_BADGE_CLASS[role] ?? ROLE_BADGE_CLASS.staff}`}>
           {role}
         </Badge>
-        <InstallAppButton />
         <Button
           onClick={handleLogout}
           className="mt-2 w-full justify-start gap-2 bg-(--nwu-btn-primary) text-white hover:bg-(--nwu-btn-primary-hover)"

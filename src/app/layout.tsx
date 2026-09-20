@@ -1,18 +1,14 @@
 import type { Metadata, Viewport } from 'next'
-import { SerwistProvider } from '@serwist/next/react'
 import './globals.css'
 import { AuthProvider } from '@/context/AuthContext'
-import { InstallPromptProvider } from '@/context/InstallPromptContext'
 import { Toaster } from '@/components/ui/sonner'
 
 export const metadata: Metadata = {
   title: 'BICS – NWU IT Store',
   description: 'Basic Inventory Control System – NWU Potchefstroom Campus',
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: 'default',
-    title: 'SmartStock',
-  },
+  // The PNGs below are plain favicons now. They were originally the PWA
+  // install icons; the manifest, service worker and appleWebApp metadata
+  // that made them installable are all gone.
   icons: {
     icon: [
       { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
@@ -30,13 +26,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className="h-full">
       <body className="h-full" suppressHydrationWarning>
-        <SerwistProvider swUrl="/sw.js" disable={process.env.NODE_ENV === 'development'}>
-          <InstallPromptProvider>
-            <AuthProvider>
-              {children}
-            </AuthProvider>
-          </InstallPromptProvider>
-        </SerwistProvider>
+        <AuthProvider>
+          {children}
+        </AuthProvider>
         <Toaster position="top-right" />
       </body>
     </html>

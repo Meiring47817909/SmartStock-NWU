@@ -64,6 +64,10 @@ export async function GET(request: NextRequest) {
       { status: 403 }
     )
   }
+  // An allowlist entry with no explicit role gets 'staff', which since the
+  // two-role change means lending-portal access only — never BICS. Granting
+  // BICS is therefore always a deliberate act: someone has to put
+  // role: 'admin' on the cas_allowlist doc.
   const role = (allowlistSnap.data()?.role ?? 'staff') as Role
 
   // 3. Get-or-create the Firebase Auth identity and Firestore profile for

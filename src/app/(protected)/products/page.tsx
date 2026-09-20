@@ -19,6 +19,14 @@ import {
 import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { storageDownloadUrl } from "@/lib/firebase/storage";
 import { findBarcodeConflict } from "@/lib/firebase/products";
+import {
+  findQuantityReductionConflicts,
+  reservationStatusLabel,
+  resolutionInstruction,
+  LENDING_INTERVALS,
+  type ReservationHolder,
+} from "@/lib/firebase/loanRequests";
+import type { LendingInterval } from "@/types/database";
 import { logAudit } from "@/lib/firebase/audit";
 import { useAuth } from "@/context/AuthContext";
 import { useRole } from "@/context/RoleContext";
@@ -100,6 +108,7 @@ type FormData = {
   location: string;
   lend_from: string;
   lend_to: string;
+  lending_interval: LendingInterval;
   images: ImageUpload[];
 };
 
@@ -110,10 +119,11 @@ const EMPTY_FORM: FormData = {
   description: "",
   quantity_on_hand: "0",
   reorder_threshold: "5",
-  available: true,
+  available: false,
   location: DEFAULT_LOCATION,
   lend_from: "",
   lend_to: "",
+  lending_interval: "week_1",
   images: [],
 };
 
@@ -134,6 +144,21 @@ export default function ProductsPage() {
   // Transient text for the "type/paste a barcode" input in the Add/Edit
   // dialog — not part of form state since it's cleared on every add.
   const [barcodeInput, setBarcodeInput] = useState("");
+  // Builds the same "who's affected, what to do about it" message Stock
+  // Out's own conflict alert uses, as a plain string for this form's single
+  // bottom error slot. Checked on Save, same as every other validation on
+  // this form (barcode conflict, lend-date ordering) — editing
+  // quantity_on_hand down bypasses Stock Out entirely, so it had no
+  // protection against silently dropping stock below what an active loan
+  // request (pending/countered/accepted) already has a claim on. Only
+  // relevant in edit mode — a brand-new product can't have any requests
+  // against it yet.
+  function formatQuantityConflictError(holders: ReservationHolder[]): string {
+    const names = holders
+      .map((h) => `${h.staffName}'s ${reservationStatusLabel(h.status)} (${h.quantity} unit(s))`)
+      .join(', ')
+    return `This quantity would leave ${names} short. Resolve ${holders.length > 1 ? 'these' : 'this'} first — ${resolutionInstruction(holders)} — before saving.`
+  }
 
   async function load() {
     setLoading(true);
@@ -203,6 +228,7 @@ export default function ProductsPage() {
       location: p.location ?? DEFAULT_LOCATION,
       lend_from: p.lend_from ?? "",
       lend_to: p.lend_to ?? "",
+      lending_interval: p.lending_interval ?? "week_1",
       // Existing images are Storage paths — no File attached, so the
       // uploader/urlFormatter knows to resolve them via storageDownloadUrl
       // instead of an in-memory object URL.
@@ -258,12 +284,22 @@ export default function ProductsPage() {
       setError("Add at least one barcode.");
       return;
     }
+    // Re-check on submit too, not just via the live effect — a fast
+    // double-click on Save could otherwise slip through before the
+    // debounced check has resolved.
+    if (editing) {
+      const offenders = await findQuantityReductionConflicts(editing.id.toString(), Number(form.quantity_on_hand));
+      if (offenders.length > 0) {
+        setError(formatQuantityConflictError(offenders));
+        return;
+      }
+    }
     if (form.lend_from && form.lend_from < todayDateStr()) {
-      setError("Lend From date can't be in the past.");
+      setError("Available From date can't be in the past.");
       return;
     }
     if (form.lend_from && form.lend_to && form.lend_to < form.lend_from) {
-      setError("Lend To date can't be before Lend From date.");
+      setError("Available To date can't be before Available From date.");
       return;
     }
     setSaving(true);
@@ -293,6 +329,7 @@ export default function ProductsPage() {
         location: form.location,
         lend_from: form.lend_from || null,
         lend_to: form.lend_to || null,
+        lending_interval: form.lending_interval,
         updated_at: new Date().toISOString(),
       };
 
@@ -344,6 +381,7 @@ export default function ProductsPage() {
             location: editing.location ?? DEFAULT_LOCATION,
             lend_from: editing.lend_from ?? null,
             lend_to: editing.lend_to ?? null,
+            lending_interval: editing.lending_interval ?? "week_1",
             images: editing.images ?? [],
           },
           after: payload,
@@ -395,7 +433,7 @@ export default function ProductsPage() {
   }
 
   return (
-    <div>
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-5 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Products</h1>
@@ -444,9 +482,10 @@ export default function ProductsPage() {
       </div>
 
       {/* Table */}
-      <Card className="py-0">
+      <Card className="min-h-0 flex-1 py-0">
+        <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
               <TableHead>Product</TableHead>
               <TableHead>Barcode</TableHead>
@@ -553,257 +592,374 @@ export default function ProductsPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </Card>
 
       {/* Add / Edit product modal */}
       <Dialog open={showModal} onOpenChange={setShowModal}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[480px]">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[820px]">
           <DialogHeader>
             <DialogTitle>
               {editing ? "Edit Product" : "Add Product"}
             </DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSave} className="flex flex-col gap-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="p-name">Name *</Label>
-                <Input
-                  id="p-name"
-                  required
-                  value={form.name}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, name: e.target.value }))
-                  }
-                />
+            <div className="grid grid-cols-1 gap-x-8 gap-y-4 md:grid-cols-2">
+              {/* Left column: Product details */}
+              <div className="flex flex-col gap-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Product details
+                </h3>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="p-name">Name *</Label>
+                  <Input
+                    id="p-name"
+                    required
+                    value={form.name}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, name: e.target.value }))
+                    }
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Category</Label>
+                  <Select
+                    items={{
+                      [NO_CATEGORY]: "— none —",
+                      ...Object.fromEntries(
+                        categories.map((c) => [c.id, c.name]),
+                      ),
+                    }}
+                    value={form.category_id || NO_CATEGORY}
+                    onValueChange={(v) =>
+                      setForm((f) => ({
+                        ...f,
+                        category_id: v && v !== NO_CATEGORY ? v : "",
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_CATEGORY}>— none —</SelectItem>
+                      {categories.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="p-qty">
+                      {editing ? "Qty On Hand" : "Initial Qty"}
+                    </Label>
+                    <Input
+                      id="p-qty"
+                      type="number"
+                      min="0"
+                      value={form.quantity_on_hand}
+                      onChange={(e) => {
+                        const nextQty = e.target.value
+                        setForm((f) => ({
+                          ...f,
+                          quantity_on_hand: nextQty,
+                          // A product with zero stock can't be Available — force
+                          // it back to Unavailable right here rather than just
+                          // disabling the dropdown below, so this holds even if
+                          // qty is edited after Availability was already set.
+                          available: Number(nextQty) > 0 ? f.available : false,
+                        }))
+                      }}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="p-threshold">Reorder Threshold</Label>
+                    <Input
+                      id="p-threshold"
+                      type="number"
+                      min="0"
+                      value={form.reorder_threshold}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          reorder_threshold: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="p-description">Description</Label>
+                  <Textarea
+                    id="p-description"
+                    rows={2}
+                    className="max-h-24 resize-none overflow-y-auto"
+                    value={form.description}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, description: e.target.value }))
+                    }
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="p-location">Location</Label>
+                  <Textarea
+                    id="p-location"
+                    rows={2}
+                    className="max-h-24 resize-none overflow-y-auto"
+                    value={form.location}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, location: e.target.value }))
+                    }
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Photos</Label>
+                  <MultiImageUploader
+                    images={form.images}
+                    max={MAX_IMAGES}
+                    disabled={!isAdmin}
+                    onImagesChange={(images) => setForm((f) => ({ ...f, images }))}
+                    urlFormatter={(image) =>
+                      image.file ? image.url : storageDownloadUrl(image.url)
+                    }
+                  />
+                </div>
               </div>
-              <div className="grid gap-1.5">
-                <Label>Category</Label>
-                <Select
-                  items={{
-                    [NO_CATEGORY]: "— none —",
-                    ...Object.fromEntries(
-                      categories.map((c) => [c.id, c.name]),
-                    ),
-                  }}
-                  value={form.category_id || NO_CATEGORY}
-                  onValueChange={(v) =>
-                    setForm((f) => ({
-                      ...f,
-                      category_id: v && v !== NO_CATEGORY ? v : "",
-                    }))
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_CATEGORY}>— none —</SelectItem>
-                    {categories.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="p-qty">
-                  {editing ? "Qty On Hand" : "Initial Qty"}
-                </Label>
-                <Input
-                  id="p-qty"
-                  type="number"
-                  min="0"
-                  value={form.quantity_on_hand}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, quantity_on_hand: e.target.value }))
-                  }
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="p-threshold">Reorder Threshold</Label>
-                <Input
-                  id="p-threshold"
-                  type="number"
-                  min="0"
-                  value={form.reorder_threshold}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      reorder_threshold: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label>Availability</Label>
-                <Select
-                  items={AVAILABLE_ITEMS}
-                  value={form.available ? "true" : "false"}
-                  onValueChange={(v) =>
-                    setForm((f) => ({
-                      ...f,
-                      available: v !== "false",
-                    }))
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="true">Available</SelectItem>
-                    <SelectItem value="false">Unavailable</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="p-lend-from">Lend From</Label>
-                <Input
-                  id="p-lend-from"
-                  type="date"
-                  min={todayDateStr()}
-                  value={form.lend_from}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, lend_from: e.target.value }))
-                  }
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="p-lend-to">Lend To</Label>
-                <Input
-                  id="p-lend-to"
-                  type="date"
-                  min={form.lend_from || todayDateStr()}
-                  value={form.lend_to}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, lend_to: e.target.value }))
-                  }
-                />
-              </div>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="p-barcode">Barcodes *</Label>
-              {form.barcodes.length > 0 && (
-                <DragDropContext onDragEnd={handleBarcodeDragEnd}>
-                  <Droppable droppableId="product-barcodes" direction="vertical">
-                    {(provided) => (
-                      <div
-                        {...provided.droppableProps}
-                        ref={provided.innerRef}
-                        className="flex flex-col gap-1.5"
-                      >
-                        {form.barcodes.map((code, i) => (
-                          <Draggable key={code} draggableId={code} index={i}>
-                            {(provided, snapshot) => (
-                              <div
-                                {...provided.draggableProps}
-                                ref={provided.innerRef}
-                                className={`flex items-center gap-2 rounded-md border bg-muted px-2 py-1.5 font-mono text-xs ${snapshot.isDragging ? "bg-accent shadow-md" : ""}`}
-                              >
-                                <div
-                                  {...provided.dragHandleProps}
-                                  className="cursor-grab text-muted-foreground active:cursor-grabbing"
-                                  title="Drag to reorder"
-                                >
-                                  <GripVertical className="size-3.5" />
-                                </div>
-                                <span className="flex-1 truncate">{code}</span>
-                                {i === 0 && form.barcodes.length > 1 && (
-                                  <Badge className="bg-emerald-100 text-[10px] text-emerald-800">
-                                    Primary
-                                  </Badge>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => removeBarcode(code)}
-                                  className="text-muted-foreground hover:text-red-600"
-                                  title="Remove barcode"
-                                >
-                                  <X className="size-3" />
-                                </button>
-                              </div>
-                            )}
-                          </Draggable>
-                        ))}
-                        {provided.placeholder}
+
+              {/* Right column: Product availability + Barcodes */}
+              <div className="flex flex-col gap-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Product availability
+                </h3>
+                <div className="grid grid-cols-2 items-start gap-3">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="p-lend-from">Available From</Label>
+                    <Input
+                      id="p-lend-from"
+                      type="date"
+                      min={todayDateStr()}
+                      value={form.lend_from}
+                      onChange={(e) => {
+                        const nextLendFrom = e.target.value
+                        setForm((f) => ({
+                          ...f,
+                          lend_from: nextLendFrom,
+                          // Clearing Lend From can't leave a Lend To dangling
+                          // with nothing to be "after" — and a product with no
+                          // Lend From can't stay Available (see Availability's
+                          // onChange/disabled logic above, same pattern).
+                          lend_to: nextLendFrom ? f.lend_to : "",
+                          available: nextLendFrom ? f.available : false,
+                        }))
+                      }}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="p-lend-to">Available To</Label>
+                    <Input
+                      id="p-lend-to"
+                      type="date"
+                      min={form.lend_from || todayDateStr()}
+                      value={form.lend_to}
+                      disabled={!form.lend_from}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, lend_to: e.target.value }))
+                      }
+                    />
+                    {!form.lend_from && (
+                      <p className="text-xs text-muted-foreground">
+                        Set an Available From date first.
+                      </p>
+                    )}
+                    {form.lend_from && form.lend_to && (
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs text-muted-foreground">
+                          Clear if always available
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setForm((f) => ({ ...f, lend_to: "" }))}
+                          className="shrink-0 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                        >
+                          Clear
+                        </button>
                       </div>
                     )}
-                  </Droppable>
-                </DragDropContext>
-              )}
-              <div className="flex gap-1">
-                <Input
-                  id="p-barcode"
-                  value={barcodeInput}
-                  onChange={(e) => setBarcodeInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addBarcode(barcodeInput);
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="p-lending-interval">Lending Interval</Label>
+                  <div className="px-1 pt-1">
+                    <input
+                      id="p-lending-interval"
+                      type="range"
+                      min={0}
+                      max={LENDING_INTERVALS.length - 1}
+                      step={1}
+                      value={LENDING_INTERVALS.findIndex((i) => i.value === form.lending_interval)}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          lending_interval: LENDING_INTERVALS[Number(e.target.value)].value,
+                        }))
+                      }
+                      className="w-full accent-primary"
+                    />
+                    <div className="mt-1 flex justify-between text-xs text-muted-foreground">
+                      {LENDING_INTERVALS.map((interval) => (
+                        <span
+                          key={interval.value}
+                          className={interval.value === form.lending_interval ? "font-semibold text-foreground" : undefined}
+                        >
+                          {interval.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {form.lending_interval === "indefinite"
+                      ? "Staff won't be required to set a return date for this item on the portal — same convenience as leaving \"Lend To\" blank on Stock Out."
+                      : `The longest a single portal loan of this item can run for — currently ${LENDING_INTERVALS.find((i) => i.value === form.lending_interval)?.label.toLowerCase()}.`}
+                  </p>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Availability</Label>
+                  <Select
+                    items={AVAILABLE_ITEMS}
+                    value={form.available ? "true" : "false"}
+                    onValueChange={(v) =>
+                      setForm((f) => ({
+                        ...f,
+                        // Belt-and-braces alongside the disabled SelectItem
+                        // below — can't be set to Available at zero stock or
+                        // with no Lend From date set.
+                        available: v !== "false" && Number(f.quantity_on_hand) > 0 && !!f.lend_from,
+                      }))
                     }
-                  }}
-                  placeholder="Scan or type a barcode, then Enter"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => addBarcode(barcodeInput)}
-                  disabled={!barcodeInput.trim()}
-                >
-                  Add
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  title="Generate a new NWU barcode"
-                  onClick={() => addBarcode(genBarcode())}
-                >
-                  <RefreshCw className="size-3.5" />
-                </Button>
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem
+                        value="true"
+                        disabled={!(Number(form.quantity_on_hand) > 0) || !form.lend_from}
+                      >
+                        Available
+                      </SelectItem>
+                      <SelectItem value="false">Unavailable</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {(() => {
+                    const qtyBlocks = !(Number(form.quantity_on_hand) > 0)
+                    const lendFromBlocks = !form.lend_from
+                    if (!qtyBlocks && !lendFromBlocks) return null
+                    const reason =
+                      qtyBlocks && lendFromBlocks
+                        ? "Qty On Hand is 0 and no Available From date is set"
+                        : qtyBlocks
+                          ? "Qty On Hand is 0"
+                          : "No Available From date is set"
+                    return (
+                      <p className="text-xs text-muted-foreground">
+                        {reason} — must stay Unavailable.
+                      </p>
+                    )
+                  })()}
+                </div>
+
+                <h3 className="mt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Barcodes
+                </h3>
+                <div className="grid gap-1.5">
+                  {form.barcodes.length > 0 && (
+                    <DragDropContext onDragEnd={handleBarcodeDragEnd}>
+                      <Droppable droppableId="product-barcodes" direction="vertical">
+                        {(provided) => (
+                          <div
+                            {...provided.droppableProps}
+                            ref={provided.innerRef}
+                            className="flex flex-col gap-1.5"
+                          >
+                            {form.barcodes.map((code, i) => (
+                              <Draggable key={code} draggableId={code} index={i}>
+                                {(provided, snapshot) => (
+                                  <div
+                                    {...provided.draggableProps}
+                                    ref={provided.innerRef}
+                                    className={`flex items-center gap-2 rounded-md border bg-muted px-2 py-1.5 font-mono text-xs ${snapshot.isDragging ? "bg-accent shadow-md" : ""}`}
+                                  >
+                                    <div
+                                      {...provided.dragHandleProps}
+                                      className="cursor-grab text-muted-foreground active:cursor-grabbing"
+                                      title="Drag to reorder"
+                                    >
+                                      <GripVertical className="size-3.5" />
+                                    </div>
+                                    <span className="flex-1 truncate">{code}</span>
+                                    {i === 0 && form.barcodes.length > 1 && (
+                                      <Badge className="bg-emerald-100 text-[10px] text-emerald-800">
+                                        Primary
+                                      </Badge>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => removeBarcode(code)}
+                                      className="text-muted-foreground hover:text-red-600"
+                                      title="Remove barcode"
+                                    >
+                                      <X className="size-3" />
+                                    </button>
+                                  </div>
+                                )}
+                              </Draggable>
+                            ))}
+                            {provided.placeholder}
+                          </div>
+                        )}
+                      </Droppable>
+                    </DragDropContext>
+                  )}
+                  <div className="flex gap-1">
+                    <Input
+                      id="p-barcode"
+                      value={barcodeInput}
+                      onChange={(e) => setBarcodeInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addBarcode(barcodeInput);
+                        }
+                      }}
+                      placeholder="Scan or type a barcode, then Enter"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => addBarcode(barcodeInput)}
+                      disabled={!barcodeInput.trim()}
+                    >
+                      Add
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      title="Generate a new NWU barcode"
+                      onClick={() => addBarcode(genBarcode())}
+                    >
+                      <RefreshCw className="size-3.5" />
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Keep the manufacturer's original barcode/QR code and add your
+                    own — either will scan to this product.
+                  </p>
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Keep the manufacturer's original barcode/QR code and add your
-                own — either will scan to this product.
-              </p>
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="p-description">Description</Label>
-              <Textarea
-                id="p-description"
-                rows={2}
-                className="max-h-24 resize-none overflow-y-auto"
-                value={form.description}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, description: e.target.value }))
-                }
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="p-location">Location</Label>
-              <Textarea
-                id="p-location"
-                rows={2}
-                className="max-h-24 resize-none overflow-y-auto"
-                value={form.location}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, location: e.target.value }))
-                }
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label>Photos</Label>
-              <MultiImageUploader
-                images={form.images}
-                max={MAX_IMAGES}
-                disabled={!isAdmin}
-                onImagesChange={(images) => setForm((f) => ({ ...f, images }))}
-                urlFormatter={(image) =>
-                  image.file ? image.url : storageDownloadUrl(image.url)
-                }
-              />
             </div>
             {error && (
               <Alert variant="destructive">

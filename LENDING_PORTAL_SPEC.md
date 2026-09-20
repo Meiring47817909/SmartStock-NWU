@@ -243,10 +243,12 @@ On `onAuthStateChanged`, if there's a user, query `where('uid', '==', currUser.u
 
 ### 5.2 Route structure
 
+**Update, post-implementation:** built as a standalone `/lend/login` per the original text below, then **removed** at explicit user request in favor of a single unified `/login` shared with the BICS app — see `LENDING_PORTAL_CHANGELOG.md` §16/§17.3 for the reasoning and exact implementation. `/login` now does a one-shot post-auth lookup (`profiles/{uid}` exists → `/dashboard`; else `staff` doc with matching `uid` → `/lend`; else sign back out with an error) rather than each app having its own login page. The portal layout's unauthenticated-redirect target is `/login`, not `/lend/login` — that route no longer exists. The rest of this section (route group structure, `StaffPortalProvider`, the "not linked" dead-end state) is otherwise accurate as built.
+
 New route group `src/app/(portal)/lend/` (a route group, not nested under `(protected)` — completely separate layout, separate auth guard, no `Sidebar`):
 
-- `src/app/(portal)/lend/layout.tsx` — wraps children in `StaffPortalProvider`, redirects to `/lend/login` if no `user`, shows the "not linked" state if `user` exists but `staffMember` is `null`, otherwise renders a minimal header (staff name, nav links: Browse / Cart / My Requests, Sign out) + `children`.
-- `src/app/(portal)/lend/login/page.tsx` — same `signInWithEmailAndPassword` pattern as `src/app/(auth)/login/page.tsx` (check that file for the exact pattern before writing this), redirects to `/lend` on success. This is the page staff members use their "Send Login Email"-provisioned password on (existing flow, already built — see `handout.md` §2).
+- `src/app/(portal)/lend/layout.tsx` — wraps children in `StaffPortalProvider`, redirects to `/login` if no `user`, shows the "not linked" state if `user` exists but `staffMember` is `null`, otherwise renders a minimal header (staff name, nav links: Browse / Cart / My Requests, Sign out) + `children`.
+- `src/app/(auth)/login/page.tsx` — shared unified login for both BICS operators and portal borrowers (see the update note above). Staff members use their "Send Login Email"-provisioned password here, same as BICS operators (existing provisioning flow, already built — see `handout.md` §2).
 - `src/app/(portal)/lend/page.tsx` — browse/catalogue (§5.3).
 - `src/app/(portal)/lend/cart/page.tsx` — cart/checkout (§5.4).
 - `src/app/(portal)/lend/requests/page.tsx` — My Requests (§5.5).

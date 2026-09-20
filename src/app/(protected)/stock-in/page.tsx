@@ -132,8 +132,9 @@ export default function StockInPage() {
             )}
 
             {cart.length > 0 && (
+              <div className="max-h-96 overflow-y-auto">
               <Table>
-                <TableHeader>
+                <TableHeader className="sticky top-0 z-10 bg-card">
                   <TableRow>
                     <TableHead>Product</TableHead>
                     <TableHead>Current Stock</TableHead>
@@ -175,6 +176,7 @@ export default function StockInPage() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             )}
           </CardContent>
         </Card>

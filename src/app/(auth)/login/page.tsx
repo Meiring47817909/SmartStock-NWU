@@ -46,8 +46,14 @@ function LoginPageInner() {
   // decisions shouldn't depend on two separate contexts' async loading
   // flags settling in the right order.
   async function routeSignedInUser(uid: string) {
+    // Only an admin profile means BICS. A profile carrying role 'staff' is
+    // a lending-portal borrower like any other, so it falls through to the
+    // staff-record lookup below rather than being pushed at /dashboard and
+    // immediately bounced back out by the (protected) layout's admin gate —
+    // that round trip shows the user a visible flash of the BICS shell they
+    // aren't allowed into.
     const profileSnap = await getDocFromServer(doc(db, 'profiles', uid))
-    if (profileSnap.exists()) {
+    if (profileSnap.exists() && profileSnap.data()?.role === 'admin') {
       router.push('/dashboard')
       router.refresh()
       return
@@ -55,13 +61,29 @@ function LoginPageInner() {
 
     const staffSnap = await getDocsFromServer(query(collection(db, 'staff'), where('uid', '==', uid)))
     if (!staffSnap.empty) {
+      // Deactivated (Staff page → Deactivate) — the portal layout itself
+      // also blocks this (see lend/layout.tsx's PortalShell), which is what
+      // actually enforces it for every sign-in path including NWU-CAS. This
+      // check is purely so the password-login path gets an immediate,
+      // specific error right here instead of a "Loading…" flash before
+      // landing on that dead-end screen.
+      if (staffSnap.docs[0].data().is_active === false) {
+        await signOut(auth)
+        setError('Your account has been deactivated. Please contact Selouna Visser at Selouna.Visser@nwu.ac.za for more information.')
+        setLoading(false)
+        return
+      }
       router.push('/lend')
       return
     }
 
-    // Neither a BICS profile nor a linked staff record — this account
-    // isn't provisioned for anything in this app. Sign back out rather
-    // than leaving them signed in with nowhere to go.
+    // Neither an admin profile nor a linked staff record — this account
+    // isn't provisioned for anything in this app. Note this now also catches
+    // a legacy profile with role 'staff' (or the old 'manager') that has no
+    // staff record to go with it: under the two-role model that account has
+    // BICS access revoked and no portal identity, so there's genuinely
+    // nowhere to send it. Sign back out rather than leaving them signed in
+    // with nowhere to go.
     await signOut(auth)
     setError("This account isn't set up for BICS or portal access — contact an administrator.")
     setLoading(false)

@@ -3,7 +3,8 @@
 import { Fragment, useEffect, useState } from 'react'
 import { formatDate, formatDateOnly } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
-import { collection, query, orderBy, limit, getDocs, where } from 'firebase/firestore'
+import { LENDING_INTERVALS } from '@/lib/firebase/loanRequests'
+import { collection, query, orderBy, getDocs, where } from 'firebase/firestore'
 import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
@@ -12,14 +13,14 @@ import { Badge } from '@/components/ui/badge'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import type { AuditLogEntry, AuditAction, AuditEntityType, TransactionLine } from '@/types/database'
+import type { AuditLogEntry, AuditAction, AuditEntityType, TransactionLine, LoanRequestLine } from '@/types/database'
 
 const ACTION_BADGE_CLASS: Record<AuditAction, string> = {
   create: 'bg-emerald-100 text-emerald-800',
   update: 'bg-sky-100 text-sky-800',
-  delete: 'bg-red-100 text-red-800',
   activate: 'bg-emerald-100 text-emerald-800',
   deactivate: 'bg-accent text-accent-foreground',
+  resolve: 'bg-violet-100 text-violet-800',
 }
 
 // Same mapping as TXN_BADGE_CLASS on the Reports page's transaction-history
@@ -56,6 +57,19 @@ const LOAN_REQUEST_BADGE_CLASS: Record<string, string> = {
   no_show: 'bg-red-100 text-red-800',
 }
 
+// Display labels for those same statuses. Only the ones whose raw value
+// doesn't read correctly on its own need an entry — everything else falls
+// back to the underscore-stripped value. 'no_show' is called "Not Picked
+// Up" everywhere the admin actually sees it (the Dashboard's Incoming
+// Pickups badge), so the Audit Log says the same thing.
+const LOAN_REQUEST_STATUS_LABEL: Record<string, string> = {
+  no_show: 'Not Picked Up',
+}
+
+function loanRequestStatusLabel(status: string): string {
+  return LOAN_REQUEST_STATUS_LABEL[status] ?? status.replace('_', ' ')
+}
+
 const ALL_ENTITIES = '__all__'
 const ALL_ACTIONS = '__all__'
 
@@ -74,6 +88,7 @@ const FIELD_LABELS: Record<string, string> = {
   location: 'Location',
   lend_from: 'Lend from',
   lend_to: 'Lend to',
+  lending_interval: 'Lending interval',
   email: 'Email',
   department: 'Department',
   card_uid: 'Card UID',
@@ -82,6 +97,7 @@ const FIELD_LABELS: Record<string, string> = {
   from_date: 'From date',
   to_date: 'To date',
   message: 'Message',
+  admin_message: 'Message to staff',
 }
 
 // Fields that are either internal bookkeeping (id, timestamps, the raw
@@ -103,7 +119,7 @@ function friendlyValue(key: string, value: unknown): string {
   if (value === null || value === undefined || value === '') return '—'
   if (typeof value === 'boolean') {
     if (key === 'available') return value ? 'Available' : 'Unavailable'
-    if (key === 'is_active') return value ? 'Active' : 'Inactive'
+    if (key === 'is_active') return value ? 'Active' : 'Deactivated'
     return value ? 'Yes' : 'No'
   }
   if (Array.isArray(value)) return value.length ? value.join(', ') : '—'
@@ -111,6 +127,10 @@ function friendlyValue(key: string, value: unknown): string {
     (key === 'lend_from' || key === 'lend_to' || key === 'from_date' || key === 'to_date') &&
     typeof value === 'string'
   ) return formatDateOnly(value)
+  if (key === 'status' && typeof value === 'string') return loanRequestStatusLabel(value)
+  if (key === 'lending_interval' && typeof value === 'string') {
+    return LENDING_INTERVALS.find((i) => i.value === value)?.label ?? value
+  }
   return String(value)
 }
 
@@ -164,7 +184,14 @@ function TransactionSummary({ after, lines }: { after: Record<string, unknown> |
   const totalQty = typeof after.total_qty === 'number' ? after.total_qty : null
   const notes = typeof after.notes === 'string' && after.notes ? after.notes : null
   const reference = typeof after.reference_no === 'string' ? after.reference_no : null
-  const manual = after.manual_override === true
+  const txnType = typeof after.transaction_type === 'string' ? after.transaction_type : null
+  // manual_override means "the staff member was picked from a list instead
+  // of scanning their card", so it's only meaningful on the two flows that
+  // HAVE a staff step to bypass -- Stock Out and Returns. Stock In and
+  // ADJUST write no staff_id and never set this field, so a true value on
+  // one of those is bad data (a seed script fabricated exactly that once),
+  // not a real manual entry. Gate the badge rather than trusting the flag.
+  const manual = after.manual_override === true && (txnType === 'OUT' || txnType === 'RETURN')
   // Only OUT transactions set these (Stock Out's Confirm step) — IN and
   // RETURN never write lend_from/lend_to, so both are null/absent there.
   const lendFrom = typeof after.lend_from === 'string' ? after.lend_from : null
@@ -216,6 +243,185 @@ function TransactionSummary({ after, lines }: { after: Record<string, unknown> |
   )
 }
 
+// A staff member's activate/deactivate toggle: before and after only ever
+// differ in `is_active` (name/surname/email are unchanged, logged purely as
+// identifying context — see toggleActive() in staff/page.tsx), so the
+// generic FieldDiff would show just "Active: Active → Deactivated" with no
+// indication of WHO. This reads the identifying fields straight off `after`
+// instead of diffing them.
+function StaffStatusSummary({ after }: { after: Record<string, unknown> | null }) {
+  if (!after) return <p className="text-sm text-muted-foreground">No details recorded.</p>
+  const fullName = typeof after.full_name === 'string' && after.full_name ? after.full_name : null
+  const email = typeof after.email === 'string' && after.email ? after.email : null
+  const isActive = after.is_active === true
+
+  return (
+    <div className="flex flex-col gap-1.5 text-sm">
+      {fullName && (
+        <div><span className="font-medium text-foreground">Staff member:</span> {fullName}</div>
+      )}
+      {email && (
+        <div><span className="font-medium text-foreground">Email:</span> {email}</div>
+      )}
+      <div>
+        <span className="font-medium text-foreground">Status:</span> {isActive ? 'Active' : 'Deactivated'}
+      </div>
+    </div>
+  )
+}
+
+// A resolved (written-off) return: logged against the ORIGINATING
+// transaction's entity_type/entity_id (see waivers.ts's createReturnWaiver)
+// so it shows up alongside that transaction's own Stock Out entry rather
+// than looking like an unrelated record — but the waiver's own descriptive
+// fields (product/qty/staff/reason) don't match TransactionSummary's shape
+// at all, so a resolve entry gets this small renderer instead, picked by
+// action rather than entity_type in the switch below.
+function ResolveSummary({ after }: { after: Record<string, unknown> | null }) {
+  if (!after) return <p className="text-sm text-muted-foreground">No details recorded.</p>
+  const productName = typeof after.product_name === 'string' ? after.product_name : null
+  const quantity = typeof after.quantity === 'number' ? after.quantity : null
+  const staffName = typeof after.staff_name === 'string' ? after.staff_name : null
+  const reason = typeof after.reason === 'string' && after.reason ? after.reason : null
+  const resolvedByName = typeof after.resolved_by_name === 'string' ? after.resolved_by_name : null
+
+  return (
+    <div className="flex flex-col gap-1.5 text-sm">
+      {(productName || quantity !== null) && (
+        <div>
+          <span className="font-medium text-foreground">Item:</span>{' '}
+          {productName ?? 'Unknown product'}{quantity !== null && <> × {quantity}</>}
+        </div>
+      )}
+      {staffName && (
+        <div><span className="font-medium text-foreground">Held by:</span> {staffName}</div>
+      )}
+      {reason && (
+        <div><span className="font-medium text-foreground">Reason:</span> {reason}</div>
+      )}
+      {resolvedByName && (
+        <div><span className="font-medium text-foreground">Resolved by:</span> {resolvedByName}</div>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Written off — recorded as not needing to come back. Stock levels were not changed.
+      </p>
+    </div>
+  )
+}
+
+// A loan_request's 'update' entries (counter/accept/decline/expire/no-show/
+// withdraw) are usually just a status/date transition — the generic
+// FieldDiff already shows those well. Two entries carry richer, purpose-
+// built snapshots instead of a plain before/after diff:
+//   - the 'create' entry (before === null): the original ask — staff,
+//     requested window, message, item/qty totals (see the item list below,
+//     lazily fetched the same way as TransactionSummary's transaction_lines).
+//   - declining an already-*countered* request (after.countered_lines is an
+//     array): declineRequest() freezes the whole counter offer — the
+//     staff's original message, the requested-vs-offered/removed line
+//     comparison, Selouna's counter message, and her decline message — into
+//     this one entry, since none of that survives on the live document once
+//     status flips to 'declined'. This snapshot is self-contained (no lazy
+//     fetch needed).
+function LoanRequestSummary({
+  before, after, lines,
+}: {
+  before: Record<string, unknown> | null
+  after: Record<string, unknown> | null
+  lines: LoanRequestLine[] | undefined
+}) {
+  if (!after) return <p className="text-sm text-muted-foreground">No details recorded.</p>
+
+  if (before !== null) {
+    if (Array.isArray(after.countered_lines)) {
+      const staffMessage = typeof after.staff_message === 'string' && after.staff_message ? after.staff_message : null
+      const counterMessage = typeof after.counter_message === 'string' && after.counter_message ? after.counter_message : null
+      const declineMessage = typeof after.admin_message === 'string' && after.admin_message ? after.admin_message : null
+      const counteredLines = after.countered_lines as { product_name?: string; requested_quantity?: number; offered_quantity?: number }[]
+
+      return (
+        <div className="flex flex-col gap-1.5 text-sm">
+          {staffMessage && (
+            <div><span className="font-medium text-foreground">Staff&apos;s message:</span> &ldquo;{staffMessage}&rdquo;</div>
+          )}
+          <div>
+            <span className="font-medium text-foreground">Counter offered (declined):</span>
+            {counteredLines.length > 0 ? (
+              <ul className="ml-4 list-disc">
+                {counteredLines.map((l, i) => (
+                  <li key={i}>
+                    {l.product_name ?? 'Unknown product'}{' '}
+                    <span className="text-muted-foreground">— requested {l.requested_quantity ?? '—'},</span>{' '}
+                    {(l.offered_quantity ?? 0) > 0
+                      ? <>offered <span className="font-semibold">{l.offered_quantity}</span></>
+                      : <span className="font-semibold text-destructive">removed</span>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="text-muted-foreground"> No line items recorded.</span>
+            )}
+          </div>
+          {counterMessage && (
+            <div><span className="font-medium text-foreground">Selouna&apos;s counter message:</span> &ldquo;{counterMessage}&rdquo;</div>
+          )}
+          {declineMessage && (
+            <div><span className="font-medium text-foreground">Decline message:</span> &ldquo;{declineMessage}&rdquo;</div>
+          )}
+        </div>
+      )
+    }
+    return <FieldDiff before={before} after={after} />
+  }
+
+  const staffName = typeof after.staff_name === 'string' ? after.staff_name : null
+  const fromDate = typeof after.from_date === 'string' ? after.from_date : null
+  const toDate = typeof after.to_date === 'string' ? after.to_date : null
+  const message = typeof after.message === 'string' && after.message ? after.message : null
+  const lineCount = typeof after.line_count === 'number' ? after.line_count : null
+  const totalQty = typeof after.total_qty === 'number' ? after.total_qty : null
+
+  return (
+    <div className="flex flex-col gap-1.5 text-sm">
+      {staffName && (
+        <div>
+          <span className="font-medium text-foreground">Staff:</span> {staffName}
+        </div>
+      )}
+      {(fromDate || toDate) && (
+        <div>
+          <span className="font-medium text-foreground">Requested window:</span>{' '}
+          {formatDateOnly(fromDate)} – {formatDateOnly(toDate)}
+        </div>
+      )}
+      {message && (
+        <div>
+          <span className="font-medium text-foreground">Message:</span> &ldquo;{message}&rdquo;
+        </div>
+      )}
+      {(lineCount !== null || totalQty !== null) && (
+        <div>
+          <span className="font-medium text-foreground">Items:</span>{' '}
+          {lineCount ?? '—'} item{lineCount === 1 ? '' : 's'} · {totalQty ?? '—'} units requested
+        </div>
+      )}
+      {lines === undefined ? (
+        <p className="text-xs text-muted-foreground">Loading items…</p>
+      ) : lines.length > 0 ? (
+        <ul className="ml-4 list-disc">
+          {lines.map((l) => (
+            <li key={l.id}>
+              {l.product_name ?? 'Unknown product'} <span className="text-muted-foreground">× {l.requested_quantity}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-muted-foreground">No line items recorded.</p>
+      )}
+    </div>
+  )
+}
+
 export default function AuditLogPage() {
   const [entries, setEntries] = useState<AuditLogEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -227,11 +433,13 @@ export default function AuditLogPage() {
   // Keyed by transaction entity_id — fetched lazily the first time a
   // transaction row is expanded, then cached so re-expanding is instant.
   const [lines, setLines] = useState<Record<string, TransactionLine[]>>({})
+  // Same idea, for a loan_request's 'create' entry — see LoanRequestSummary.
+  const [loanLines, setLoanLines] = useState<Record<string, LoanRequestLine[]>>({})
 
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const snap = await getDocs(query(collection(db, 'audit_log'), orderBy('created_at', 'desc'), limit(300)))
+      const snap = await getDocs(query(collection(db, 'audit_log'), orderBy('created_at', 'desc')))
       let items = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as AuditLogEntry[]
 
       if (fromDate) items = items.filter(e => e.created_at >= `${fromDate}T00:00:00`)
@@ -256,22 +464,33 @@ export default function AuditLogPage() {
       const items = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as TransactionLine[]
       setLines(prev => ({ ...prev, [e.entity_id]: items }))
     }
+    if (e.entity_type === 'loan_request' && e.before === null && !loanLines[e.entity_id]) {
+      const snap = await getDocs(query(collection(db, 'loan_request_lines'), where('request_id', '==', e.entity_id)))
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as LoanRequestLine[]
+      setLoanLines(prev => ({ ...prev, [e.entity_id]: items }))
+    }
   }
 
   function actionBadge(e: AuditLogEntry) {
     const loanStatus = e.entity_type === 'loan_request' ? e.after?.status : undefined
     if (typeof loanStatus === 'string') {
-      return <Badge className={`${LOAN_REQUEST_BADGE_CLASS[loanStatus] ?? ''} uppercase`}>{loanStatus.replace('_', ' ')}</Badge>
+      return <Badge className={`${LOAN_REQUEST_BADGE_CLASS[loanStatus] ?? ''} uppercase`}>{loanRequestStatusLabel(loanStatus)}</Badge>
     }
     const txnType = e.entity_type === 'transaction' ? e.after?.transaction_type : undefined
     if (typeof txnType === 'string') {
       return <Badge className={`${TXN_BADGE_CLASS[txnType] ?? ''} uppercase`}>{txnType}</Badge>
     }
+    // A resolved (written-off) return logs against the transaction it
+    // closes out (see waivers.ts) — "resolve" reads oddly as a verb badge,
+    // so show it as "Resolved" rather than the generic uppercased action.
+    if (e.action === 'resolve') {
+      return <Badge className={`${ACTION_BADGE_CLASS.resolve} uppercase`}>Resolved</Badge>
+    }
     return <Badge className={`${ACTION_BADGE_CLASS[e.action] ?? ''} uppercase`}>{e.action}</Badge>
   }
 
   return (
-    <div>
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground">Audit Log</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -296,7 +515,7 @@ export default function AuditLogPage() {
           </SelectContent>
         </Select>
         <Select
-          items={{ [ALL_ACTIONS]: 'All actions', create: 'Create', update: 'Update', delete: 'Delete', activate: 'Activate', deactivate: 'Deactivate' }}
+          items={{ [ALL_ACTIONS]: 'All actions', create: 'Create', update: 'Update', activate: 'Activate', deactivate: 'Deactivate', resolve: 'Resolved' }}
           value={actionFilter || ALL_ACTIONS}
           onValueChange={v => setActionFilter(v && v !== ALL_ACTIONS ? v : '')}
         >
@@ -305,9 +524,9 @@ export default function AuditLogPage() {
             <SelectItem value={ALL_ACTIONS}>All actions</SelectItem>
             <SelectItem value="create">Create</SelectItem>
             <SelectItem value="update">Update</SelectItem>
-            <SelectItem value="delete">Delete</SelectItem>
             <SelectItem value="activate">Activate</SelectItem>
             <SelectItem value="deactivate">Deactivate</SelectItem>
+            <SelectItem value="resolve">Resolved</SelectItem>
           </SelectContent>
         </Select>
         <Input type="date" className="w-40" value={fromDate} onChange={e => setFromDate(e.target.value)} placeholder="From date" />
@@ -318,9 +537,10 @@ export default function AuditLogPage() {
         <span className="self-center text-sm text-muted-foreground">{filtered.length} entries</span>
       </div>
 
-      <Card className="py-0">
+      <Card className="min-h-0 flex-1 py-0">
+        <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
               <TableHead>Date</TableHead>
               <TableHead>User</TableHead>
@@ -347,7 +567,15 @@ export default function AuditLogPage() {
                   <TableRow className="bg-muted/50">
                     <TableCell colSpan={6} className="p-4">
                       {e.entity_type === 'transaction' ? (
-                        <TransactionSummary after={e.after} lines={lines[e.entity_id]} />
+                        e.action === 'resolve' ? (
+                          <ResolveSummary after={e.after} />
+                        ) : (
+                          <TransactionSummary after={e.after} lines={lines[e.entity_id]} />
+                        )
+                      ) : e.entity_type === 'loan_request' ? (
+                        <LoanRequestSummary before={e.before} after={e.after} lines={loanLines[e.entity_id]} />
+                      ) : e.entity_type === 'staff' && (e.action === 'activate' || e.action === 'deactivate') ? (
+                        <StaffStatusSummary after={e.after} />
                       ) : (
                         <FieldDiff before={e.before} after={e.after} />
                       )}
@@ -377,6 +605,7 @@ export default function AuditLogPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </Card>
     </div>
   )

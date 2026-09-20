@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { ImageOff } from 'lucide-react'
 import { storageDownloadUrl } from '@/lib/firebase/storage'
-import { formatDateOnly } from '@/lib/utils'
+import { formatLendWindow, formatDateOnly } from '@/lib/utils'
+import { lendingIntervalLabel } from '@/lib/firebase/loanRequests'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -22,9 +23,29 @@ const AVAILABLE_BADGE_CLASS = (available: boolean) =>
 export default function ProductPreviewDialog({
   product,
   onClose,
+  expectedReturnDate,
+  cart,
 }: {
   product: Product | null
   onClose: () => void
+  // The date this product's next unit is expected back, when it's
+  // currently out of stock — see (portal)/lend/page.tsx, the only caller
+  // that has this (fetched via /api/products/expected-return-dates, since
+  // it needs Admin SDK access to compute — see lib/server/availability.ts).
+  // The admin Products page doesn't pass this; the dialog still correctly
+  // shows "Unavailable" from stock alone there, just without a date.
+  expectedReturnDate?: string | null
+  // Cart controls — only the portal Browse page passes this (the admin
+  // Products page has no cart). When present and the product is actually
+  // in stock, the footer swaps its plain "Close" button for the same
+  // qty stepper + Add to Cart control the Browse card itself has, so
+  // there's no need to close the preview just to add the item.
+  cart?: {
+    quantity: number
+    onIncrement: () => void
+    onDecrement: () => void
+    onAddToCart: () => void
+  }
 }) {
   const [activeImage, setActiveImage] = useState(0)
 
@@ -98,14 +119,34 @@ export default function ProductPreviewDialog({
               <div className="flex flex-col gap-3">
                 <DialogTitle className="font-heading text-2xl font-bold">{product.name}</DialogTitle>
 
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {product.category_name && (
-                    <Badge className="bg-accent text-accent-foreground">{product.category_name}</Badge>
-                  )}
-                  <Badge className={AVAILABLE_BADGE_CLASS(product.available ?? true)}>
-                    {product.available ?? true ? 'Available' : 'Unavailable'}
-                  </Badge>
-                </div>
+                {/* `product.available` is the admin's own on/off toggle for
+                    whether this item is offered for lending at all — it does
+                    NOT track live stock (Stock Out decrements
+                    quantity_on_hand without ever touching `available`, so a
+                    product can be `available: true` and still have zero
+                    units on hand). Out-of-stock takes precedence in the
+                    badge below so a portal borrower never sees "Available"
+                    on something they can't actually get right now. */}
+                {(() => {
+                  const adminDisabled = !(product.available ?? true)
+                  const outOfStock = !adminDisabled && (product.quantity_on_hand ?? 0) <= 0
+                  const unavailable = adminDisabled || outOfStock
+                  const label = adminDisabled
+                    ? 'Unavailable'
+                    : outOfStock
+                      ? expectedReturnDate
+                        ? `Unavailable — back ${formatDateOnly(expectedReturnDate)}`
+                        : 'Unavailable — return date not set'
+                      : `${product.quantity_on_hand} Available`
+                  return (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {product.category_name && (
+                        <Badge className="bg-accent text-accent-foreground">{product.category_name}</Badge>
+                      )}
+                      <Badge className={AVAILABLE_BADGE_CLASS(!unavailable)}>{label}</Badge>
+                    </div>
+                  )
+                })()}
 
                 <div className="border-t" />
 
@@ -120,10 +161,19 @@ export default function ProductPreviewDialog({
                   <div>
                     <div className="mb-1 text-sm font-semibold">Lendable:</div>
                     <p className="text-sm">
-                      {formatDateOnly(product.lend_from)} – {formatDateOnly(product.lend_to)}
+                      {formatLendWindow(product.lend_from, product.lend_to)}
                     </p>
                   </div>
                 )}
+
+                <div>
+                  <div className="mb-1 text-sm font-semibold">Lending interval:</div>
+                  <p className="text-sm">
+                    {product.lending_interval === 'indefinite'
+                      ? 'No return date required'
+                      : `Up to ${lendingIntervalLabel(product.lending_interval).toLowerCase()} per loan`}
+                  </p>
+                </div>
 
                 {product.description && (
                   <div>
@@ -134,9 +184,18 @@ export default function ProductPreviewDialog({
               </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={onClose}>
-                Close
-              </Button>
+              {cart && (product.available ?? true) && product.quantity_on_hand > 0 ? (
+                <div className="flex w-full items-center gap-1.5 sm:w-auto sm:justify-end">
+                  <Button variant="ghost" size="icon-sm" onClick={cart.onDecrement}>−</Button>
+                  <span className="min-w-6 text-center font-bold text-primary">{cart.quantity}</span>
+                  <Button variant="ghost" size="icon-sm" onClick={cart.onIncrement}>+</Button>
+                  <Button className="ml-auto sm:ml-1.5" onClick={cart.onAddToCart}>Add to Cart</Button>
+                </div>
+              ) : (
+                <Button type="button" variant="outline" onClick={onClose}>
+                  Close
+                </Button>
+              )}
             </DialogFooter>
           </>
         )}

@@ -16,31 +16,44 @@ export class ApiError extends Error {
   }
 }
 
-// Verifies the request's `Authorization: Bearer <idToken>` header and that
-// the signed-in user has the admin role (matches useRole()'s
-// canManageStaff, which is admin-only). Throws ApiError on any failure —
-// callers should catch it and turn it into a NextResponse.
-export async function requireAdmin(request: NextRequest): Promise<{ uid: string }> {
+// Verifies the request's `Authorization: Bearer <idToken>` header belongs
+// to SOME signed-in Firebase Auth user — BICS admin or portal borrower,
+// no role check. For routes that need admin data access (bypassing
+// firestore.rules via adminDb) but are called from portal pages a
+// borrower's own client can't read directly — e.g. computing another
+// staff member's expected-return date, which touches `transactions` and
+// is admin-only in firestore.rules for good reason (it's every staff
+// member's full borrow history, not just the caller's own). Throws
+// ApiError on any failure — callers should catch it and turn it into a
+// NextResponse.
+export async function requireSignedIn(request: NextRequest): Promise<{ uid: string }> {
   const authHeader = request.headers.get('authorization') ?? ''
   const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
   if (!idToken) {
     throw new ApiError(401, 'Missing Authorization header.')
   }
-
-  let decoded
   try {
-    decoded = await adminAuth.verifyIdToken(idToken)
+    const decoded = await adminAuth.verifyIdToken(idToken)
+    return { uid: decoded.uid }
   } catch {
     throw new ApiError(401, 'Invalid or expired session — please sign in again.')
   }
+}
 
-  const profileSnap = await adminDb.collection('profiles').doc(decoded.uid).get()
+// Verifies the request's `Authorization: Bearer <idToken>` header and that
+// the signed-in user has the admin role (matches useRole()'s
+// canManageStaff, which is admin-only). Throws ApiError on any failure —
+// callers should catch it and turn it into a NextResponse.
+export async function requireAdmin(request: NextRequest): Promise<{ uid: string }> {
+  const { uid } = await requireSignedIn(request)
+
+  const profileSnap = await adminDb.collection('profiles').doc(uid).get()
   const role = profileSnap.exists ? profileSnap.data()?.role : null
   if (role !== 'admin') {
     throw new ApiError(403, 'Only admins can manage staff logins.')
   }
 
-  return { uid: decoded.uid }
+  return { uid }
 }
 
 // Does any `staff` document already have this Firebase Auth UID linked?

@@ -4,6 +4,12 @@ service cloud.firestore {
 
     function isSignedIn() { return request.auth != null; }
 
+    // BICS access is admin-only. The 'staff' role is lending-portal only and
+    // is deliberately NOT a BICS role — a portal borrower normally has no
+    // profiles doc at all, and one carrying role 'staff' is treated the same
+    // way. Kept as a roles-list helper rather than a bare isAdmin() so that
+    // re-introducing a middle role later is a change to the call sites, not
+    // to the shape of every rule.
     function hasBicsRole(roles) {
       return isSignedIn() &&
         exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) &&
@@ -34,30 +40,43 @@ service cloud.firestore {
 
     match /products/{productId} {
       allow read: if isSignedIn(); // BICS operators AND portal borrowers (Browse page)
-      allow create, delete: if hasBicsRole(['admin', 'manager']);
-      allow update: if hasBicsRole(['admin', 'manager']) ||
-        (hasBicsRole(['staff']) && affectedKeysOnly(['quantity_on_hand', 'updated_at']));
+      allow create, delete: if hasBicsRole(['admin']);
+      // The previous narrow staff-role clause (quantity_on_hand + updated_at
+      // only, for Stock Out's decrement) is gone: Stock Out is admin-only
+      // now, and admin already has full update rights here.
+      allow update: if hasBicsRole(['admin']);
     }
 
     match /categories/{categoryId} {
-      allow read: if hasBicsRole(['admin', 'manager', 'staff']);
-      allow write: if hasBicsRole(['admin', 'manager']);
+      allow read, write: if hasBicsRole(['admin']);
     }
 
     match /staff/{staffId} {
-      allow read: if hasBicsRole(['admin', 'manager', 'staff']) ||
+      allow read: if hasBicsRole(['admin']) ||
         (isSignedIn() && resource.data.uid == request.auth.uid);
       allow write: if hasBicsRole(['admin']); // uid-linking itself is via Admin SDK
     }
 
     match /transactions/{txnId} {
-      allow read: if hasBicsRole(['admin', 'manager', 'staff']);
-      allow create: if hasBicsRole(['admin', 'manager', 'staff']);
+      allow read, create: if hasBicsRole(['admin']);
       allow update, delete: if false; // append-only, confirmed no updateDoc/deleteDoc anywhere
     }
 
     match /transaction_lines/{lineId} {
-      allow read, create: if hasBicsRole(['admin', 'manager', 'staff']);
+      allow read, create: if hasBicsRole(['admin']);
+      allow update, delete: if false;
+    }
+
+    // Return waivers — Selouna writing off an outstanding loan line because
+    // she's agreed the staff member keeps the item. Append-only for the same
+    // reason transactions/transaction_lines are: the outstanding calculation
+    // is a replay over this ledger, and a mutable or deletable waiver would
+    // make a past Dashboard state unreproducible. Admin-only in both
+    // directions: every page that subtracts waivers (Dashboard, Returns,
+    // Staff, Reports) is itself admin-only now.
+    match /return_waivers/{waiverId} {
+      allow read: if hasBicsRole(['admin']);
+      allow create: if hasBicsRole(['admin']);
       allow update, delete: if false;
     }
 
@@ -68,7 +87,7 @@ service cloud.firestore {
       // like Selouna's queue does, and that transition is logged the same
       // way regardless of who triggered it. Scoped to loan_request entries
       // only — a borrower has no legitimate reason to log anything else.
-      allow create: if hasBicsRole(['admin', 'manager', 'staff']) ||
+      allow create: if hasBicsRole(['admin']) ||
         (isSignedIn() && request.resource.data.entity_type == 'loan_request');
       allow update, delete: if false;
     }
@@ -89,20 +108,12 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isOwnStaffRecord(request.resource.data.staff_id);
 
-      // Selouna: full transition rights (approve/counter/decline/fulfil/expire/no-show)
-      allow update: if hasBicsRole(['admin', 'manager']);
-
-      // BICS staff-role (till operators): narrow — only the fulfilment write Stock Out
-      // needs, plus lazy expire/no-show writes any list page may trigger on load. §2.3
-      // of LENDING_PORTAL_SPEC.md says staff-role gets read-only, but canManageStock
-      // (which gates Stock Out) is true for every role, so a literal read-only rule
-      // would break the fulfillment write for non-admin/manager till operators.
-      allow update: if hasBicsRole(['staff']) &&
-        ((affectedKeysOnly(['status', 'updated_at', 'fulfilled_txn_id']) &&
-          resource.data.status == 'accepted' && request.resource.data.status == 'fulfilled') ||
-         (affectedKeysOnly(['status', 'updated_at']) &&
-          ((resource.data.status in ['pending', 'countered'] && request.resource.data.status == 'expired') ||
-           (resource.data.status == 'accepted' && request.resource.data.status == 'no_show'))));
+      // Selouna: full transition rights (approve/counter/decline/fulfil/expire/no-show).
+      // The separate narrow clause that used to exist for BICS staff-role till
+      // operators (the accepted -> fulfilled write from Stock Out, plus lazy
+      // expire/no-show) is gone with the role itself — Stock Out is admin-only
+      // now, so this one clause covers every BICS-side transition.
+      allow update: if hasBicsRole(['admin']);
 
       // Portal borrower: only their own request, only status/updated_at, only these
       // specific state-machine edges (dates/staff_id/message are immutable from their side).
@@ -120,8 +131,8 @@ service cloud.firestore {
       // needs to sum offered_quantity across every active request's lines
       // for a given product_id, not just the caller's own.
       allow read: if isSignedIn();
-      allow create: if hasBicsRole(['admin', 'manager']) || isOwnRequestOwner(request.resource.data.request_id);
-      allow update: if hasBicsRole(['admin', 'manager']); // offered_quantity edits — Selouna only
+      allow create: if hasBicsRole(['admin']) || isOwnRequestOwner(request.resource.data.request_id);
+      allow update: if hasBicsRole(['admin']); // offered_quantity edits — Selouna only
       allow delete: if false;
     }
 

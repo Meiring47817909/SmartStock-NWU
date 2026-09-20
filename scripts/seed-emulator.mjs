@@ -24,7 +24,10 @@ const app = initializeApp({ projectId: PROJECT_ID })
 const auth = getAuth(app)
 const db = getFirestore(app)
 
-async function upsertAdminUser(email, password, uid) {
+// Get-or-create an Auth account with a known password. Named generically
+// because it's used for both the BICS admin and the portal borrower below —
+// under the two-role model those are the only two kinds of login there are.
+async function upsertUser(email, password, uid) {
   try {
     return await auth.getUserByEmail(email)
   } catch {
@@ -39,7 +42,7 @@ async function main() {
   // accounts — see the passwordless createUser() call in
   // src/app/api/staff/send-reset-email/route.ts — this one just needs a
   // password because it's how *you* log into SmartStock-NWU to test it.
-  const admin = await upsertAdminUser('admin@nwu.test', 'password123', 'seed-admin')
+  const admin = await upsertUser('admin@nwu.test', 'password123', 'seed-admin')
   await db.collection('profiles').doc(admin.uid).set(
     {
       id: admin.uid,
@@ -50,10 +53,16 @@ async function main() {
     { merge: true },
   )
 
-  // A staff/borrower record with a fake email and no linked uid yet —
-  // click "Send Login Email" on this one in the UI to exercise the
-  // create-account-and-send path. Click it again afterwards to exercise
-  // the resend path.
+  // The portal borrower: a staff record with a real Auth account and a
+  // known password, linked via `uid` — sign straight into /lend as this
+  // person without going near the reset-email flow. Since the two-role
+  // change, 'staff' means lending-portal-only, so this is the account that
+  // exercises everything a non-admin can actually do.
+  // uid is 'seed-test-borrower', NOT 'seed-borrower' — seed-lending-portal.mjs
+  // already claims that one for borrower@nwu.test. Both scripts are meant to
+  // be run against the same emulator, and createUser() with a uid that
+  // already exists throws auth/uid-already-exists, so the two must not collide.
+  const borrower = await upsertUser('test.borrower@example.com', 'password123', 'seed-test-borrower')
   const staffId = 'seed-staff-1'
   await db.collection('staff').doc(staffId).set(
     {
@@ -61,6 +70,28 @@ async function main() {
       surname: 'Borrower',
       full_name: 'Test Borrower',
       email: 'test.borrower@example.com',
+      department: 'Testing',
+      card_uid: null,
+      is_active: true,
+      uid: borrower.uid,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    { merge: true },
+  )
+
+  // Linking the borrower above means clicking "Send Login Email" on that row
+  // now takes the *resend* branch, so this second record keeps the
+  // create-account-and-send path testable from a genuinely clean state:
+  // no Auth account, no uid, exactly like a freshly-added staff member.
+  // Click it once for the create path, again for the resend path.
+  const unlinkedStaffId = 'seed-staff-2'
+  await db.collection('staff').doc(unlinkedStaffId).set(
+    {
+      name: 'Unprovisioned',
+      surname: 'Borrower',
+      full_name: 'Unprovisioned Borrower',
+      email: 'new.borrower@example.com',
       department: 'Testing',
       card_uid: null,
       is_active: true,
@@ -72,8 +103,9 @@ async function main() {
   )
 
   console.log('Seeded emulator data:')
-  console.log(`  App login (admin role): admin@nwu.test / password123`)
-  console.log(`  Staff record: "${staffId}" — test.borrower@example.com, no uid yet`)
+  console.log(`  BICS admin (full access):      admin@nwu.test / password123          → /dashboard`)
+  console.log(`  Portal borrower (lend only):   test.borrower@example.com / password123 → /lend`)
+  console.log(`  Unprovisioned staff record:    new.borrower@example.com — no account yet, for "Send Login Email"`)
   console.log('')
   console.log('Emulator UI: http://127.0.0.1:4000')
   console.log('  Auth tab — see created accounts, incl. one created by "Send Login Email"')

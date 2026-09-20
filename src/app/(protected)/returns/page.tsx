@@ -4,7 +4,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { genRef, formatDateOnly, todayDateStr } from '@/lib/utils'
 import { CreditCard, CheckCircle, Users, Search, RotateCcw } from 'lucide-react'
 import { db } from '@/lib/firebase/config'
-import { collection, query, where, getDocs, addDoc, updateDoc, doc, getDoc, orderBy, limit } from 'firebase/firestore'
+import { collection, query, where, getDocs, addDoc, updateDoc, doc, getDoc, orderBy } from 'firebase/firestore'
 import { logAudit } from '@/lib/firebase/audit'
 import { useAuth } from '@/context/AuthContext'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -171,6 +171,13 @@ export default function ReturnsPage() {
       })
     })
 
+    // Lines Selouna has written off (Dashboard → Resolve) are NOT
+    // excluded here. A write-off just means she's stopped chasing the
+    // item and it's no longer flagged as outstanding elsewhere (Dashboard,
+    // Staff page) — it doesn't mean the item can never physically come
+    // back. If it does turn up, it must still be processable as a normal
+    // return, so this page deliberately ignores waived quantity and bases
+    // returnable purely on what hasn't actually been returned yet.
     const openLines: OpenLine[] = []
     outTxnsSnap.forEach(doc => {
       const txn = doc.data()
@@ -204,22 +211,36 @@ export default function ReturnsPage() {
     setLoading(false)
   }
 
-  async function loadStaffList(qStr: string) {
+  // Fetched once per dialog-open, not per keystroke — previously this
+  // re-queried Firestore with `limit(20)` on every character typed, so a
+  // staff member outside the first 20 active staff (alphabetically) could
+  // never be found by typing their name. Now the full active roster is
+  // fetched once and every keystroke just filters that in-memory list, so
+  // no one can be searched into invisibility as the roster grows.
+  const [staffAll, setStaffAll] = useState<StaffMember[]>([])
+
+  async function loadAllStaff() {
     setStaffLoading(true)
-    const snap = await getDocs(query(collection(db, 'staff'), where('is_active', '==', true), orderBy('full_name'), limit(20)))
-    let data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as StaffMember[]
-    if (qStr) {
-      const s = qStr.toLowerCase()
-      data = data.filter(st =>
-        (st.full_name && st.full_name.toLowerCase().includes(s))
-      )
-    }
+    const snap = await getDocs(query(collection(db, 'staff'), where('is_active', '==', true), orderBy('full_name')))
+    const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as StaffMember[]
+    setStaffAll(data)
     setStaffList(data)
     setStaffLoading(false)
   }
 
+  function filterStaffList(qStr: string) {
+    if (!qStr) { setStaffList(staffAll); return }
+    const s = qStr.toLowerCase()
+    setStaffList(staffAll.filter(st =>
+      (st.full_name && st.full_name.toLowerCase().includes(s)) ||
+      (st.email && st.email.toLowerCase().includes(s))
+    ))
+  }
+
   function openStaffSearch() {
-    setStaffSearch(''); loadStaffList(''); setShowStaffSearch(true)
+    setStaffSearch('')
+    loadAllStaff()
+    setShowStaffSearch(true)
   }
 
   function updateReturning(lineId: string, val: number) {
@@ -301,7 +322,7 @@ export default function ReturnsPage() {
   const toReturn = lines.filter(l => l.returning > 0)
 
   return (
-    <div className="max-w-[700px]">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground">Returns</h1>
         <p className="mt-1 text-sm text-muted-foreground">Process equipment returns from NWU staff</p>
@@ -315,7 +336,7 @@ export default function ReturnsPage() {
 
       {/* Step: Staff */}
       {step === 'staff' && (
-        <Card>
+        <Card className="max-w-[700px]">
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><CreditCard className="size-4" /> Identify Staff Member</CardTitle>
           </CardHeader>
@@ -341,7 +362,7 @@ export default function ReturnsPage() {
 
       {/* Step: Items */}
       {step === 'items' && staff && (
-        <div className="flex flex-col gap-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-4">
           <Card>
             <CardContent className="flex items-center gap-4">
               <div className="flex size-10 items-center justify-center rounded-full bg-accent">
@@ -355,19 +376,19 @@ export default function ReturnsPage() {
             </CardContent>
           </Card>
 
-          <Card className="py-0">
+          <Card className="flex min-h-0 flex-1 flex-col py-0">
             <CardHeader className="flex-row items-center justify-between border-b pt-4">
               <CardTitle>Items Currently Issued</CardTitle>
               <span className="text-sm text-muted-foreground">Set quantity to return (0 = keep)</span>
             </CardHeader>
-            <div className="overflow-x-auto">
+            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto">
               {lines.length === 0 ? (
                 <div className="p-8 text-center text-sm text-muted-foreground">
                   No outstanding items found for this staff member.
                 </div>
               ) : (
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="sticky top-0 z-10 bg-card">
                     <TableRow>
                       <TableHead>Product</TableHead>
                       <TableHead>Ref</TableHead>
@@ -423,7 +444,7 @@ export default function ReturnsPage() {
 
       {/* Done */}
       {step === 'done' && (
-        <Card>
+        <Card className="max-w-[700px]">
           <CardContent className="py-10 text-center">
             <CheckCircle className="mx-auto mb-4 size-12 text-emerald-500" />
             <h2 className="mb-2 text-xl font-bold">Return Processed Successfully</h2>
@@ -443,9 +464,9 @@ export default function ReturnsPage() {
           </DialogHeader>
           <div className="relative">
             <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input className="pl-8" placeholder="Search name, department…"
+            <Input className="pl-8" placeholder="Search name, email…"
               value={staffSearch} autoFocus
-              onChange={e => { setStaffSearch(e.target.value); loadStaffList(e.target.value) }} />
+              onChange={e => { setStaffSearch(e.target.value); filterStaffList(e.target.value) }} />
           </div>
           <div className="-mx-6 flex-1 overflow-y-auto border-t">
             {staffLoading && <div className="p-6 text-center text-sm text-muted-foreground">Loading…</div>}
@@ -453,7 +474,10 @@ export default function ReturnsPage() {
             {staffList.map(s => (
               <button key={s.id} onClick={() => { setShowStaffSearch(false); loadOpenItems(s, true) }}
                 className="block w-full border-b px-6 py-3 text-left hover:bg-muted">
-                <div className="font-medium text-foreground">{s.full_name}</div>
+                <div className="font-medium text-foreground">
+                  {s.full_name}
+                  {s.email && <span className="font-normal text-muted-foreground"> - {s.email}</span>}
+                </div>
                 <div className="text-xs text-muted-foreground">{s.department ?? 'No department'}</div>
               </button>
             ))}

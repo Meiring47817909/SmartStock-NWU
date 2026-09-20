@@ -1,6 +1,16 @@
 // Database types for NWU BICS – mirrors the Firebase Firestore schema
 
-export type Role = 'admin' | 'manager' | 'staff'
+// Two roles only.
+//   admin — Selouna and anyone else running the IT Store: every BICS page.
+//   staff — an NWU staff member who can do exactly one thing, apply for a
+//           loan request in the lending portal. No BICS access of any kind.
+//
+// A portal borrower normally has NO profiles/{uid} doc at all (they're
+// identified by a staff record whose `uid` matches — see StaffPortalContext).
+// A profiles doc carrying role 'staff' is treated identically: portal only.
+// So "not admin" is the single BICS gate, whether the profile is missing or
+// present-but-staff.
+export type Role = 'admin' | 'staff'
 export type TxnType = 'IN' | 'OUT' | 'RETURN' | 'ADJUST'
 
 export interface Profile {
@@ -16,6 +26,15 @@ export interface Category {
   description: string | null
   created_at: string
 }
+
+// How long a single loan of this product can run for, on the portal (see
+// LENDING_PORTAL section of loanRequests.ts's validateCartDates). Distinct
+// from lend_from/lend_to below (the window during which the product can be
+// borrowed AT ALL) — this caps the DURATION of any one loan within that
+// window. 'indefinite' additionally means the portal doesn't require a
+// return date at all, the same convenience Stock Out's own blank "Lend To"
+// already offers for a walk-in issue.
+export type LendingInterval = 'week_1' | 'week_2' | 'week_3' | 'month_1' | 'indefinite'
 
 export interface Product {
   id: number
@@ -37,6 +56,11 @@ export interface Product {
   // restriction — informational only, not currently enforced in Stock Out.
   lend_from: string | null
   lend_to: string | null
+  // Optional — missing on any product saved before this field existed;
+  // treated as 'week_1' wherever it's read (see DEFAULT_LENDING_INTERVAL in
+  // loanRequests.ts), preserving the flat 7-day cap that used to apply to
+  // every product.
+  lending_interval?: LendingInterval
   created_at: string
   updated_at: string
   // Firebase Storage paths (not download URLs) — resolved to a URL at
@@ -72,7 +96,14 @@ export interface Transaction {
   notes: string | null
   return_date: string | null
   linked_txn_id: number | null
-  manual_override: boolean
+  // "The staff member was picked from a list instead of scanning their
+  // card." Only Stock Out and Returns have a staff step that can be
+  // bypassed, so only OUT/RETURN ever write this — Stock In writes no
+  // staff_id at all, and so has no card scan to skip. Optional because a
+  // real IN document genuinely does not contain the field; anything
+  // reading it must therefore treat absent as false AND ignore it on a
+  // non-OUT/RETURN transaction (see audit-log and reports).
+  manual_override?: boolean
   // Loan window set by Selouna on Stock Out's Confirm step (YYYY-MM-DD,
   // native <input type="date"> format) — when the item is being lent out
   // and when it's due back. Only ever set on OUT transactions.
@@ -146,14 +177,23 @@ export interface LoanRequest {
   staff_name: string              // denormalized, same pattern as Transaction.staff_name
   status: LoanRequestStatus
   message: string | null          // optional note from staff at submission
+  admin_message: string | null    // optional note from Selouna, sent along with a counter
+                                   // or a decline — shown to the staff member on their My
+                                   // Requests page. Reused across whichever of those two
+                                   // actions was taken most recently (they're mutually
+                                   // exclusive transitions for a given request, so there's
+                                   // never a case where both need to be visible at once).
   from_date: string               // YYYY-MM-DD — current shared date range. Mutable: Selouna's
                                    // counter can change it, overwritten in place.
-  to_date: string                 // YYYY-MM-DD
+  to_date: string | null          // YYYY-MM-DD, or null for an indefinite loan (a product whose
+                                   // lending_interval is 'indefinite' doesn't require a return
+                                   // date) — same open-ended convention as Product.lend_to and
+                                   // Transaction.lend_to.
   // Immutable snapshot of what was originally submitted — set once, never
   // touched again — so the staff-facing counter-diff view can show what
   // Selouna changed even after from_date/to_date are overwritten in place.
   original_from_date: string
-  original_to_date: string
+  original_to_date: string | null
   created_at: string              // ISO — set once at submission, never changes
   updated_at: string              // ISO — bumped on every status transition. Expiry is computed
                                    // from this (see loanRequests.ts) — never store an expiry date.
@@ -172,7 +212,37 @@ export interface LoanRequestLine {
   created_at: string
 }
 
-export type AuditAction = 'create' | 'update' | 'delete' | 'activate' | 'deactivate'
+// A permanent write-off of an outstanding loan line: Selouna has agreed the
+// staff member keeps the item, so it must stop appearing in Outstanding
+// Returns without a RETURN transaction ever happening.
+//
+// Deliberately its own append-only collection rather than a mutable flag on
+// the OUT transaction/line: `transactions` and `transaction_lines` are
+// locked `allow update, delete: if false` in firestore.rules, and that
+// immutability is load-bearing (the whole outstanding calculation is a
+// replay of issued-minus-returned over an append-only ledger). A waiver is
+// just a third kind of entry in that replay — subtracted exactly the way a
+// RETURN's lines are — so nothing about the existing ledger has to change.
+//
+// NOTE: a waiver never touches Product.quantity_on_hand. The stock was
+// decremented when it was issued and the item is not coming back, so the
+// on-hand count is already correct; "resolving" is about the paperwork, not
+// the shelf.
+export interface ReturnWaiver {
+  id: string                 // Firestore document ID
+  transaction_id: string      // the originating OUT transaction's document ID
+  product_id: string          // Firestore document ID of the product
+  product_name: string        // denormalized, same pattern as TransactionLine
+  staff_id: number | null     // denormalized from the OUT transaction
+  staff_name: string | null
+  quantity: number            // units written off — the line's remaining balance at resolve time
+  reason: string | null       // free-text note, currently always null (no UI for it yet)
+  created_at: string
+  resolved_by_uid: string | null
+  resolved_by_name: string | null
+}
+
+export type AuditAction = 'create' | 'update' | 'activate' | 'deactivate' | 'resolve'
 export type AuditEntityType = 'product' | 'category' | 'staff' | 'transaction' | 'loan_request'
 
 export interface AuditLogEntry {

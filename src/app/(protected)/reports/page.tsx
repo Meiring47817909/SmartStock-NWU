@@ -3,7 +3,8 @@
 import { Fragment, useEffect, useState } from 'react'
 import { formatDate, formatDateOnly, isoToLocalDateStr } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
-import { collection, query, where, getDocs, orderBy, limit, doc, getDoc } from 'firebase/firestore'
+import { loadWaivedByTxn, waivedQty } from '@/lib/firebase/waivers'
+import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore'
 import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
@@ -44,24 +45,24 @@ export default function ReportsPage() {
   const [tab, setTab] = useState<ReportTab>('stock-levels')
 
   return (
-    <div>
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground">Reports</h1>
         <p className="mt-1 text-sm text-muted-foreground">NWU IT Store · Potchefstroom</p>
       </div>
 
-      <Tabs value={tab} onValueChange={v => setTab(v as ReportTab)}>
-        <TabsList variant="line" className="mb-6 w-full justify-start overflow-x-auto border-b">
+      <Tabs value={tab} onValueChange={v => setTab(v as ReportTab)} className="min-h-0 flex-1">
+        <TabsList variant="line" className="mb-6 w-full justify-start overflow-x-auto overflow-y-hidden border-b">
           {TABS.map(t => (
             <TabsTrigger key={t.id} value={t.id} className="whitespace-nowrap">{t.label}</TabsTrigger>
           ))}
         </TabsList>
 
-        <TabsContent value="stock-levels"><StockLevelsReport /></TabsContent>
-        <TabsContent value="low-stock"><LowStockReport /></TabsContent>
-        <TabsContent value="issued-per-staff"><IssuedPerStaffReport /></TabsContent>
-        <TabsContent value="returns"><ReturnsReport /></TabsContent>
-        <TabsContent value="transaction-history"><TransactionHistoryReport /></TabsContent>
+        <TabsContent value="stock-levels" className="min-h-0"><StockLevelsReport /></TabsContent>
+        <TabsContent value="low-stock" className="min-h-0"><LowStockReport /></TabsContent>
+        <TabsContent value="issued-per-staff" className="min-h-0"><IssuedPerStaffReport /></TabsContent>
+        <TabsContent value="returns" className="min-h-0"><ReturnsReport /></TabsContent>
+        <TabsContent value="transaction-history" className="min-h-0"><TransactionHistoryReport /></TabsContent>
       </Tabs>
     </div>
   )
@@ -95,7 +96,7 @@ function StockLevelsReport() {
   const totalUnits = data.reduce((s, p) => s + (p.quantity_on_hand || 0), 0)
 
   return (
-    <div>
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-4 flex items-center gap-3">
         <Select
           items={{ [ALL_CATEGORIES]: 'All categories', ...Object.fromEntries(cats.map((c: any) => [c.id, c.name])) }}
@@ -110,9 +111,10 @@ function StockLevelsReport() {
         </Select>
         <span className="text-sm text-muted-foreground">{data.length} products · {totalUnits} total units</span>
       </div>
-      <Card className="py-0">
+      <Card className="min-h-0 flex-1 py-0">
+        <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
               <TableHead>Product</TableHead>
               <TableHead>Category</TableHead>
@@ -139,6 +141,7 @@ function StockLevelsReport() {
             })}
           </TableBody>
         </Table>
+        </div>
       </Card>
     </div>
   )
@@ -159,7 +162,7 @@ function LowStockReport() {
   }, [])
 
   return (
-    <div>
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-4">
         {!loading && (
           <div className={`text-sm font-semibold ${data.length > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
@@ -167,9 +170,10 @@ function LowStockReport() {
           </div>
         )}
       </div>
-      <Card className="py-0">
+      <Card className="min-h-0 flex-1 py-0">
+        <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
               <TableHead>Product</TableHead>
               <TableHead>Category</TableHead>
@@ -196,6 +200,7 @@ function LowStockReport() {
             })}
           </TableBody>
         </Table>
+        </div>
       </Card>
     </div>
   )
@@ -252,9 +257,10 @@ function IssuedPerStaffReport() {
   }
 
   return (
-    <Card className="py-0">
+    <Card className="h-full min-h-0 py-0">
+      <div className="min-h-0 flex-1 overflow-y-auto">
       <Table>
-        <TableHeader>
+        <TableHeader className="sticky top-0 z-10 bg-card">
           <TableRow>
             <TableHead>Staff Member</TableHead>
             <TableHead>Department</TableHead>
@@ -281,25 +287,34 @@ function IssuedPerStaffReport() {
                   <TableCell className="text-xs text-muted-foreground">{expanded === s.id ? '▲' : '▼'}</TableCell>
                 </TableRow>
                 {expanded === s.id && lines[s.id] && (
-                  lines[s.id].map((t: any) => (
-                    <TableRow key={t.id} className="bg-muted/50">
-                      <TableCell colSpan={2} className="pl-8 font-mono text-xs text-muted-foreground">
-                        {t.reference_no} · {formatDate(t.created_at)}
-                      </TableCell>
-                      <TableCell colSpan={2} className="text-xs text-muted-foreground">
-                        {(t.transaction_lines || []).map((l: any) => `${l.product_name ?? '?'} ×${l.quantity}`).join(', ')}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {t.lend_to ? <>Expected {formatDateOnly(t.lend_to)}</> : '—'}
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  lines[s.id].flatMap((t: any) => {
+                    // One row per line item on the transaction (not one row
+                    // per transaction with every item mashed into a single
+                    // comma-joined cell) — a multi-item Stock Out needs each
+                    // product and its own quantity to be its own line here.
+                    const tLines = t.transaction_lines || []
+                    const rows = tLines.length > 0 ? tLines : [null]
+                    return rows.map((l: any, idx: number) => (
+                      <TableRow key={`${t.id}_${idx}`} className="bg-muted/50">
+                        <TableCell colSpan={2} className="pl-8 font-mono text-xs text-muted-foreground">
+                          {t.reference_no} · {formatDate(t.created_at)}
+                        </TableCell>
+                        <TableCell colSpan={2} className="text-xs text-muted-foreground">
+                          {l ? `${l.product_name ?? '?'} ×${l.quantity}` : 'No items recorded'}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {t.lend_to ? <>Expected {formatDateOnly(t.lend_to)}</> : '—'}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  })
                 )}
               </Fragment>
             )
           })}
         </TableBody>
       </Table>
+      </div>
     </Card>
   )
 }
@@ -356,6 +371,9 @@ function ReturnsReport() {
 
       // Fetch each distinct linked OUT transaction once, for its Lend To
       // date and originally-issued quantities.
+      // Written-off lines are no longer outstanding, so a Partial row must
+      // not keep claiming a balance Selouna has already resolved away.
+      const waivedByTxn = await loadWaivedByTxn()
       const linkedIds = Array.from(new Set(txns.map(t => t.linked_txn_id).filter(Boolean))) as string[]
       const outTxnById: Record<string, any> = {}
       await Promise.all(linkedIds.map(async (id) => {
@@ -381,7 +399,8 @@ function ReturnsReport() {
               .map((l: any) => {
                 const issued = l.quantity || 0
                 const returned = returnedByOutTxn[outTxn.id]?.[l.product_id] ?? 0
-                return { product_name: l.product_name ?? 'Unknown', outstanding: issued - returned }
+                const waived = waivedQty(waivedByTxn, outTxn.id, l.product_id)
+                return { product_name: l.product_name ?? 'Unknown', outstanding: issued - returned - waived }
               })
               .filter((l: any) => l.outstanding > 0)
           : []
@@ -395,9 +414,10 @@ function ReturnsReport() {
   }, [])
 
   return (
-    <Card className="py-0">
+    <Card className="h-full min-h-0 py-0">
+      <div className="min-h-0 flex-1 overflow-y-auto">
       <Table>
-        <TableHeader>
+        <TableHeader className="sticky top-0 z-10 bg-card">
           <TableRow>
             <TableHead>Reference</TableHead>
             <TableHead>Staff</TableHead>
@@ -458,6 +478,7 @@ function ReturnsReport() {
           })}
         </TableBody>
       </Table>
+      </div>
     </Card>
   )
 }
@@ -472,9 +493,12 @@ function TransactionHistoryReport() {
 
   useEffect(() => {
     setLoading(true)
-    let q = query(collection(db, 'transactions'), orderBy('created_at', 'desc'), limit(200))
+    // Fetches the full transaction history — no server-side limit — so the
+    // From/To date filters below can never silently miss older rows that
+    // fell outside a capped "most recent N" window.
+    let q = query(collection(db, 'transactions'), orderBy('created_at', 'desc'))
     if (typeFilter) {
-      q = query(collection(db, 'transactions'), where('transaction_type', '==', typeFilter), orderBy('created_at', 'desc'), limit(200))
+      q = query(collection(db, 'transactions'), where('transaction_type', '==', typeFilter), orderBy('created_at', 'desc'))
     }
     // Note: complex queries with inequality on one field and ordering on another require composite index in Firestore.
     // Client-side filtering dates is easier for small/medium datasets.
@@ -507,7 +531,7 @@ function TransactionHistoryReport() {
   }, [typeFilter, fromDate, toDate])
 
   return (
-    <div>
+    <div className="flex h-full min-h-0 flex-col">
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Select
           items={{ [ALL_TYPES]: 'All types', IN: 'Stock In', OUT: 'Stock Out', RETURN: 'Returns', ADJUST: 'Adjustments' }}
@@ -530,9 +554,10 @@ function TransactionHistoryReport() {
         )}
         <span className="self-center text-sm text-muted-foreground">{data.length} transactions</span>
       </div>
-      <Card className="py-0">
+      <Card className="min-h-0 flex-1 py-0">
+        <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
               <TableHead>Reference</TableHead>
               <TableHead>Type</TableHead>
@@ -557,7 +582,9 @@ function TransactionHistoryReport() {
                     <TableCell><Badge className={`${TXN_BADGE_CLASS[t.transaction_type] ?? ''} uppercase`}>{t.transaction_type}</Badge></TableCell>
                     <TableCell className="text-muted-foreground">{t.staff_name ?? '—'}</TableCell>
                     <TableCell className="text-muted-foreground">{tLines.length} line{tLines.length !== 1 ? 's' : ''} · {totalQty} units</TableCell>
-                    <TableCell>{t.manual_override && <Badge className="bg-amber-100 text-amber-800 uppercase">Manual</Badge>}</TableCell>
+                    {/* Only OUT/RETURN have a staff step whose card scan can be
+                        skipped -- see the same gate in audit-log/page.tsx. */}
+                    <TableCell>{t.manual_override && (t.transaction_type === 'OUT' || t.transaction_type === 'RETURN') && <Badge className="bg-amber-100 text-amber-800 uppercase">Manual</Badge>}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{formatDate(t.created_at)}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{isExpanded ? '▲' : '▼'}</TableCell>
                   </TableRow>
@@ -596,6 +623,7 @@ function TransactionHistoryReport() {
             })}
           </TableBody>
         </Table>
+        </div>
       </Card>
     </div>
   )

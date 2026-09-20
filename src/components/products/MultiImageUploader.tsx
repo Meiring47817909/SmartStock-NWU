@@ -50,6 +50,7 @@ export default function MultiImageUploader({
     if (files.length > room) {
       toast.warning(`Only ${max} image${max !== 1 ? 's' : ''} allowed per product`, {
         description: room > 0 ? `Added the first ${room}, skipped the rest.` : 'Remove an image to add another.',
+        classNames: { description: '!text-black' },
       })
     }
     const accepted = files.slice(0, room)

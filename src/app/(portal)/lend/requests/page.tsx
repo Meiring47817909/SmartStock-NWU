@@ -6,7 +6,7 @@ import { db } from '@/lib/firebase/config'
 import { collection, query, where, getDocs } from 'firebase/firestore'
 import { useStaffPortal } from '@/context/StaffPortalContext'
 import { acceptCounter, declineCounter, withdrawRequest, expireIfNeeded } from '@/lib/firebase/loanRequests'
-import { formatDateOnly } from '@/lib/utils'
+import { formatDateOnly, formatLendWindow } from '@/lib/utils'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -40,7 +40,7 @@ function RequestCard({
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between border-b py-3">
-        <CardTitle className="text-sm">{formatDateOnly(request.from_date)} – {formatDateOnly(request.to_date)}</CardTitle>
+        <CardTitle className="text-sm">{formatLendWindow(request.from_date, request.to_date)}</CardTitle>
         <Badge className={`${STATUS_BADGE_CLASS[request.status]} uppercase`}>{request.status.replace('_', ' ')}</Badge>
       </CardHeader>
       <div className="flex flex-col gap-3 p-4">
@@ -75,7 +75,19 @@ function RequestCard({
           </ul>
         )}
 
-        {request.message && <p className="text-sm text-muted-foreground">&ldquo;{request.message}&rdquo;</p>}
+        {request.message && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">Your note</p>
+            <p className="text-sm text-muted-foreground">&ldquo;{request.message}&rdquo;</p>
+          </div>
+        )}
+
+        {request.admin_message && (
+          <div className="rounded-md border bg-muted/50 p-2">
+            <p className="text-xs font-medium text-muted-foreground">Message from Selouna</p>
+            <p className="mt-0.5 text-sm text-foreground">&ldquo;{request.admin_message}&rdquo;</p>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           {onAccept && <Button size="sm" disabled={busy} onClick={onAccept}>{busy ? '…' : 'Accept'}</Button>}

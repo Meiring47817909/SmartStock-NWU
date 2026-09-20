@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { usePortalCart } from '@/context/PortalCartContext'
 import { useStaffPortal } from '@/context/StaffPortalContext'
-import { submitLoanRequest, validateCartDates } from '@/lib/firebase/loanRequests'
-import { todayDateStr, addDaysToDateStr } from '@/lib/utils'
+import { submitLoanRequest, validateCartDates, tightestLendingCap, lendingIntervalLabel } from '@/lib/firebase/loanRequests'
+import { todayDateStr, addDaysToDateStr, formatLendWindow } from '@/lib/utils'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
@@ -27,8 +27,13 @@ export default function LendCartPage() {
   const [checking, setChecking] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
+  // A To date is only required while at least one cart item has a finite
+  // lending interval — validateCartDates itself decides that (and re-checks
+  // it here too since the cart's contents, not just the dates, can change
+  // which item is tightest), so the effect must still run on a blank toDate
+  // rather than skipping validation entirely the way it used to.
   useEffect(() => {
-    if (cart.length === 0 || !fromDate || !toDate) { setErrors([]); return }
+    if (cart.length === 0 || !fromDate) { setErrors([]); return }
     let cancelled = false
     setChecking(true)
     validateCartDates(cart, fromDate, toDate).then((result) => {
@@ -37,8 +42,10 @@ export default function LendCartPage() {
     return () => { cancelled = true }
   }, [cart, fromDate, toDate])
 
+  const tightestCap = tightestLendingCap(cart)
+
   async function handleSubmit() {
-    if (!staffMember || cart.length === 0 || !fromDate || !toDate) return
+    if (!staffMember || cart.length === 0 || !fromDate || (!toDate && tightestCap)) return
     setSubmitting(true)
     try {
       await submitLoanRequest(
@@ -64,7 +71,7 @@ export default function LendCartPage() {
     )
   }
 
-  const canSubmit = fromDate && toDate && errors.length === 0 && !checking
+  const canSubmit = fromDate && (toDate || !tightestCap) && errors.length === 0 && !checking
 
   return (
     <div className="max-w-[700px]">
@@ -74,10 +81,13 @@ export default function LendCartPage() {
       </div>
 
       <Card className="mb-4 py-0">
+        <div className="max-h-96 overflow-y-auto">
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
               <TableHead>Product</TableHead>
+              <TableHead>Lendable</TableHead>
+              <TableHead>Max loan</TableHead>
               <TableHead>Quantity</TableHead>
               <TableHead></TableHead>
             </TableRow>
@@ -86,6 +96,12 @@ export default function LendCartPage() {
             {cart.map((item) => (
               <TableRow key={item.product.id}>
                 <TableCell className="font-medium">{item.product.name}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">
+                  {formatLendWindow(item.product.lend_from, item.product.lend_to)}
+                </TableCell>
+                <TableCell className="text-sm text-muted-foreground">
+                  {lendingIntervalLabel(item.product.lending_interval)}
+                </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1.5">
                     <Button variant="ghost" size="icon-sm" onClick={() => updateQuantity(item.product.id, item.quantity - 1)}>−</Button>
@@ -102,6 +118,7 @@ export default function LendCartPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       </Card>
 
       <Card>
@@ -116,13 +133,22 @@ export default function LendCartPage() {
                 onChange={(e) => { setFromDate(e.target.value); if (toDate && toDate < e.target.value) setToDate('') }} />
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="to-date">To</Label>
+              <Label htmlFor="to-date">To {!tightestCap && <span className="font-normal text-muted-foreground">(optional)</span>}</Label>
               <Input id="to-date" type="date" className="w-44" value={toDate}
-                min={fromDate || todayDateStr()} max={fromDate ? addDaysToDateStr(fromDate, 7) : undefined}
+                min={fromDate || todayDateStr()}
+                max={fromDate && tightestCap ? addDaysToDateStr(fromDate, tightestCap.days) : undefined}
                 disabled={!fromDate}
                 onChange={(e) => setToDate(e.target.value)} />
             </div>
           </div>
+
+          {fromDate && (
+            <p className="text-xs text-muted-foreground">
+              {tightestCap
+                ? `Based on the items in your cart, this loan can run for up to ${tightestCap.label.toLowerCase()}.`
+                : "Every item in your cart can be borrowed indefinitely — you don't need to set a To date unless you want one."}
+            </p>
+          )}
 
           <div className="grid gap-1.5">
             <Label htmlFor="message">Message (optional)</Label>
