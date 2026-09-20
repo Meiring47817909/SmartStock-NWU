@@ -11,7 +11,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
+  SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import type { AuditLogEntry, AuditAction, AuditEntityType, TransactionLine, LoanRequestLine } from '@/types/database'
 
@@ -72,6 +73,67 @@ function loanRequestStatusLabel(status: string): string {
 
 const ALL_ENTITIES = '__all__'
 const ALL_ACTIONS = '__all__'
+
+/*
+ * The "Activity" column and its filter used to disagree, which made the
+ * filter look broken: the column showed a DERIVED value (a transaction's
+ * IN/OUT/RETURN type, or a loan request's new status) while the dropdown
+ * filtered on the raw `action` field. Since `transactions` is append-only
+ * every transaction entry logs action 'create', so picking "Create"
+ * returned every transaction in the log — each one badged OUT or RETURN,
+ * none of them saying "create" anywhere.
+ *
+ * activityKey() is now the single source of truth. The badge, the filter
+ * options and the filter comparison all derive from it, so the column and
+ * the dropdown cannot drift apart again.
+ */
+function activityKey(e: AuditLogEntry): string {
+  const loanStatus = e.entity_type === 'loan_request' ? e.after?.status : undefined
+  if (typeof loanStatus === 'string') return `status:${loanStatus}`
+  // A resolve entry is logged against the transaction it closes out and
+  // carries the waiver's fields, not a transaction_type — so it falls
+  // through to the action branch below, as 'action:resolve'.
+  const txnType = e.entity_type === 'transaction' ? e.after?.transaction_type : undefined
+  if (typeof txnType === 'string') return `txn:${txnType}`
+  return `action:${e.action}`
+}
+
+// Label + badge colour per activity key. Anything not listed falls back to
+// the raw key's suffix, so an unrecognised value still renders sensibly.
+const ACTIVITY: Record<string, { label: string; className: string }> = {
+  'txn:IN': { label: 'In', className: TXN_BADGE_CLASS.IN },
+  'txn:OUT': { label: 'Out', className: TXN_BADGE_CLASS.OUT },
+  'txn:RETURN': { label: 'Return', className: TXN_BADGE_CLASS.RETURN },
+  'txn:ADJUST': { label: 'Adjust', className: TXN_BADGE_CLASS.ADJUST },
+
+  'status:pending': { label: 'Pending', className: LOAN_REQUEST_BADGE_CLASS.pending },
+  'status:countered': { label: 'Countered', className: LOAN_REQUEST_BADGE_CLASS.countered },
+  'status:accepted': { label: 'Accepted', className: LOAN_REQUEST_BADGE_CLASS.accepted },
+  'status:fulfilled': { label: 'Fulfilled', className: LOAN_REQUEST_BADGE_CLASS.fulfilled },
+  'status:declined': { label: 'Declined', className: LOAN_REQUEST_BADGE_CLASS.declined },
+  'status:expired': { label: 'Expired', className: LOAN_REQUEST_BADGE_CLASS.expired },
+  'status:withdrawn': { label: 'Withdrawn', className: LOAN_REQUEST_BADGE_CLASS.withdrawn },
+  'status:no_show': { label: 'Not Picked Up', className: LOAN_REQUEST_BADGE_CLASS.no_show },
+
+  'action:create': { label: 'Create', className: ACTION_BADGE_CLASS.create },
+  'action:update': { label: 'Update', className: ACTION_BADGE_CLASS.update },
+  'action:activate': { label: 'Activate', className: ACTION_BADGE_CLASS.activate },
+  'action:deactivate': { label: 'Deactivate', className: ACTION_BADGE_CLASS.deactivate },
+  'action:resolve': { label: 'Resolved', className: ACTION_BADGE_CLASS.resolve },
+}
+
+function activityLabel(key: string): string {
+  return ACTIVITY[key]?.label ?? key.split(':')[1]?.replace('_', ' ') ?? key
+}
+
+// The dropdown, grouped so stock movements, loan-request transitions and
+// plain record edits don't read as one flat soup. Order matches the table's
+// own vocabulary, not the underlying field names.
+const ACTIVITY_GROUPS: { label: string; keys: string[] }[] = [
+  { label: 'Stock movements', keys: ['txn:IN', 'txn:OUT', 'txn:RETURN', 'txn:ADJUST', 'action:resolve'] },
+  { label: 'Loan requests', keys: ['status:pending', 'status:countered', 'status:accepted', 'status:fulfilled', 'status:declined', 'status:expired', 'status:withdrawn', 'status:no_show'] },
+  { label: 'Record changes', keys: ['action:create', 'action:update', 'action:activate', 'action:deactivate'] },
+]
 
 // Plain-English labels for the raw Firestore field names that show up in
 // product/category/staff before-after snapshots — Selouna shouldn't have to
@@ -453,7 +515,7 @@ export default function AuditLogPage() {
 
   const filtered = entries.filter(e =>
     (!entityFilter || e.entity_type === entityFilter) &&
-    (!actionFilter || e.action === actionFilter)
+    (!actionFilter || activityKey(e) === actionFilter)
   )
 
   async function toggleExpand(e: AuditLogEntry) {
@@ -471,22 +533,16 @@ export default function AuditLogPage() {
     }
   }
 
-  function actionBadge(e: AuditLogEntry) {
-    const loanStatus = e.entity_type === 'loan_request' ? e.after?.status : undefined
-    if (typeof loanStatus === 'string') {
-      return <Badge className={`${LOAN_REQUEST_BADGE_CLASS[loanStatus] ?? ''} uppercase`}>{loanRequestStatusLabel(loanStatus)}</Badge>
-    }
-    const txnType = e.entity_type === 'transaction' ? e.after?.transaction_type : undefined
-    if (typeof txnType === 'string') {
-      return <Badge className={`${TXN_BADGE_CLASS[txnType] ?? ''} uppercase`}>{txnType}</Badge>
-    }
-    // A resolved (written-off) return logs against the transaction it
-    // closes out (see waivers.ts) — "resolve" reads oddly as a verb badge,
-    // so show it as "Resolved" rather than the generic uppercased action.
-    if (e.action === 'resolve') {
-      return <Badge className={`${ACTION_BADGE_CLASS.resolve} uppercase`}>Resolved</Badge>
-    }
-    return <Badge className={`${ACTION_BADGE_CLASS[e.action] ?? ''} uppercase`}>{e.action}</Badge>
+  // Renders from activityKey(), the same value the filter compares
+  // against — so what you see is exactly what you can filter by.
+  function activityBadge(e: AuditLogEntry) {
+    const key = activityKey(e)
+    const meta = ACTIVITY[key]
+    return (
+      <Badge className={`${meta?.className ?? ''} uppercase`}>
+        {activityLabel(key)}
+      </Badge>
+    )
   }
 
   return (
@@ -515,18 +571,26 @@ export default function AuditLogPage() {
           </SelectContent>
         </Select>
         <Select
-          items={{ [ALL_ACTIONS]: 'All actions', create: 'Create', update: 'Update', activate: 'Activate', deactivate: 'Deactivate', resolve: 'Resolved' }}
+          items={{
+            [ALL_ACTIONS]: 'All activity',
+            ...Object.fromEntries(
+              ACTIVITY_GROUPS.flatMap(g => g.keys.map(k => [k, activityLabel(k)]))
+            ),
+          }}
           value={actionFilter || ALL_ACTIONS}
           onValueChange={v => setActionFilter(v && v !== ALL_ACTIONS ? v : '')}
         >
-          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value={ALL_ACTIONS}>All actions</SelectItem>
-            <SelectItem value="create">Create</SelectItem>
-            <SelectItem value="update">Update</SelectItem>
-            <SelectItem value="activate">Activate</SelectItem>
-            <SelectItem value="deactivate">Deactivate</SelectItem>
-            <SelectItem value="resolve">Resolved</SelectItem>
+            <SelectItem value={ALL_ACTIONS}>All activity</SelectItem>
+            {ACTIVITY_GROUPS.map(group => (
+              <SelectGroup key={group.label}>
+                <SelectLabel>{group.label}</SelectLabel>
+                {group.keys.map(k => (
+                  <SelectItem key={k} value={k}>{activityLabel(k)}</SelectItem>
+                ))}
+              </SelectGroup>
+            ))}
           </SelectContent>
         </Select>
         <Input type="date" className="w-40" value={fromDate} onChange={e => setFromDate(e.target.value)} placeholder="From date" />
@@ -544,7 +608,7 @@ export default function AuditLogPage() {
             <TableRow>
               <TableHead>Date</TableHead>
               <TableHead>User</TableHead>
-              <TableHead>Action</TableHead>
+              <TableHead>Activity</TableHead>
               <TableHead>Entity</TableHead>
               <TableHead>Entity ID</TableHead>
               <TableHead></TableHead>
@@ -558,7 +622,7 @@ export default function AuditLogPage() {
                 <TableRow className="cursor-pointer" onClick={() => toggleExpand(e)}>
                   <TableCell className="text-xs text-muted-foreground">{formatDate(e.created_at)}</TableCell>
                   <TableCell className="font-medium">{e.user_name ?? '—'}</TableCell>
-                  <TableCell>{actionBadge(e)}</TableCell>
+                  <TableCell>{activityBadge(e)}</TableCell>
                   <TableCell className="text-muted-foreground">{ENTITY_LABEL[e.entity_type] ?? e.entity_type}</TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">{e.entity_id}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{expanded === e.id ? '▲' : '▼'}</TableCell>
