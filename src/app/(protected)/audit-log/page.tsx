@@ -342,11 +342,13 @@ function ProductUpdateSummary({
   return (
     <div className="flex flex-col gap-1.5">
       {name && (
-        <div className="flex items-baseline gap-1.5 border-b pb-2">
-          <span className="text-[0.7rem] font-semibold tracking-wide text-muted-foreground uppercase">
-            Product
-          </span>
-          <span className="text-sm font-semibold text-foreground">{name}</span>
+        // Same markup FieldDiff uses for a field on a create entry (its
+        // no-`before` branch), so "Name: ..." reads identically whether
+        // the product was just created or edited. friendlyLabel keeps the
+        // wording tied to FIELD_LABELS rather than hard-coding it.
+        <div className="flex flex-wrap items-baseline gap-1.5 text-sm">
+          <span className="font-medium text-foreground">{friendlyLabel('name')}:</span>
+          <span className="text-foreground">{name}</span>
         </div>
       )}
       <FieldDiff before={before} after={after} />
