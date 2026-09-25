@@ -459,10 +459,26 @@ async function main() {
     after: { is_active: false, name: 'Demo', surname: 'Staff Badge -- Deactivated', full_name: S.BadgeDeactivated.full_name, email: S.BadgeDeactivated.email },
     createdAt: isoAt(-19),
   })
+  // Portal access: granting a login, and later re-issuing the link. These
+  // used to be logged as a plain 'update' carrying only { uid }, which the
+  // Audit Log rendered as "No details recorded" because uid is a hidden
+  // field — so both shapes are seeded in their corrected form here.
+  const portalAccessContext = {
+    full_name: S.PortalLinked.full_name,
+    email: S.PortalLinked.email,
+    uid: 'seed-demo-portallinked-uid',
+  }
   await writeAudit({
-    userId: ADMIN_UID, userName: ADMIN_NAME, action: 'update', entityType: 'staff', entityId: S.PortalLinked.id,
-    before: { uid: null }, after: { uid: 'seed-demo-portallinked-uid' },
+    userId: ADMIN_UID, userName: ADMIN_NAME,
+    action: 'grant_access', entityType: 'staff', entityId: S.PortalLinked.id,
+    before: portalAccessContext, after: portalAccessContext,
     createdAt: isoAt(-18),
+  })
+  await writeAudit({
+    userId: ADMIN_UID, userName: ADMIN_NAME,
+    action: 'resend_access', entityType: 'staff', entityId: S.PortalLinked.id,
+    before: portalAccessContext, after: portalAccessContext,
+    createdAt: isoAt(-11),
   })
 
   // =====================================================================

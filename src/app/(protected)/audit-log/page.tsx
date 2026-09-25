@@ -22,6 +22,8 @@ const ACTION_BADGE_CLASS: Record<AuditAction, string> = {
   activate: 'bg-emerald-100 text-emerald-800',
   deactivate: 'bg-accent text-accent-foreground',
   resolve: 'bg-violet-100 text-violet-800',
+  grant_access: 'bg-emerald-100 text-emerald-800',
+  resend_access: 'bg-sky-100 text-sky-800',
 }
 
 // Same mapping as TXN_BADGE_CLASS on the Reports page's transaction-history
@@ -130,6 +132,8 @@ const ACTIVITY: Record<string, {
   // Only staff records can be activated or deactivated.
   'action:activate': { label: 'Activate', className: ACTION_BADGE_CLASS.activate, entities: ['staff'] },
   'action:deactivate': { label: 'Deactivate', className: ACTION_BADGE_CLASS.deactivate, entities: ['staff'] },
+  'action:grant_access': { label: 'Portal Access Granted', className: ACTION_BADGE_CLASS.grant_access, entities: ['staff'] },
+  'action:resend_access': { label: 'Login Link Resent', className: ACTION_BADGE_CLASS.resend_access, entities: ['staff'] },
 }
 
 // Activity keys applicable to an entity filter ('' meaning "all entities").
@@ -150,6 +154,7 @@ const ACTIVITY_GROUPS: { label: string; keys: string[] }[] = [
   { label: 'Stock movements', keys: ['txn:IN', 'txn:OUT', 'txn:RETURN', 'txn:ADJUST', 'action:resolve'] },
   { label: 'Loan requests', keys: ['status:pending', 'status:countered', 'status:accepted', 'status:fulfilled', 'status:declined', 'status:expired', 'status:withdrawn', 'status:no_show'] },
   { label: 'Record changes', keys: ['action:create', 'action:update', 'action:activate', 'action:deactivate'] },
+  { label: 'Portal access', keys: ['action:grant_access', 'action:resend_access'] },
 ]
 
 // Plain-English labels for the raw Firestore field names that show up in
@@ -179,6 +184,7 @@ const FIELD_LABELS: Record<string, string> = {
   admin_message: 'Message to staff',
   reference_no: 'Reference',
   operator_name: 'Operator',
+  auth_email_synced: 'Login account email also changed',
   fulfilled_txn_id: 'Fulfilled transaction',
   fulfilled_txn_ref: 'Fulfilled transaction ref',
   linked_request_ref: 'Loan request ref',
@@ -378,6 +384,46 @@ function ProductUpdateSummary({
         </div>
       )}
       <FieldDiff before={before} after={after} />
+    </div>
+  )
+}
+
+// Provisioning or re-issuing a lending-portal login. Every field on the
+// entry is identical in before and after (it's context, not a change), so
+// FieldDiff would filter the lot and render "No details recorded" — which
+// is exactly what this entry used to do, since its only field was a `uid`
+// that SKIP_FIELDS hides.
+function StaffAccessSummary({
+  after, granted,
+}: {
+  after: Record<string, unknown> | null
+  granted: boolean
+}) {
+  if (!after) return <p className="text-sm text-muted-foreground">No details recorded.</p>
+  const fullName = typeof after.full_name === 'string' && after.full_name ? after.full_name : null
+  const email = typeof after.email === 'string' && after.email ? after.email : null
+  const uid = typeof after.uid === 'string' && after.uid ? after.uid : null
+
+  return (
+    <div className="flex flex-col gap-1.5 text-sm">
+      {fullName && (
+        <div><span className="font-medium text-foreground">Staff member:</span> {fullName}</div>
+      )}
+      {email && (
+        <div><span className="font-medium text-foreground">Sent to:</span> {email}</div>
+      )}
+      <div>
+        <span className="font-medium text-foreground">Action:</span>{' '}
+        {granted
+          ? 'Lending-portal login provisioned and a password-set link emailed.'
+          : 'Password-reset link re-sent to the existing login account.'}
+      </div>
+      {uid && (
+        <div>
+          <span className="font-medium text-foreground">Login account:</span>{' '}
+          <span className="font-mono text-xs text-muted-foreground">{uid}</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -831,6 +877,8 @@ export default function AuditLogPage() {
                         )
                       ) : e.entity_type === 'loan_request' ? (
                         <LoanRequestSummary before={e.before} after={e.after} lines={loanLines[e.entity_id]} />
+                      ) : e.entity_type === 'staff' && (e.action === 'grant_access' || e.action === 'resend_access') ? (
+                        <StaffAccessSummary after={e.after} granted={e.action === 'grant_access'} />
                       ) : e.entity_type === 'staff' && (e.action === 'activate' || e.action === 'deactivate') ? (
                         <StaffStatusSummary after={e.after} />
                       ) : e.entity_type === 'product' && e.action === 'update' ? (

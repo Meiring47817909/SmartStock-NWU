@@ -255,7 +255,14 @@ export interface ReturnWaiver {
   resolved_by_name: string | null
 }
 
-export type AuditAction = 'create' | 'update' | 'activate' | 'deactivate' | 'resolve'
+// 'grant_access' / 'resend_access' cover the Staff page's Send/Resend
+// Login Email button — provisioning a portal login and re-issuing the
+// password-reset link. They are separate from 'update' because granting
+// someone access to the system is not the same kind of event as editing
+// their department, and an auditor needs to find them on their own.
+export type AuditAction =
+  | 'create' | 'update' | 'activate' | 'deactivate' | 'resolve'
+  | 'grant_access' | 'resend_access'
 export type AuditEntityType = 'product' | 'category' | 'staff' | 'transaction' | 'loan_request'
 
 export interface AuditLogEntry {

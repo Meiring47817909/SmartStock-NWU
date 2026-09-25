@@ -295,12 +295,14 @@ export default function StaffPage() {
         // BEFORE writing Firestore, and only proceed to the Firestore write
         // if it succeeds, so the two can never drift out of sync.
         const previousEmail = editing.email ? normalizeEmail(editing.email) : null
+        let authEmailSynced = false
         if (editing.uid && normalizedEmail && normalizedEmail !== previousEmail) {
           if (!user) throw new Error('Not signed in.')
           await postStaffAdmin('/api/staff/update-email', user, {
             staffId: editing.id.toString(),
             newEmail: normalizedEmail,
           })
+          authEmailSynced = true
         }
 
         const updated = { ...payload, updated_at: new Date().toISOString() }
@@ -312,7 +314,10 @@ export default function StaffPage() {
             name: editing.name, surname: editing.surname, full_name: editing.full_name,
             email: editing.email, department: editing.department, card_uid: editing.card_uid,
           },
-          after: updated,
+          // Flags that this edit also re-pointed the linked login account,
+          // which decides where future password-reset links are delivered
+          // — a materially different act from editing a contact detail.
+          after: authEmailSynced ? { ...updated, auth_email_synced: true } : updated,
         })
       } else {
         const created = {
@@ -381,13 +386,29 @@ export default function StaffPage() {
         '/api/staff/send-reset-email', user, { staffId: s.id.toString() },
       )
       toast.success(`Login email sent to ${res.email}.`)
-      if (!s.uid) {
-        logAudit({
-          userId: user.uid, userName: profile?.full_name ?? user.email,
-          action: 'update', entityType: 'staff', entityId: s.id.toString(),
-          before: { uid: null },
-          after: { uid: res.uid },
-        })
+      // Audit EVERY send, not only the first. Re-issuing a password-reset
+      // link into someone's inbox is a sensitive act and used to leave no
+      // trace at all. `res.linked` is the server's own answer to "did this
+      // call attach a new Auth account?" — more reliable than checking
+      // s.uid here, which misses re-provisioning after the linked account
+      // was deleted (the uid is set, but the account is gone and a new one
+      // is created).
+      const context = {
+        full_name: s.full_name,
+        email: res.email,
+        uid: res.uid,
+      }
+      logAudit({
+        userId: user.uid, userName: profile?.full_name ?? user.email,
+        action: res.linked ? 'grant_access' : 'resend_access',
+        entityType: 'staff', entityId: s.id.toString(),
+        // Identifying context, not a diff — the same shape the
+        // activate/deactivate entry uses, so the summary can read it
+        // straight off `after` instead of relying on what changed.
+        before: context,
+        after: context,
+      })
+      if (res.linked) {
         load() // refresh so the row picks up the newly-linked uid
       }
     } catch (err: any) {
