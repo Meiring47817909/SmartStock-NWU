@@ -276,6 +276,19 @@ function TransactionSummary({ after, lines }: { after: Record<string, unknown> |
   const lendFrom = typeof after.lend_from === 'string' ? after.lend_from : null
   const lendTo = typeof after.lend_to === 'string' ? after.lend_to : null
 
+  // Prefer the product lines frozen into the entry at write time over the
+  // ones joined from transaction_lines on expand. The frozen copy is what
+  // a CSV export carries, so preferring it keeps the screen and the export
+  // showing the same thing — and it reflects the names and quantities as
+  // they were, not as they are now. Entries written before this was
+  // recorded have no `after.lines`, so they fall back to the join.
+  const frozenLines = Array.isArray(after.lines)
+    ? (after.lines as { product_id?: string; product_name?: string; quantity?: number }[])
+    : null
+  const shownLines = frozenLines
+    ?? (lines ?? []).map((l) => ({ product_name: l.product_name, quantity: l.quantity }))
+  const linesPending = frozenLines === null && lines === undefined
+
   return (
     <div className="flex flex-col gap-1.5 text-sm">
       {reference && (
@@ -295,12 +308,12 @@ function TransactionSummary({ after, lines }: { after: Record<string, unknown> |
           {lineCount ?? '—'} line{lineCount === 1 ? '' : 's'} · {totalQty ?? '—'} units
         </div>
       )}
-      {lines === undefined ? (
+      {linesPending ? (
         <p className="text-xs text-muted-foreground">Loading items…</p>
-      ) : lines.length > 0 ? (
+      ) : shownLines.length > 0 ? (
         <ul className="ml-4 list-disc">
-          {lines.map((l) => (
-            <li key={l.id}>
+          {shownLines.map((l, i) => (
+            <li key={i}>
               {l.product_name ?? 'Unknown product'} <span className="text-muted-foreground">× {l.quantity}</span>
             </li>
           ))}
@@ -669,7 +682,10 @@ export default function AuditLogPage() {
   async function toggleExpand(e: AuditLogEntry) {
     if (expanded === e.id) { setExpanded(null); return }
     setExpanded(e.id)
-    if (e.entity_type === 'transaction' && !lines[e.entity_id]) {
+    // Entries written since product lines started being frozen into the
+    // payload already carry them, so there's nothing to join to.
+    const hasFrozenLines = Array.isArray(e.after?.lines)
+    if (e.entity_type === 'transaction' && !hasFrozenLines && !lines[e.entity_id]) {
       const snap = await getDocs(query(collection(db, 'transaction_lines'), where('transaction_id', '==', e.entity_id)))
       const items = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as TransactionLine[]
       setLines(prev => ({ ...prev, [e.entity_id]: items }))

@@ -279,7 +279,23 @@ export default function ReturnsPage() {
           userId: user?.uid, userName: profile?.full_name ?? user?.email,
           action: 'create', entityType: 'transaction', entityId: txnRef.id,
           before: null,
-          after: { ...txnPayload, line_count: items.length, total_qty: items.reduce((s, i) => s + i.returning, 0) },
+          // Product lines are frozen into the audit entry, not just counted.
+          // They live in transaction_lines, which the audit log has to join
+          // to at display time - and a CSV export can't join. Without this a
+          // stock movement exports as "3 lines - 7 units" with no products,
+          // making any product-level audit question unanswerable. Frozen
+          // rather than joined so the entry also stays true to the names and
+          // quantities as they were at the time.
+          after: {
+            ...txnPayload,
+            line_count: items.length,
+            total_qty: items.reduce((s, i) => s + i.returning, 0),
+            lines: items.map((i) => ({
+              product_id: i.product_id,
+              product_name: i.product_name,
+              quantity: i.returning,
+            })),
+          },
         })
 
         for (const item of items) {
