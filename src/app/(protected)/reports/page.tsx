@@ -8,38 +8,27 @@ import { loadWaivedByTxn, waivedQty } from '@/lib/firebase/waivers'
 import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore'
 import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 
-type ReportTab = 'stock-levels' | 'low-stock' | 'issued-per-staff' | 'returns' | 'transaction-history'
+type ReportTab = 'stock-levels' | 'low-stock' | 'issued-per-staff' | 'returns'
 
 const TABS: { id: ReportTab; label: string }[] = [
   { id: 'stock-levels',        label: 'Current Stock Levels' },
   { id: 'low-stock',           label: 'Low Stock Items' },
   { id: 'issued-per-staff',    label: 'Issued per Staff' },
   { id: 'returns',             label: 'Returns' },
-  { id: 'transaction-history', label: 'Transaction History' },
 ]
 
 const ALL_CATEGORIES = '__all__'
-const ALL_TYPES = '__all__'
 
 const STATUS_BADGE_CLASS: Record<string, string> = {
   'OUT OF STOCK': 'bg-red-100 text-red-800',
   'LOW STOCK': 'bg-amber-100 text-amber-800',
   'IN STOCK': 'bg-emerald-100 text-emerald-800',
-}
-
-const TXN_BADGE_CLASS: Record<string, string> = {
-  IN: 'bg-emerald-100 text-emerald-800',
-  OUT: 'bg-accent text-accent-foreground',
-  RETURN: 'bg-sky-100 text-sky-800',
-  ADJUST: 'bg-amber-100 text-amber-800',
 }
 
 export default function ReportsPage() {
@@ -63,7 +52,6 @@ export default function ReportsPage() {
         <TabsContent value="low-stock" className="min-h-0"><LowStockReport /></TabsContent>
         <TabsContent value="issued-per-staff" className="min-h-0"><IssuedPerStaffReport /></TabsContent>
         <TabsContent value="returns" className="min-h-0"><ReturnsReport /></TabsContent>
-        <TabsContent value="transaction-history" className="min-h-0"><TransactionHistoryReport /></TabsContent>
       </Tabs>
     </div>
   )
@@ -482,163 +470,5 @@ function ReturnsReport() {
       </Table>
       </div>
     </Card>
-  )
-}
-
-function TransactionHistoryReport() {
-  const [data, setData] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [typeFilter, setTypeFilter] = useState('')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
-  const { isExpanded: rowExpanded, toggle: toggleRow } = useExpandedRows()
-
-  useEffect(() => {
-    setLoading(true)
-    // Fetches the full transaction history — no server-side limit — so the
-    // From/To date filters below can never silently miss older rows that
-    // fell outside a capped "most recent N" window.
-    let q = query(collection(db, 'transactions'), orderBy('created_at', 'desc'))
-    if (typeFilter) {
-      q = query(collection(db, 'transactions'), where('transaction_type', '==', typeFilter), orderBy('created_at', 'desc'))
-    }
-    // Note: complex queries with inequality on one field and ordering on another require composite index in Firestore.
-    // Client-side filtering dates is easier for small/medium datasets.
-
-    async function load() {
-      const snap = await getDocs(q)
-      let items = snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
-
-      if (fromDate) {
-        items = items.filter(t => t.created_at >= `${fromDate}T00:00:00`)
-      }
-      if (toDate) {
-        items = items.filter(t => t.created_at <= `${toDate}T23:59:59`)
-      }
-
-      // transaction_lines is its own collection now — fetch once and
-      // re-attach as `.transaction_lines` for the render code below.
-      const linesSnap = await getDocs(collection(db, 'transaction_lines'))
-      const linesByTxn: Record<string, any[]> = {}
-      linesSnap.forEach(d => {
-        const l = d.data()
-        ;(linesByTxn[l.transaction_id] ??= []).push(l)
-      })
-      items.forEach(t => { t.transaction_lines = linesByTxn[t.id] ?? [] })
-
-      setData(items)
-      setLoading(false)
-    }
-    load()
-  }, [typeFilter, fromDate, toDate])
-
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Select
-          items={{ [ALL_TYPES]: 'All types', IN: 'Stock In', OUT: 'Stock Out', RETURN: 'Returns', ADJUST: 'Adjustments' }}
-          value={typeFilter || ALL_TYPES}
-          onValueChange={v => setTypeFilter(v && v !== ALL_TYPES ? v : '')}
-        >
-          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_TYPES}>All types</SelectItem>
-            <SelectItem value="IN">Stock In</SelectItem>
-            <SelectItem value="OUT">Stock Out</SelectItem>
-            <SelectItem value="RETURN">Returns</SelectItem>
-            <SelectItem value="ADJUST">Adjustments</SelectItem>
-          </SelectContent>
-        </Select>
-        <Input type="date" className="w-40" value={fromDate} onChange={e => setFromDate(e.target.value)} placeholder="From date" />
-        <Input type="date" className="w-40" value={toDate} onChange={e => setToDate(e.target.value)} placeholder="To date" />
-        {(typeFilter || fromDate || toDate) && (
-          <Button variant="ghost" onClick={() => { setTypeFilter(''); setFromDate(''); setToDate('') }}>Clear filters</Button>
-        )}
-        <span className="self-center text-sm text-muted-foreground">{data.length} transactions</span>
-      </div>
-      <Card className="min-h-0 flex-1 py-0">
-        <div className="min-h-0 flex-1 overflow-y-auto">
-        <Table>
-          <TableHeader className="sticky top-0 z-10 bg-card">
-            <TableRow>
-              <TableHead>Reference</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Staff</TableHead>
-              <TableHead>Items</TableHead>
-              <TableHead>Flag</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
-            {!loading && data.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">No transactions found</TableCell></TableRow>}
-            {data.map((t: any) => {
-              const tLines = t.transaction_lines || []
-              const totalQty = tLines.reduce((s: number, l: any) => s + (l.quantity || 0), 0)
-              const isExpanded = rowExpanded(t.id)
-              return (
-                <Fragment key={t.id}>
-                  <TableRow className="cursor-pointer" onClick={() => toggleRow(t.id)}>
-                    <TableCell className="font-mono text-xs">{t.reference_no}</TableCell>
-                    <TableCell><Badge className={`${TXN_BADGE_CLASS[t.transaction_type] ?? ''} uppercase`}>{t.transaction_type}</Badge></TableCell>
-                    <TableCell className="text-muted-foreground">{t.staff_name ?? '—'}</TableCell>
-                    <TableCell className="text-muted-foreground">{tLines.length} line{tLines.length !== 1 ? 's' : ''} · {totalQty} units</TableCell>
-                    {/* Only OUT/RETURN have a staff step whose card scan can be
-                        skipped -- see the same gate in audit-log/page.tsx. */}
-                    <TableCell>{t.manual_override && (t.transaction_type === 'OUT' || t.transaction_type === 'RETURN') && <Badge className="bg-amber-100 text-amber-800 uppercase">Manual</Badge>}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{formatDate(t.created_at)}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{isExpanded ? '▲' : '▼'}</TableCell>
-                  </TableRow>
-                  {isExpanded && (
-                    <TableRow className="bg-muted/50">
-                      <TableCell colSpan={7} className="p-4 break-words whitespace-normal">
-                        <div className="flex flex-col gap-1.5 text-sm">
-                          {t.operator_name && (
-                            <div>
-                              <span className="font-medium text-foreground">Operator:</span>{' '}
-                              {t.operator_name}
-                            </div>
-                          )}
-                          {t.linked_request_ref && (
-                            <div>
-                              <span className="font-medium text-foreground">Loan request:</span>{' '}
-                              <span className="font-mono text-xs">{t.linked_request_ref}</span>
-                            </div>
-                          )}
-                          {tLines.length > 0 ? (
-                            <ul className="ml-4 list-disc">
-                              {tLines.map((l: any, i: number) => (
-                                <li key={l.id ?? i}>
-                                  {l.product_name ?? 'Unknown product'} <span className="text-muted-foreground">× {l.quantity}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <p className="text-muted-foreground">No line items recorded.</p>
-                          )}
-                          {(t.lend_from || t.lend_to) && (
-                            <div>
-                              <span className="font-medium text-foreground">Lend window:</span>{' '}
-                              {formatDateOnly(t.lend_from)} – {formatDateOnly(t.lend_to)}
-                            </div>
-                          )}
-                          {t.notes && (
-                            <div>
-                              <span className="font-medium text-foreground">Notes:</span> {t.notes}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </Fragment>
-              )
-            })}
-          </TableBody>
-        </Table>
-        </div>
-      </Card>
-    </div>
   )
 }
