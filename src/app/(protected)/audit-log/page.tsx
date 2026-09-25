@@ -601,6 +601,16 @@ function LoanRequestSummary({
           ) : (
             <p className="text-xs text-muted-foreground">No line items recorded.</p>
           )}
+          {/* The staff member's own note from submission. It rides along
+              on every snapshot, and on a counter it's the half of the
+              exchange Selouna was replying to — reading her counter
+              without it only tells you half the story. */}
+          {typeof after.message === 'string' && after.message && (
+            <div>
+              <span className="font-medium text-foreground">Staff&apos;s message:</span>{' '}
+              <span className="text-foreground">&ldquo;{after.message}&rdquo;</span>
+            </div>
+          )}
           {/* Selouna's note to the staff member. admin_message is shared
               between a counter and a decline (they're mutually exclusive
               transitions), so the label follows the status. It is in the
