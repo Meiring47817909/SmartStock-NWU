@@ -312,13 +312,20 @@ export default function LoanRequestsPage() {
                   <Input type="date" className="w-40" value={draft.toDate} min={draft.fromDate}
                     onChange={(e) => updateDraftDate(r.id, 'toDate', e.target.value)} />
                 </div>
-                {r.message && (
-                  <div className="grid gap-1.5">
-                    <span className="text-xs font-medium text-muted-foreground">Message</span>
-                    <p className="max-w-[360px] text-sm text-foreground">{r.message}</p>
-                  </div>
-                )}
               </div>
+
+              {/* Below the dates and full width, rather than squeezed into
+                  the date row at a fixed 360px. w-full so it uses the whole
+                  expanded cell and only wraps at the table's edge;
+                  break-words so an unbroken token can't widen the table. */}
+              {r.message && (
+                <div className="grid w-full gap-1.5">
+                  <span className="text-xs font-medium text-muted-foreground">Message</span>
+                  <p className="w-full text-sm break-words whitespace-normal text-foreground">
+                    {r.message}
+                  </p>
+                </div>
+              )}
 
               <div className="max-h-64 overflow-y-auto">
               <Table>
@@ -401,7 +408,7 @@ export default function LoanRequestsPage() {
             {r.message && (
               <div className="grid gap-1.5">
                 <span className="text-xs font-medium text-muted-foreground">Staff&apos;s message</span>
-                <p className="max-w-[480px] text-sm text-foreground">&ldquo;{r.message}&rdquo;</p>
+                <p className="w-full text-sm break-words whitespace-normal text-foreground">&ldquo;{r.message}&rdquo;</p>
               </div>
             )}
 
@@ -445,7 +452,7 @@ export default function LoanRequestsPage() {
             {r.admin_message && (
               <div className="grid gap-1.5">
                 <span className="text-xs font-medium text-muted-foreground">Your counter message</span>
-                <p className="max-w-[480px] text-sm text-foreground">&ldquo;{r.admin_message}&rdquo;</p>
+                <p className="w-full text-sm break-words whitespace-normal text-foreground">&ldquo;{r.admin_message}&rdquo;</p>
               </div>
             )}
 
