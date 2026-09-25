@@ -117,13 +117,12 @@ export default function MyRequestsPage() {
   async function load() {
     if (!staffMember) return
     setLoading(true)
-    const actor = { userId: user?.uid, userName: staffMember.full_name }
     const reqSnap = await getDocs(query(collection(db, 'loan_requests'), where('staff_id', '==', staffMember.id.toString())))
     let reqs = reqSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as LoanRequest[]
 
     reqs = await Promise.all(reqs.map(async (r) => {
       if (r.status !== 'pending' && r.status !== 'countered' && r.status !== 'accepted') return r
-      const next = await expireIfNeeded(r, actor)
+      const next = await expireIfNeeded(r)
       return next !== r.status ? { ...r, status: next, updated_at: new Date().toISOString() } : r
     }))
 
@@ -191,7 +190,7 @@ export default function MyRequestsPage() {
     <div className="flex max-w-[700px] flex-col gap-8">
       <div>
         <h1 className="text-2xl font-bold text-foreground">My Requests</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Track your lending requests and respond to Selouna's counters.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Track your lending requests and respond to Selouna&apos;s counters.</p>
       </div>
 
       {requests.length === 0 && (

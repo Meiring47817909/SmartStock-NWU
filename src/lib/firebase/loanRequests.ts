@@ -338,7 +338,21 @@ export function isNoShowCandidate(request: LoanRequest): boolean {
 // Lazily persists the expiry/no-show transition on next read (see decision
 // #5/§3.4 — both need to be real status values the reservation ledger and
 // list queries can exclude/include on, not just a live display label).
-export async function expireIfNeeded(request: LoanRequest, actor: ActorInfo = {}): Promise<LoanRequestStatus> {
+// The line items belonging to a request. The same query is currently
+// inlined in stock-out/page.tsx and audit-log/page.tsx; this is the
+// shared version, added for expireIfNeeded's audit snapshot.
+export async function getRequestLines(requestId: string): Promise<LoanRequestLine[]> {
+  const snap = await getDocs(
+    query(collection(db, 'loan_request_lines'), where('request_id', '==', requestId)),
+  )
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as unknown as LoanRequestLine[]
+}
+
+// No ActorInfo parameter, deliberately: this transition has no actor. It
+// is driven by a date passing, and fires on whichever page runs the lazy
+// pass first. Accepting an actor here and ignoring it would invite a
+// caller to believe it was being recorded.
+export async function expireIfNeeded(request: LoanRequest): Promise<LoanRequestStatus> {
   let next: LoanRequestStatus | null = null
   if (isExpired(request)) next = 'expired'
   else if (isNoShowCandidate(request)) next = 'no_show'
@@ -346,10 +360,68 @@ export async function expireIfNeeded(request: LoanRequest, actor: ActorInfo = {}
 
   const now = new Date().toISOString()
   await updateDoc(doc(db, 'loan_requests', request.id), { status: next, updated_at: now })
+
+  /*
+   * These two transitions used to log nothing but { status }, which made
+   * them impossible to follow in the audit log: you could see a request
+   * became "Not Picked Up" but not who was meant to collect it, what was
+   * in it, or when it was due. Everything except the line items is
+   * already in `request`, so it costs nothing to record it; the lines are
+   * one extra read, the same trade declineRequest() already makes to
+   * freeze its counter offer.
+   *
+   * Freezing rather than joining at display time is deliberate. The audit
+   * entry has to stand on its own in a CSV export, and stay truthful even
+   * if the request or its lines are edited or removed afterwards.
+   */
+  let lines: LoanRequestLine[] = []
+  try {
+    lines = await getRequestLines(request.id)
+  } catch {
+    // An audit entry missing its item list is worth far more than no
+    // audit entry at all, so a failed read must not block the transition.
+    lines = []
+  }
+
   logAudit({
-    userId: actor.userId, userName: actor.userName,
+    // NOT `actor`. This is an automatic transition triggered by a date
+    // passing, not a decision anyone made. It fires on whichever page
+    // happens to run the lazy pass first — including the borrower's own
+    // portal — so attributing it to that person would put their name on
+    // an action they did not take. See ActorInfo callers of this function.
+    userId: null,
+    userName: 'System (automatic)',
     action: 'update', entityType: 'loan_request', entityId: request.id,
-    before: { status: request.status }, after: { status: next },
+    before: { status: request.status },
+    after: {
+      status: next,
+      // Who was meant to collect it, and how to find them.
+      staff_id: request.staff_id,
+      staff_name: request.staff_name,
+      // The agreed pickup window, and what was originally asked for if
+      // Selouna's counter moved it.
+      from_date: request.from_date,
+      to_date: request.to_date,
+      original_from_date: request.original_from_date,
+      original_to_date: request.original_to_date,
+      // What should have been handed over. offered_quantity is the agreed
+      // number (Selouna's counter can reduce it); requested_quantity is
+      // what the staff member originally asked for. Both matter in an
+      // audit, so both are kept — same shape as countered_lines.
+      lines: lines.map((l) => ({
+        product_id: l.product_id,
+        product_name: l.product_name,
+        requested_quantity: l.requested_quantity,
+        offered_quantity: l.offered_quantity,
+      })),
+      line_count: lines.length,
+      total_qty: lines.reduce((sum, l) => sum + (l.offered_quantity ?? 0), 0),
+      // Recorded explicitly, and always null here: a no-show or an expiry
+      // means nothing was ever issued, so no transaction exists to look
+      // up and stock never moved. Stating that is more useful than an
+      // absent field, which reads as missing data rather than as a fact.
+      fulfilled_txn_id: request.fulfilled_txn_id ?? null,
+    },
   })
   return next
 }

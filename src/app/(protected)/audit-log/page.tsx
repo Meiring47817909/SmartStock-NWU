@@ -1,7 +1,7 @@
 'use client'
 
 import { Fragment, useEffect, useState } from 'react'
-import { formatDate, formatDateOnly } from '@/lib/utils'
+import { formatDate, formatDateOnly, formatLendWindow } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { LENDING_INTERVALS } from '@/lib/firebase/loanRequests'
 import { collection, query, orderBy, getDocs, where } from 'firebase/firestore'
@@ -484,6 +484,86 @@ function LoanRequestSummary({
         </div>
       )
     }
+    // An automatic no-show / expiry transition (see expireIfNeeded in
+    // loanRequests.ts). It freezes the whole picture into `after` so the
+    // entry stands on its own: who was meant to collect, what was in it,
+    // and the window that lapsed. Recognised by the frozen `lines` array,
+    // the same way the countered case is recognised by countered_lines.
+    if (Array.isArray(after.lines)) {
+      const frozen = after.lines as {
+        product_id?: string; product_name?: string
+        requested_quantity?: number; offered_quantity?: number
+      }[]
+      const staffName = typeof after.staff_name === 'string' ? after.staff_name : null
+      const staffId = typeof after.staff_id === 'string' ? after.staff_id : null
+      const fromDate = typeof after.from_date === 'string' ? after.from_date : null
+      const toDate = typeof after.to_date === 'string' ? after.to_date : null
+      const origFrom = typeof after.original_from_date === 'string' ? after.original_from_date : null
+      const origTo = typeof after.original_to_date === 'string' ? after.original_to_date : null
+      const datesMoved = origFrom !== null && (origFrom !== fromDate || origTo !== toDate)
+      const status = typeof after.status === 'string' ? after.status : ''
+
+      return (
+        <div className="flex flex-col gap-1.5 text-sm">
+          {staffName && (
+            <div>
+              <span className="font-medium text-foreground">Staff member:</span> {staffName}
+              {staffId && (
+                <span className="ml-1.5 font-mono text-xs text-muted-foreground">({staffId})</span>
+              )}
+            </div>
+          )}
+          <div>
+            <span className="font-medium text-foreground">
+              {status === 'no_show' ? 'Pickup window:' : 'Requested window:'}
+            </span>{' '}
+            {formatLendWindow(fromDate, toDate)}
+            {datesMoved && (
+              <span className="ml-1.5 text-xs text-muted-foreground">
+                (originally {formatLendWindow(origFrom, origTo)})
+              </span>
+            )}
+          </div>
+          <div>
+            <span className="font-medium text-foreground">Items:</span>{' '}
+            {frozen.length} item{frozen.length === 1 ? '' : 's'}
+            {typeof after.total_qty === 'number' && ` · ${after.total_qty} units`}
+          </div>
+          {frozen.length > 0 ? (
+            <ul className="ml-4 list-disc">
+              {frozen.map((l, i) => (
+                <li key={i}>
+                  {l.product_name ?? 'Unknown product'}{' '}
+                  <span className="text-muted-foreground">× {l.offered_quantity ?? 0}</span>
+                  {l.offered_quantity !== l.requested_quantity && (
+                    <span className="text-muted-foreground"> (requested {l.requested_quantity ?? 0})</span>
+                  )}
+                  {l.product_id && (
+                    <span className="ml-1.5 font-mono text-xs text-muted-foreground">{l.product_id}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-muted-foreground">No line items recorded.</p>
+          )}
+          {/* Stated rather than omitted: a no-show or expiry means nothing
+              was ever issued, so there is no transaction to look up and no
+              stock movement. An absent field would read as missing data. */}
+          <div>
+            <span className="font-medium text-foreground">Fulfilled transaction:</span>{' '}
+            {typeof after.fulfilled_txn_id === 'string' && after.fulfilled_txn_id ? (
+              <span className="font-mono text-xs">{after.fulfilled_txn_id}</span>
+            ) : (
+              <span className="text-muted-foreground">
+                none — nothing was issued, stock was never taken off the shelf
+              </span>
+            )}
+          </div>
+        </div>
+      )
+    }
+
     return <FieldDiff before={before} after={after} />
   }
 

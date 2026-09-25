@@ -85,7 +85,7 @@ export default function LoanRequestsPage() {
   const [declineMessage, setDeclineMessage] = useState('')
   const [declineBusy, setDeclineBusy] = useState(false)
 
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
@@ -97,7 +97,7 @@ export default function LoanRequestsPage() {
     // LENDING_PORTAL_SPEC.md §3.3/3.4.
     reqs = await Promise.all(reqs.map(async (r) => {
       if (r.status !== 'pending' && r.status !== 'countered' && r.status !== 'accepted') return r
-      const next = await expireIfNeeded(r, actor)
+      const next = await expireIfNeeded(r)
       return next !== r.status ? { ...r, status: next, updated_at: new Date().toISOString() } : r
     }))
 
