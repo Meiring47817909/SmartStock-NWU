@@ -601,6 +601,19 @@ function LoanRequestSummary({
           ) : (
             <p className="text-xs text-muted-foreground">No line items recorded.</p>
           )}
+          {/* Selouna's note to the staff member. admin_message is shared
+              between a counter and a decline (they're mutually exclusive
+              transitions), so the label follows the status. It is in the
+              payload either way — rendering it only on a counter would
+              hide a message that was actually sent. */}
+          {typeof after.admin_message === 'string' && after.admin_message && (
+            <div>
+              <span className="font-medium text-foreground">
+                {status === 'countered' ? 'Counter message:' : 'Message to staff:'}
+              </span>{' '}
+              <span className="text-foreground">&ldquo;{after.admin_message}&rdquo;</span>
+            </div>
+          )}
           {/* Stated rather than omitted: a no-show or expiry means nothing
               was ever issued, so there is no transaction to look up and no
               stock movement. An absent field would read as missing data. */}
