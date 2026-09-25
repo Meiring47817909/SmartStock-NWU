@@ -849,7 +849,7 @@ export default function AuditLogPage() {
         </p>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-end gap-3">
         <Select
           items={{ [ALL_ENTITIES]: 'All entities', product: 'Product', category: 'Category', staff: 'Staff', transaction: 'Transaction', loan_request: 'Loan Request' }}
           value={entityFilter || ALL_ENTITIES}
@@ -888,12 +888,28 @@ export default function AuditLogPage() {
             ))}
           </SelectContent>
         </Select>
-        <Input type="date" className="w-40" value={fromDate} onChange={e => setFromDate(e.target.value)} placeholder="From date" />
-        <Input type="date" className="w-40" value={toDate} onChange={e => setToDate(e.target.value)} placeholder="To date" />
+        {/* A date input ignores `placeholder`, so these two were the only
+            unlabelled controls on the row — the browser's own dd/mm/yyyy
+            hint was all there was to say which end of the range each one
+            set. htmlFor/id so clicking the label focuses the input. */}
+        <div className="grid gap-1.5">
+          <label htmlFor="audit-from-date" className="text-xs font-medium text-muted-foreground">
+            From date
+          </label>
+          <Input id="audit-from-date" type="date" className="w-40"
+            value={fromDate} onChange={e => setFromDate(e.target.value)} />
+        </div>
+        <div className="grid gap-1.5">
+          <label htmlFor="audit-to-date" className="text-xs font-medium text-muted-foreground">
+            To date
+          </label>
+          <Input id="audit-to-date" type="date" className="w-40"
+            value={toDate} onChange={e => setToDate(e.target.value)} />
+        </div>
         {(entityFilter || actionFilter || fromDate || toDate) && (
           <Button variant="ghost" onClick={() => { setEntityFilter(''); setActionFilter(''); setFromDate(''); setToDate('') }}>Clear filters</Button>
         )}
-        <span className="self-center text-sm text-muted-foreground">{filtered.length} entries</span>
+        <span className="self-end pb-2 text-sm text-muted-foreground">{filtered.length} entries</span>
       </div>
 
       <Card className="min-h-0 flex-1 py-0">
