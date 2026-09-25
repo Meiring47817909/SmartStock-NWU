@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useEffect, useState } from 'react'
+import { useExpandedRows } from '@/hooks/useExpandedRows'
 import { formatDate, formatDateOnly, formatLendWindow } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { LENDING_INTERVALS } from '@/lib/firebase/loanRequests'
@@ -776,7 +777,7 @@ export default function AuditLogPage() {
   const [actionFilter, setActionFilter] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const { isExpanded, toggle: toggleRow } = useExpandedRows()
   // Keyed by transaction entity_id — fetched lazily the first time a
   // transaction row is expanded, then cached so re-expanding is instant.
   const [lines, setLines] = useState<Record<string, TransactionLine[]>>({})
@@ -821,8 +822,9 @@ export default function AuditLogPage() {
   }
 
   async function toggleExpand(e: AuditLogEntry) {
-    if (expanded === e.id) { setExpanded(null); return }
-    setExpanded(e.id)
+    // toggle() reports whether the row just opened; collapsing needs no
+    // fetch.
+    if (!toggleRow(e.id)) return
     // Entries written since product lines started being frozen into the
     // payload already carry them, so there's nothing to join to.
     const hasFrozenLines = Array.isArray(e.after?.lines)
@@ -946,9 +948,9 @@ export default function AuditLogPage() {
                   <TableCell>{activityBadge(e)}</TableCell>
                   <TableCell className="text-muted-foreground">{ENTITY_LABEL[e.entity_type] ?? e.entity_type}</TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">{e.entity_id}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{expanded === e.id ? '▲' : '▼'}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{isExpanded(e.id) ? '▲' : '▼'}</TableCell>
                 </TableRow>
-                {expanded === e.id && (
+                {isExpanded(e.id) && (
                   <TableRow className="bg-muted/50">
                     {/* TableCell is whitespace-nowrap by default (see
                         components/ui/table.tsx), which is right for the data

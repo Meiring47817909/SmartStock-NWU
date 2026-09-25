@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useEffect, useState } from 'react'
+import { useExpandedRows } from '@/hooks/useExpandedRows'
 import { toast } from 'sonner'
 import { Search, Plus, Pencil, CreditCard, Mail, ChevronRight, ChevronDown } from 'lucide-react'
 import { db } from '@/lib/firebase/config'
@@ -89,7 +90,7 @@ export default function StaffPage() {
   // built in the same single pass as lendingStaffIds below, so expanding a
   // row costs no extra reads.
   const [lentByStaff, setLentByStaff] = useState<Record<string, LentItem[]>>({})
-  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const { isExpanded: isStaffExpanded, toggle: toggleStaff } = useExpandedRows()
   // The item Selouna has clicked Resolve on in a staff member's expanded
   // list, held while the confirmation dialog is open — same write as the
   // Dashboard's Resolve button (a return_waivers doc), just triggered from
@@ -475,7 +476,7 @@ export default function StaffPage() {
             {!loading && visibleStaff.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">No {statusTab} staff found</TableCell></TableRow>}
             {visibleStaff.map(s => {
             const lent = lentByStaff[s.id.toString()] ?? []
-            const isExpanded = expandedId === s.id.toString()
+            const isExpanded = isStaffExpanded(s.id.toString())
             return (
             <Fragment key={s.id}>
               <TableRow>
@@ -485,7 +486,7 @@ export default function StaffPage() {
                       variant="ghost" size="icon-sm"
                       aria-expanded={isExpanded}
                       aria-label={isExpanded ? `Hide items held by ${s.full_name}` : `Show items held by ${s.full_name}`}
-                      onClick={() => setExpandedId(isExpanded ? null : s.id.toString())}
+                      onClick={() => toggleStaff(s.id.toString())}
                     >
                       {isExpanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                     </Button>

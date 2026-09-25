@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useEffect, useState } from 'react'
+import { useExpandedRows } from '@/hooks/useExpandedRows'
 import { formatDate, formatDateOnly, isoToLocalDateStr } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { loadWaivedByTxn, waivedQty } from '@/lib/firebase/waivers'
@@ -209,7 +210,7 @@ function LowStockReport() {
 function IssuedPerStaffReport() {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const { isExpanded: rowExpanded, toggle: toggleRow } = useExpandedRows()
   const [lines, setLines] = useState<Record<string, any[]>>({})
 
   useEffect(() => {
@@ -245,8 +246,9 @@ function IssuedPerStaffReport() {
   }, [])
 
   async function toggleExpand(staffId: string) {
-    if (expanded === staffId) { setExpanded(null); return }
-    setExpanded(staffId)
+    // toggle() reports whether the row just opened; collapsing needs no
+    // fetch.
+    if (!toggleRow(staffId)) return
     // we already fetched the txns and they are embedded in 'data' under 's.txns', we just need to group and show them
     if (lines[staffId]) return
     const staffMember = data.find(s => s.id === staffId)
@@ -284,9 +286,9 @@ function IssuedPerStaffReport() {
                   <TableCell className="text-muted-foreground">{s.department ?? '—'}</TableCell>
                   <TableCell className="font-semibold">{txns.length}</TableCell>
                   <TableCell className="font-semibold">{totalQty}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{expanded === s.id ? '▲' : '▼'}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{rowExpanded(s.id) ? '▲' : '▼'}</TableCell>
                 </TableRow>
-                {expanded === s.id && lines[s.id] && (
+                {rowExpanded(s.id) && lines[s.id] && (
                   lines[s.id].flatMap((t: any) => {
                     // One row per line item on the transaction (not one row
                     // per transaction with every item mashed into a single
@@ -337,7 +339,7 @@ function returnRowStatus(t: any): { label: string; className: string } | null {
 function ReturnsReport() {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const { isExpanded: rowExpanded, toggle: toggleRow } = useExpandedRows()
 
   useEffect(() => {
     async function load() {
@@ -435,12 +437,12 @@ function ReturnsReport() {
           {data.map((t: any) => {
             const tLines = t.transaction_lines || []
             const status = returnRowStatus(t)
-            const isExpanded = expanded === t.id
+            const isExpanded = rowExpanded(t.id)
             return (
               <Fragment key={t.id}>
                 <TableRow
                   className={t.partial ? 'cursor-pointer' : ''}
-                  onClick={() => t.partial && setExpanded(isExpanded ? null : t.id)}
+                  onClick={() => t.partial && toggleRow(t.id)}
                 >
                   <TableCell className="font-mono text-xs">{t.reference_no}</TableCell>
                   <TableCell className="font-medium">{t.staff_name ?? '—'}</TableCell>
@@ -489,7 +491,7 @@ function TransactionHistoryReport() {
   const [typeFilter, setTypeFilter] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const { isExpanded: rowExpanded, toggle: toggleRow } = useExpandedRows()
 
   useEffect(() => {
     setLoading(true)
@@ -574,10 +576,10 @@ function TransactionHistoryReport() {
             {data.map((t: any) => {
               const tLines = t.transaction_lines || []
               const totalQty = tLines.reduce((s: number, l: any) => s + (l.quantity || 0), 0)
-              const isExpanded = expanded === t.id
+              const isExpanded = rowExpanded(t.id)
               return (
                 <Fragment key={t.id}>
-                  <TableRow className="cursor-pointer" onClick={() => setExpanded(isExpanded ? null : t.id)}>
+                  <TableRow className="cursor-pointer" onClick={() => toggleRow(t.id)}>
                     <TableCell className="font-mono text-xs">{t.reference_no}</TableCell>
                     <TableCell><Badge className={`${TXN_BADGE_CLASS[t.transaction_type] ?? ''} uppercase`}>{t.transaction_type}</Badge></TableCell>
                     <TableCell className="text-muted-foreground">{t.staff_name ?? '—'}</TableCell>

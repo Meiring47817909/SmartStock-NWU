@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useEffect, useState } from 'react'
+import { useExpandedRows } from '@/hooks/useExpandedRows'
 import { toast } from 'sonner'
 import { db } from '@/lib/firebase/config'
 import { collection, doc, getDoc, getDocs } from 'firebase/firestore'
@@ -69,7 +70,7 @@ export default function LoanRequestsPage() {
   const [linesByRequest, setLinesByRequest] = useState<Record<string, LoanRequestLine[]>>({})
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<'pending' | 'countered'>('pending')
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const { isExpanded, toggle: toggleRow, collapse: collapseRow } = useExpandedRows()
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [availability, setAvailability] = useState<Record<string, Record<string, number>>>({})
   const [busy, setBusy] = useState<string | null>(null)
@@ -146,8 +147,9 @@ export default function LoanRequestsPage() {
   }
 
   function toggleExpand(r: LoanRequest) {
-    if (expanded === r.id) { setExpanded(null); return }
-    setExpanded(r.id)
+    // toggle() reports whether the row just opened; collapsing needs no
+    // draft built.
+    if (!toggleRow(r.id)) return
     // Only a 'pending' request gets an editable draft — a 'countered' one
     // renders read-only (CounteredRow below) straight from linesByRequest,
     // since she can no longer re-edit or re-send it.
@@ -203,7 +205,7 @@ export default function LoanRequestsPage() {
     try {
       await approveAsIs(r, linesByRequest[r.id] ?? [], actor)
       toast.success(`Approved ${r.staff_name}'s request.`)
-      setExpanded(null)
+      collapseRow(r.id)
       await load()
       // Approving moves this request out of Needs Review and into an
       // Incoming Pickup — both this page's own Sidebar badge and the
@@ -239,7 +241,7 @@ export default function LoanRequestsPage() {
         draft.fromDate, draft.toDate || null, counterMessage, actor,
       )
       toast.success(`Counter sent to ${r.staff_name}.`)
-      setExpanded(null)
+      collapseRow(r.id)
       setCountering(null)
       setCounterMessage('')
       await load()
@@ -267,7 +269,7 @@ export default function LoanRequestsPage() {
     try {
       await declineRequest(r, declineMessage, linesByRequest[r.id], actor)
       toast.success(`Declined ${r.staff_name}'s request.`)
-      setExpanded(null)
+      collapseRow(r.id)
       setDeclining(null)
       setDeclineMessage('')
       await load()
@@ -492,9 +494,9 @@ export default function LoanRequestsPage() {
               <Badge className={`${STATUS_BADGE_CLASS[r.status]} uppercase`}>{r.status.replace('_', ' ')}</Badge>
             </TableCell>
             <TableCell className="text-muted-foreground">{expiry ? formatDateOnly(expiry) : '—'}</TableCell>
-            <TableCell className="text-xs text-muted-foreground">{expanded === r.id ? '▲' : '▼'}</TableCell>
+            <TableCell className="text-xs text-muted-foreground">{isExpanded(r.id) ? '▲' : '▼'}</TableCell>
           </TableRow>
-          {expanded === r.id && <EditableRow r={r} />}
+          {isExpanded(r.id) && <EditableRow r={r} />}
         </Fragment>
       )
     })

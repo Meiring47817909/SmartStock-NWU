@@ -1,6 +1,7 @@
 'use client'
 
 import { Fragment, useEffect, useState } from 'react'
+import { useExpandedRows } from '@/hooks/useExpandedRows'
 import { formatDateOnly, formatLendWindow, stockStatusLabel, todayDateStr } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { collection, query, where, orderBy, getDocs, getCountFromServer } from 'firebase/firestore'
@@ -68,7 +69,7 @@ export default function DashboardPage() {
   // short (see the insufficiency check below). Keyed by product_id so an
   // expanded pickup row can look its own products up directly.
   const [overdueByProduct, setOverdueByProduct] = useState<Record<string, { id: string; staff_name: string; qty: number; expected_date: string; txn_ref: string }[]>>({})
-  const [expandedPickup, setExpandedPickup] = useState<string | null>(null)
+  const { isExpanded: isPickupExpanded, toggle: togglePickup } = useExpandedRows()
   const [loading, setLoading] = useState(true)
   // The row Selouna has clicked Resolve on, held while the confirmation
   // dialog is open. Resolving writes a return_waivers doc — see
@@ -457,7 +458,7 @@ export default function DashboardPage() {
                   <Fragment key={p.id}>
                     <TableRow
                       className="cursor-pointer"
-                      onClick={() => setExpandedPickup(expandedPickup === p.id ? null : p.id)}
+                      onClick={() => togglePickup(p.id)}
                     >
                       <TableCell className="font-medium">
                         {p.staff_name}
@@ -487,11 +488,11 @@ export default function DashboardPage() {
                               Cancel
                             </Button>
                           )}
-                          <span className="text-xs text-muted-foreground">{expandedPickup === p.id ? '▲' : '▼'}</span>
+                          <span className="text-xs text-muted-foreground">{isPickupExpanded(p.id) ? '▲' : '▼'}</span>
                         </div>
                       </TableCell>
                     </TableRow>
-                    {expandedPickup === p.id && (
+                    {isPickupExpanded(p.id) && (
                       <TableRow className="bg-muted/50">
                         <TableCell colSpan={5} className="p-4">
                           {(pickupLines[p.id] ?? []).length === 0 ? (
