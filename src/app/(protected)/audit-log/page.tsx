@@ -177,6 +177,10 @@ const FIELD_LABELS: Record<string, string> = {
   to_date: 'To date',
   message: 'Message',
   admin_message: 'Message to staff',
+  reference_no: 'Reference',
+  fulfilled_txn_id: 'Fulfilled transaction',
+  fulfilled_txn_ref: 'Fulfilled transaction ref',
+  linked_request_ref: 'Loan request ref',
 }
 
 // Fields that are either internal bookkeeping (id, timestamps, the raw
@@ -516,8 +520,16 @@ function LoanRequestSummary({
       const datesMoved = origFrom !== null && (origFrom !== fromDate || origTo !== toDate)
       const status = typeof after.status === 'string' ? after.status : ''
 
+      const reference = typeof after.reference_no === 'string' ? after.reference_no : null
+
       return (
         <div className="flex flex-col gap-1.5 text-sm">
+          {reference && (
+            <div>
+              <span className="font-medium text-foreground">Reference:</span>{' '}
+              <span className="font-mono text-xs text-muted-foreground">{reference}</span>
+            </div>
+          )}
           {staffName && (
             <div>
               <span className="font-medium text-foreground">Staff member:</span> {staffName}
@@ -587,8 +599,16 @@ function LoanRequestSummary({
   const lineCount = typeof after.line_count === 'number' ? after.line_count : null
   const totalQty = typeof after.total_qty === 'number' ? after.total_qty : null
 
+  const reference = typeof after.reference_no === 'string' ? after.reference_no : null
+
   return (
     <div className="flex flex-col gap-1.5 text-sm">
+      {reference && (
+        <div>
+          <span className="font-medium text-foreground">Reference:</span>{' '}
+          <span className="font-mono text-xs text-muted-foreground">{reference}</span>
+        </div>
+      )}
       {staffName && (
         <div>
           <span className="font-medium text-foreground">Staff:</span> {staffName}

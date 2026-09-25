@@ -464,7 +464,14 @@ export default function LoanRequestsPage() {
       return (
         <Fragment key={r.id}>
           <TableRow className="cursor-pointer" onClick={() => toggleExpand(r)}>
-            <TableCell className="font-medium">{r.staff_name}</TableCell>
+            <TableCell className="font-medium">
+              {r.staff_name}
+              {r.reference_no && (
+                <div className="font-mono text-xs font-normal text-muted-foreground">
+                  {r.reference_no}
+                </div>
+              )}
+            </TableCell>
             <TableCell className="text-muted-foreground">{itemCount} item{itemCount === 1 ? '' : 's'}</TableCell>
             <TableCell>
               <Badge className={`${STATUS_BADGE_CLASS[r.status]} uppercase`}>{r.status.replace('_', ' ')}</Badge>

@@ -40,7 +40,16 @@ function RequestCard({
   return (
     <Card>
       <CardHeader className="flex-row items-center justify-between border-b py-3">
-        <CardTitle className="text-sm">{formatLendWindow(request.from_date, request.to_date)}</CardTitle>
+        <CardTitle className="flex flex-wrap items-baseline gap-2 text-sm">
+          {formatLendWindow(request.from_date, request.to_date)}
+          {/* The reference is what the staff member quotes if they email
+              or phone the IT Store about this request. */}
+          {request.reference_no && (
+            <span className="font-mono text-xs font-normal text-muted-foreground">
+              {request.reference_no}
+            </span>
+          )}
+        </CardTitle>
         <Badge className={`${STATUS_BADGE_CLASS[request.status]} uppercase`}>{request.status.replace('_', ' ')}</Badge>
       </CardHeader>
       <div className="flex flex-col gap-3 p-4">

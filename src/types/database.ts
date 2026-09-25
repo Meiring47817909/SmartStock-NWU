@@ -173,6 +173,13 @@ export type LoanRequestStatus =
 
 export interface LoanRequest {
   id: string                    // Firestore document ID
+  // Human-readable reference, LR-XXXXXXXX — the loan-request counterpart
+  // to Transaction.reference_no, so a request can be quoted in an email or
+  // matched against a paper note instead of a Firestore id. Optional
+  // because requests created before this existed genuinely don't have one;
+  // they are not backfilled, since a reference invented today was never
+  // the reference anyone used at the time.
+  reference_no?: string
   staff_id: string               // StaffMember document ID (resolved via StaffMember.uid at submission)
   staff_name: string              // denormalized, same pattern as Transaction.staff_name
   status: LoanRequestStatus

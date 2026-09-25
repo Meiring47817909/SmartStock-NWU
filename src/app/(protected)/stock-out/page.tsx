@@ -320,6 +320,12 @@ export default function StockOutPage() {
             product_name: i.product.name,
             quantity: i.quantity,
           })),
+          // The other half of the fulfilment join, in a form a person can
+          // read. txnPayload already carries linked_request_id, but that's
+          // a Firestore id; this is the LR-... someone can actually search
+          // for. Audit payload only — the transactions collection keeps
+          // the id, as it always has.
+          linked_request_ref: activeRequest?.reference_no ?? null,
         },
       })
 
@@ -346,7 +352,19 @@ export default function StockOutPage() {
         logAudit({
           userId: user?.uid, userName: profile?.full_name ?? user?.email,
           action: 'update', entityType: 'loan_request', entityId: activeRequest.id,
-          before: { status: 'accepted' }, after: { status: 'fulfilled', fulfilled_txn_id: txnRef.id },
+          before: {
+            status: 'accepted',
+            reference_no: activeRequest.reference_no ?? null,
+          },
+          after: {
+            status: 'fulfilled',
+            reference_no: activeRequest.reference_no ?? null,
+            fulfilled_txn_id: txnRef.id,
+            // The transaction's own reference too: fulfilled_txn_id is a
+            // Firestore id, which is not something anyone can look up by
+            // eye. This is the half of the join a person can actually use.
+            fulfilled_txn_ref: ref,
+          },
         })
       }
 
@@ -462,7 +480,16 @@ export default function StockOutPage() {
                       activeRequest?.id === r.id ? 'border-primary bg-accent' : 'hover:bg-muted',
                     )}>
                     <div>
-                      <div className="text-sm font-medium">Pickup {formatLendWindow(r.from_date, r.to_date)}</div>
+                      <div className="flex flex-wrap items-baseline gap-2 text-sm font-medium">
+                        Pickup {formatLendWindow(r.from_date, r.to_date)}
+                        {/* The reference Selouna will see again on the
+                            resulting transaction's audit entry. */}
+                        {r.reference_no && (
+                          <span className="font-mono text-xs font-normal text-muted-foreground">
+                            {r.reference_no}
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs text-muted-foreground">Requested via lending portal</div>
                     </div>
                     {activeRequest?.id === r.id && <Badge className="bg-primary text-primary-foreground">Selected</Badge>}

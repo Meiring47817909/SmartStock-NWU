@@ -1,7 +1,7 @@
 import { db } from './config'
 import { collection, doc, getDoc, getDocs, addDoc, updateDoc, query, where } from 'firebase/firestore'
 import { logAudit } from './audit'
-import { todayDateStr, addDaysToDateStr, isoToLocalDateStr } from '@/lib/utils'
+import { todayDateStr, addDaysToDateStr, isoToLocalDateStr, genRequestRef } from '@/lib/utils'
 import type { Product, LoanRequest, LoanRequestLine, LoanRequestStatus, LendingInterval } from '@/types/database'
 
 export const ACTIVE_STATUSES: LoanRequestStatus[] = ['pending', 'countered', 'accepted']
@@ -392,9 +392,10 @@ export async function expireIfNeeded(request: LoanRequest): Promise<LoanRequestS
     userId: null,
     userName: 'System (automatic)',
     action: 'update', entityType: 'loan_request', entityId: request.id,
-    before: { status: request.status },
+    before: { status: request.status, reference_no: request.reference_no ?? null },
     after: {
       status: next,
+      reference_no: request.reference_no ?? null,
       // Who was meant to collect it, and how to find them.
       staff_id: request.staff_id,
       staff_name: request.staff_name,
@@ -441,6 +442,10 @@ export async function submitLoanRequest(
 
   const now = new Date().toISOString()
   const reqPayload = {
+    // Human-readable reference, the counterpart to a transaction's
+    // TXN-... — see genRequestRef. Written once at submission and never
+    // changed, so it stays quotable for the life of the request.
+    reference_no: genRequestRef(),
     staff_id: staffId,
     staff_name: staffName,
     status: 'pending' as const,
@@ -517,7 +522,8 @@ export async function approveAsIs(request: LoanRequest, lines: LoanRequestLine[]
   logAudit({
     userId: actor.userId, userName: actor.userName,
     action: 'update', entityType: 'loan_request', entityId: request.id,
-    before: { status: request.status }, after: { status: 'accepted' },
+    before: { status: request.status, reference_no: request.reference_no ?? null },
+    after: { status: 'accepted', reference_no: request.reference_no ?? null },
   })
 }
 
@@ -544,9 +550,13 @@ export async function sendCounter(
   logAudit({
     userId: actor.userId, userName: actor.userName,
     action: 'update', entityType: 'loan_request', entityId: request.id,
-    before: { status: request.status, from_date: request.from_date, to_date: request.to_date },
+    before: {
+      status: request.status, from_date: request.from_date, to_date: request.to_date,
+      reference_no: request.reference_no ?? null,
+    },
     after: {
       status: 'countered', from_date: fromDate, to_date: toDate,
+      reference_no: request.reference_no ?? null,
       ...(adminMessage ? { admin_message: adminMessage } : {}),
     },
   })
@@ -575,9 +585,10 @@ export async function declineRequest(
   logAudit({
     userId: actor.userId, userName: actor.userName,
     action: 'update', entityType: 'loan_request', entityId: request.id,
-    before: { status: request.status },
+    before: { status: request.status, reference_no: request.reference_no ?? null },
     after: {
       status: 'declined',
+      reference_no: request.reference_no ?? null,
       ...(adminMessage ? { admin_message: adminMessage } : {}),
       ...(wasCountered ? {
         staff_message: request.message ?? null,
@@ -599,7 +610,8 @@ async function transitionStatus(request: LoanRequest, next: LoanRequestStatus, a
   logAudit({
     userId: actor.userId, userName: actor.userName,
     action: 'update', entityType: 'loan_request', entityId: request.id,
-    before: { status: request.status }, after: { status: next },
+    before: { status: request.status, reference_no: request.reference_no ?? null },
+    after: { status: next, reference_no: request.reference_no ?? null },
   })
 }
 
@@ -626,8 +638,12 @@ export async function withdrawRequest(
   logAudit({
     userId: actor.userId, userName: actor.userName,
     action: 'update', entityType: 'loan_request', entityId: request.id,
-    before: { status: request.status },
-    after: reason ? { status: 'withdrawn', cancel_reason: reason } : { status: 'withdrawn' },
+    before: { status: request.status, reference_no: request.reference_no ?? null },
+    after: {
+      status: 'withdrawn',
+      reference_no: request.reference_no ?? null,
+      ...(reason ? { cancel_reason: reason } : {}),
+    },
   })
 }
 

@@ -106,12 +106,17 @@ function addDays(dateStr, days) {
   const dd = String(dt.getDate()).padStart(2, '0')
   return `${dt.getFullYear()}-${mm}-${dd}`
 }
-function genRef() {
+function genPrefixedRef(prefix) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-  let result = 'TXN-'
+  let result = `${prefix}-`
   for (let i = 0; i < 8; i++) result += chars.charAt(Math.floor(Math.random() * chars.length))
   return result
 }
+// Mirrors genRef/genRequestRef in src/lib/utils.ts -- seeded records must
+// carry references, or the demo data looks like legacy data that predates
+// them and the feature can't be seen at all.
+function genRef() { return genPrefixedRef('TXN') }
+function genRequestRef() { return genPrefixedRef('LR') }
 const TODAY = todayStr()
 // A day offset expressed as a full ISO timestamp, for created_at/updated_at
 // fields -- 09:00 local-ish so ordering between same-day entries is stable.
@@ -282,7 +287,9 @@ async function createLoanRequest({
 }) {
   const created = isoAt(createdDayOffset)
   const updated = isoAt(updatedDayOffset ?? createdDayOffset)
+  const requestRef = genRequestRef()
   const reqPayload = {
+    reference_no: requestRef,
     staff_id: staff.id, staff_name: staff.full_name, status, message, admin_message: adminMessage,
     from_date: fromDate, to_date: toDate,
     original_from_date: originalFromDate, original_to_date: originalToDate,
@@ -301,6 +308,7 @@ async function createLoanRequest({
     action: 'create', entityType: 'loan_request', entityId: reqRef.id,
     before: null,
     after: {
+      reference_no: requestRef,
       staff_id: staff.id, staff_name: staff.full_name, status: 'pending', message, admin_message: null,
       from_date: originalFromDate, to_date: originalToDate,
       original_from_date: originalFromDate, original_to_date: originalToDate,
@@ -309,13 +317,18 @@ async function createLoanRequest({
     },
     createdAt: created,
   })
-  return { id: reqRef.id, staff, lines }
+  return { id: reqRef.id, reference_no: requestRef, staff, lines }
 }
 
 async function writeLoanUpdate({ request, before, after, dayOffset, actorName = ADMIN_NAME, actorId = ADMIN_UID }) {
   await writeAudit({
     userId: actorId, userName: actorName, action: 'update', entityType: 'loan_request', entityId: request.id,
-    before, after, createdAt: isoAt(dayOffset),
+    // Every real loan_request transition now carries the reference on both
+    // sides (identifying context, never a change), so seeded history has to
+    // as well or it won't match what the app produces.
+    before: { ...before, reference_no: request.reference_no ?? null },
+    after: { ...after, reference_no: request.reference_no ?? null },
+    createdAt: isoAt(dayOffset),
   })
 }
 

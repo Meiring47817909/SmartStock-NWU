@@ -52,7 +52,7 @@ export default function DashboardPage() {
   })
   const [outstanding, setOutstanding] = useState<any[]>([])
   const [lowItems, setLowItems] = useState<any[]>([])
-  const [incomingPickups, setIncomingPickups] = useState<{ id: string; staff_name: string; item_count: number; from_date: string; to_date: string | null; noShow: boolean; insufficient: boolean }[]>([])
+  const [incomingPickups, setIncomingPickups] = useState<{ id: string; reference_no: string | null; staff_name: string; item_count: number; from_date: string; to_date: string | null; noShow: boolean; insufficient: boolean }[]>([])
   // The row Selouna has clicked Cancel on, held while the confirmation
   // dialog is open — same pattern as `resolving` above.
   const [cancelling, setCancelling] = useState<{ id: string; staff_name: string; item_count: number; from_date: string; to_date: string | null } | null>(null)
@@ -271,7 +271,8 @@ export default function DashboardPage() {
         const pickups = loanReqs
           .filter(r => r.status === 'accepted')
           .map(r => ({
-            id: r.id, staff_name: r.staff_name, item_count: lineCountByRequest[r.id] ?? 0,
+            id: r.id, reference_no: r.reference_no ?? null,
+            staff_name: r.staff_name, item_count: lineCountByRequest[r.id] ?? 0,
             from_date: r.from_date, to_date: r.to_date, noShow: isNoShowCandidate(r),
             insufficient: (linesByRequest[r.id] ?? []).some(l => l.shortBy > 0),
           }))
@@ -458,7 +459,14 @@ export default function DashboardPage() {
                       className="cursor-pointer"
                       onClick={() => setExpandedPickup(expandedPickup === p.id ? null : p.id)}
                     >
-                      <TableCell className="font-medium">{p.staff_name}</TableCell>
+                      <TableCell className="font-medium">
+                        {p.staff_name}
+                        {p.reference_no && (
+                          <div className="font-mono text-xs font-normal text-muted-foreground">
+                            {p.reference_no}
+                          </div>
+                        )}
+                      </TableCell>
                       <TableCell className="text-muted-foreground">{p.item_count} item{p.item_count === 1 ? '' : 's'}</TableCell>
                       <TableCell className="text-muted-foreground">{formatLendWindow(p.from_date, p.to_date)}</TableCell>
                       <TableCell>

@@ -15,13 +15,33 @@ export function genBarcode(): string {
   return `BC-${ts}${rand}`
 }
 
-export function genRef(): string {
+/**
+ * Human-readable reference, e.g. TXN-SBHMPJ10 — something Selouna can
+ * quote in an email or write on a note, as opposed to a Firestore
+ * document id. 8 random chars from a 36-character alphabet, the scheme
+ * transactions have always used.
+ */
+function genPrefixedRef(prefix: string): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-  let result = 'TXN-'
+  let result = `${prefix}-`
   for (let i = 0; i < 8; i++) {
     result += chars.charAt(Math.floor(Math.random() * chars.length))
   }
   return result
+}
+
+/** Reference for a stock transaction: TXN-XXXXXXXX. */
+export function genRef(): string {
+  return genPrefixedRef('TXN')
+}
+
+/**
+ * Reference for a loan request: LR-XXXXXXXX. Deliberately the same shape
+ * and length as genRef() so the two read as one scheme, with the prefix
+ * saying which kind of record it is.
+ */
+export function genRequestRef(): string {
+  return genPrefixedRef('LR')
 }
 
 export function formatDate(iso: string): string {
