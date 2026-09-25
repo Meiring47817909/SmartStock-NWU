@@ -292,7 +292,11 @@ export default function LoanRequestsPage() {
     const dirty = isDirty(r)
     return (
       <TableRow className="bg-muted/50">
-        <TableCell colSpan={5} className="p-4">
+        {/* Holds free text (a staff message, a counter note), and TableCell
+                    is whitespace-nowrap by default — see the same fix in
+                    audit-log/page.tsx. Without this the message sets the cell's
+                    min-content width and drags the table past the screen. */}
+        <TableCell colSpan={5} className="p-4 break-words whitespace-normal">
           {!draft ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : (
@@ -388,7 +392,11 @@ export default function LoanRequestsPage() {
     const datesChanged = r.from_date !== r.original_from_date || (r.to_date ?? null) !== (r.original_to_date ?? null)
     return (
       <TableRow className="bg-muted/50">
-        <TableCell colSpan={5} className="p-4">
+        {/* Holds free text (a staff message, a counter note), and TableCell
+                    is whitespace-nowrap by default — see the same fix in
+                    audit-log/page.tsx. Without this the message sets the cell's
+                    min-content width and drags the table past the screen. */}
+        <TableCell colSpan={5} className="p-4 break-words whitespace-normal">
           <div className="flex flex-col gap-4">
             {r.message && (
               <div className="grid gap-1.5">

@@ -590,7 +590,7 @@ function TransactionHistoryReport() {
                   </TableRow>
                   {isExpanded && (
                     <TableRow className="bg-muted/50">
-                      <TableCell colSpan={7} className="p-4">
+                      <TableCell colSpan={7} className="p-4 break-words whitespace-normal">
                         <div className="flex flex-col gap-1.5 text-sm">
                           {t.operator_name && (
                             <div>
