@@ -269,6 +269,11 @@ export default function ReturnsPage() {
           reference_no: ref,
           staff_id: staff!.id,
           staff_name: staff!.full_name,
+          // Who performed this movement. staff_id/staff_name is the
+          // borrower; this is the operator, and on a Stock In it is the
+          // only person involved at all.
+          user_id: user?.uid ?? null,
+          operator_name: profile?.full_name ?? user?.email ?? null,
           linked_txn_id: txnId,
           manual_override: manualOverride,
           notes: `Return of ${items.map(i => i.product_name).join(', ')}`,

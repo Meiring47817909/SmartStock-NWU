@@ -49,6 +49,11 @@ export default function StockInPage() {
       const txnPayload = {
         transaction_type: 'IN',
         reference_no: ref,
+        // Who performed this movement. staff_id/staff_name is the
+        // borrower; this is the operator, and on a Stock In it is the
+        // only person involved at all.
+        user_id: user?.uid ?? null,
+        operator_name: profile?.full_name ?? user?.email ?? null,
         notes,
         created_at: new Date().toISOString()
       }

@@ -592,6 +592,12 @@ function TransactionHistoryReport() {
                     <TableRow className="bg-muted/50">
                       <TableCell colSpan={7} className="p-4">
                         <div className="flex flex-col gap-1.5 text-sm">
+                          {t.operator_name && (
+                            <div>
+                              <span className="font-medium text-foreground">Operator:</span>{' '}
+                              {t.operator_name}
+                            </div>
+                          )}
                           {tLines.length > 0 ? (
                             <ul className="ml-4 list-disc">
                               {tLines.map((l: any, i: number) => (

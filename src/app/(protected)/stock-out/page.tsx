@@ -292,6 +292,11 @@ export default function StockOutPage() {
         reference_no: ref,
         staff_id: staff.id,
         staff_name: staff.full_name,
+        // Who performed this movement. staff_id/staff_name is the
+        // borrower; this is the operator, and on a Stock In it is the
+        // only person involved at all.
+        user_id: user?.uid ?? null,
+        operator_name: profile?.full_name ?? user?.email ?? null,
         manual_override: manualOverride,
         notes: manualOverride ? 'Staff selected manually (no card scan)' : '',
         lend_from: lendFrom,

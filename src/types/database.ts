@@ -92,7 +92,14 @@ export interface Transaction {
   transaction_type: TxnType
   reference_no: string
   staff_id: number | null
+  // The BICS operator who performed this movement — distinct from
+  // staff_id, which is the borrower it was for (and is null on an IN,
+  // where nothing is lent to anyone). Both were declared from the start
+  // but user_id was never written by any flow, so the transactions
+  // collection had no record of who did anything; that lived only in the
+  // audit log.
   user_id: string | null
+  operator_name: string | null   // denormalized, same pattern as staff_name
   notes: string | null
   return_date: string | null
   linked_txn_id: number | null
@@ -115,7 +122,6 @@ export interface Transaction {
   created_at: string
   // joined
   staff_name?: string
-  operator?: string
   line_count?: number
   total_qty?: number
 }

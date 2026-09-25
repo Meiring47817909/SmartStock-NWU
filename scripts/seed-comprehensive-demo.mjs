@@ -234,7 +234,7 @@ async function recordTxn({
   const txnPayload = {
     transaction_type: type, reference_no: ref,
     staff_id: staff?.id ?? null, staff_name: staff?.full_name ?? null,
-    user_id: actorId, notes, return_date: returnDate,
+    user_id: actorId, operator_name: actorName, notes, return_date: returnDate,
     linked_txn_id: linkedTxnId, ...(isStaffFlow ? { manual_override: manualOverride } : {}),
     lend_from: lendFrom, lend_to: lendTo, linked_request_id: linkedRequestId,
     created_at: issuedAt,

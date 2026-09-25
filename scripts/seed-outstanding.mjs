@@ -153,6 +153,7 @@ async function issueOut({ staff, items, lendFrom, lendTo, issuedAt }) {
     staff_id: staff.id,
     staff_name: staff.full_name,
     user_id: null,
+    operator_name: 'Seed Script',
     notes: 'Seeded by scripts/seed-outstanding.mjs',
     return_date: null,
     linked_txn_id: null,

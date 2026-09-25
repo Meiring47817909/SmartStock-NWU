@@ -178,6 +178,7 @@ const FIELD_LABELS: Record<string, string> = {
   message: 'Message',
   admin_message: 'Message to staff',
   reference_no: 'Reference',
+  operator_name: 'Operator',
   fulfilled_txn_id: 'Fulfilled transaction',
   fulfilled_txn_ref: 'Fulfilled transaction ref',
   linked_request_ref: 'Loan request ref',
@@ -263,6 +264,7 @@ function FieldDiff({ before, after }: { before: Record<string, unknown> | null; 
 function TransactionSummary({ after, lines }: { after: Record<string, unknown> | null; lines: TransactionLine[] | undefined }) {
   if (!after) return <p className="text-sm text-muted-foreground">No details recorded.</p>
   const staffName = typeof after.staff_name === 'string' ? after.staff_name : null
+  const operatorName = typeof after.operator_name === 'string' ? after.operator_name : null
   const lineCount = typeof after.line_count === 'number' ? after.line_count : null
   const totalQty = typeof after.total_qty === 'number' ? after.total_qty : null
   const notes = typeof after.notes === 'string' && after.notes ? after.notes : null
@@ -304,6 +306,13 @@ function TransactionSummary({ after, lines }: { after: Record<string, unknown> |
       {staffName && (
         <div>
           <span className="font-medium text-foreground">Staff:</span> {staffName}
+        </div>
+      )}
+      {operatorName && (
+        <div>
+          {/* Who ran the till, as opposed to who it was for. On a Stock In
+              this is the only person on the record. */}
+          <span className="font-medium text-foreground">Operator:</span> {operatorName}
         </div>
       )}
       {(lineCount !== null || totalQty !== null) && (

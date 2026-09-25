@@ -131,7 +131,8 @@ async function issueOut({ staff, items, lendFrom, lendTo, issuedAt }) {
   const txnRef = await db.collection('transactions').add({
     transaction_type: 'OUT', reference_no: ref,
     staff_id: staff.id, staff_name: staff.full_name,
-    user_id: null, notes: 'Seeded by scripts/seed-conflict-scenarios.mjs',
+    user_id: null, operator_name: 'Seed Script',
+    notes: 'Seeded by scripts/seed-conflict-scenarios.mjs',
     return_date: null, linked_txn_id: null, manual_override: true,
     lend_from: lendFrom, lend_to: lendTo, linked_request_id: null,
     created_at: issuedAt,
