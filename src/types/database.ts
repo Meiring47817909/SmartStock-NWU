@@ -119,6 +119,12 @@ export interface Transaction {
   // Set when this OUT transaction was issued against an accepted loan
   // request (see loan-requests portal). null for walk-ins.
   linked_request_id: string | null
+  // The same link in a form a person can read and search for (LR-...).
+  // Carried onto the RETURN as well as the OUT: without it a return can
+  // only reach its loan request by hopping through the originating
+  // transaction, which a CSV export cannot do. Explicitly null on a Stock
+  // In and on a walk-in Stock Out, so the column always exists.
+  linked_request_ref: string | null
   created_at: string
   // joined
   staff_name?: string

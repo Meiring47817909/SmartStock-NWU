@@ -33,6 +33,10 @@ interface OpenLine {
   // The originating Stock Out transaction's Lend To date (Stage A) — null
   // for transactions created before that field existed.
   expected_date: string | null
+  // The loan request that Stock Out was issued against, inherited so the
+  // RETURN can record it directly. A return of a walk-in issue has none.
+  linked_request_id: string | null
+  linked_request_ref: string | null
 }
 
 // Partial takes priority over timing: if some of this line has already come
@@ -192,6 +196,8 @@ export default function ReturnsPage() {
         openLines.push({
           txn_id: doc.id,
           txn_ref: txn.reference_no ?? '',
+          linked_request_id: (txn.linked_request_id as string | null) ?? null,
+          linked_request_ref: (txn.linked_request_ref as string | null) ?? null,
           txn_date: txn.created_at ?? '',
           line_id: `${doc.id}_${idx}`,
           product_id: l.product_id,
@@ -275,6 +281,11 @@ export default function ReturnsPage() {
           user_id: user?.uid ?? null,
           operator_name: profile?.full_name ?? user?.email ?? null,
           linked_txn_id: txnId,
+          // Inherited from the Stock Out being returned against, so a
+          // return row reaches its loan request directly instead of
+          // requiring a second hop through the originating transaction.
+          linked_request_id: items[0]?.linked_request_id ?? null,
+          linked_request_ref: items[0]?.linked_request_ref ?? null,
           manual_override: manualOverride,
           notes: `Return of ${items.map(i => i.product_name).join(', ')}`,
           created_at: new Date().toISOString()

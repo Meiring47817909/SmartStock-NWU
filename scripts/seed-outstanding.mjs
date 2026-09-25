@@ -161,6 +161,7 @@ async function issueOut({ staff, items, lendFrom, lendTo, issuedAt }) {
     lend_from: lendFrom,
     lend_to: lendTo,
     linked_request_id: null,
+    linked_request_ref: null,
     created_at: issuedAt,
   }
   const txnRef = await db.collection('transactions').add(txnPayload)

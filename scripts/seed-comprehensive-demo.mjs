@@ -211,7 +211,8 @@ async function writeAudit({ userId = null, userName = null, action, entityType, 
 // returns' own page.tsx files write for a real transaction.
 async function recordTxn({
   type, staff = null, items, direction, lendFrom = null, lendTo = null, returnDate = null,
-  manualOverride = false, notes = null, linkedTxnId = null, linkedRequestId = null,
+  manualOverride = false, notes = null, linkedTxnId = null,
+  linkedRequestId = null, linkedRequestRef = null,
   dayOffset, actorName = ADMIN_NAME, actorId = ADMIN_UID,
 }) {
   const dir = direction ?? (type === 'OUT' ? -1 : 1) // IN/RETURN default to +1, OUT to -1; ADJUST must pass direction explicitly
@@ -236,7 +237,10 @@ async function recordTxn({
     staff_id: staff?.id ?? null, staff_name: staff?.full_name ?? null,
     user_id: actorId, operator_name: actorName, notes, return_date: returnDate,
     linked_txn_id: linkedTxnId, ...(isStaffFlow ? { manual_override: manualOverride } : {}),
-    lend_from: lendFrom, lend_to: lendTo, linked_request_id: linkedRequestId,
+    lend_from: lendFrom, lend_to: lendTo,
+    // Both halves of the loan-request link, explicitly null when the
+    // movement isn't against a request, so the field always exists.
+    linked_request_id: linkedRequestId, linked_request_ref: linkedRequestRef,
     created_at: issuedAt,
   }
   const txnRef = await db.collection('transactions').add(txnPayload)
@@ -747,10 +751,14 @@ async function main() {
     await writeLoanUpdate({ request: req, dayOffset: -9, actorId: S.FulfilledPickup.id, actorName: S.FulfilledPickup.full_name, before: { status: 'countered' }, after: { status: 'accepted' } })
     const fulfillTxn = await recordTxn({
       type: 'OUT', staff: S.FulfilledPickup, items: [{ product: P.fulfilled, quantity: 2 }],
-      lendFrom: newFrom, lendTo: newTo, linkedRequestId: req.id, dayOffset: -1,
+      lendFrom: newFrom, lendTo: newTo,
+      linkedRequestId: req.id, linkedRequestRef: req.reference_no, dayOffset: -1,
     })
     await db.collection('loan_requests').doc(req.id).update({ status: 'fulfilled', fulfilled_txn_id: fulfillTxn.id, updated_at: isoAt(-1) })
-    await writeLoanUpdate({ request: req, dayOffset: -1, before: { status: 'accepted' }, after: { status: 'fulfilled', fulfilled_txn_id: fulfillTxn.id } })
+    await writeLoanUpdate({
+      request: req, dayOffset: -1, before: { status: 'accepted' },
+      after: { status: 'fulfilled', fulfilled_txn_id: fulfillTxn.id, fulfilled_txn_ref: fulfillTxn.reference_no },
+    })
   }
 
   // ---- declined while still pending (Selouna, simple) ----------------------

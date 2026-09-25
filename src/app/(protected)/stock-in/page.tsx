@@ -54,6 +54,11 @@ export default function StockInPage() {
         // only person involved at all.
         user_id: user?.uid ?? null,
         operator_name: profile?.full_name ?? user?.email ?? null,
+        // Stock arriving on the shelf is never against a loan request.
+        // Written explicitly so the field exists on every transaction and
+        // an empty CSV cell means "not applicable", not "not recorded".
+        linked_request_id: null,
+        linked_request_ref: null,
         notes,
         created_at: new Date().toISOString()
       }

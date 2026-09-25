@@ -188,6 +188,8 @@ const FIELD_LABELS: Record<string, string> = {
   fulfilled_txn_id: 'Fulfilled transaction',
   fulfilled_txn_ref: 'Fulfilled transaction ref',
   linked_request_ref: 'Loan request ref',
+  linked_request_id: 'Loan request',
+  linked_txn_id: 'Returned against',
 }
 
 // Fields that are either internal bookkeeping (id, timestamps, the raw
@@ -319,6 +321,14 @@ function TransactionSummary({ after, lines }: { after: Record<string, unknown> |
           {/* Who ran the till, as opposed to who it was for. On a Stock In
               this is the only person on the record. */}
           <span className="font-medium text-foreground">Operator:</span> {operatorName}
+        </div>
+      )}
+      {typeof after.linked_request_ref === 'string' && after.linked_request_ref && (
+        <div>
+          {/* Present on an OUT issued against an online request, and on
+              any RETURN of that issue. Absent on a walk-in or a Stock In. */}
+          <span className="font-medium text-foreground">Loan request:</span>{' '}
+          <span className="font-mono text-xs text-muted-foreground">{after.linked_request_ref}</span>
         </div>
       )}
       {(lineCount !== null || totalQty !== null) && (

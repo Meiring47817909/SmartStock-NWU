@@ -134,7 +134,8 @@ async function issueOut({ staff, items, lendFrom, lendTo, issuedAt }) {
     user_id: null, operator_name: 'Seed Script',
     notes: 'Seeded by scripts/seed-conflict-scenarios.mjs',
     return_date: null, linked_txn_id: null, manual_override: true,
-    lend_from: lendFrom, lend_to: lendTo, linked_request_id: null,
+    lend_from: lendFrom, lend_to: lendTo,
+    linked_request_id: null, linked_request_ref: null,
     created_at: issuedAt,
   })
   for (const item of items) {

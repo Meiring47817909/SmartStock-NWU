@@ -598,6 +598,12 @@ function TransactionHistoryReport() {
                               {t.operator_name}
                             </div>
                           )}
+                          {t.linked_request_ref && (
+                            <div>
+                              <span className="font-medium text-foreground">Loan request:</span>{' '}
+                              <span className="font-mono text-xs">{t.linked_request_ref}</span>
+                            </div>
+                          )}
                           {tLines.length > 0 ? (
                             <ul className="ml-4 list-disc">
                               {tLines.map((l: any, i: number) => (

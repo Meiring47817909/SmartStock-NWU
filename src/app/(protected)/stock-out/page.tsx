@@ -302,6 +302,7 @@ export default function StockOutPage() {
         lend_from: lendFrom,
         lend_to: lendTo || null,
         linked_request_id: activeRequest?.id ?? null,
+        linked_request_ref: activeRequest?.reference_no ?? null,
         created_at: new Date().toISOString()
       }
       const txnRef = await addDoc(collection(db, 'transactions'), txnPayload)
@@ -325,12 +326,6 @@ export default function StockOutPage() {
             product_name: i.product.name,
             quantity: i.quantity,
           })),
-          // The other half of the fulfilment join, in a form a person can
-          // read. txnPayload already carries linked_request_id, but that's
-          // a Firestore id; this is the LR-... someone can actually search
-          // for. Audit payload only — the transactions collection keeps
-          // the id, as it always has.
-          linked_request_ref: activeRequest?.reference_no ?? null,
         },
       })
 
