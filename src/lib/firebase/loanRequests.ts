@@ -338,6 +338,83 @@ export function isNoShowCandidate(request: LoanRequest): boolean {
 // Lazily persists the expiry/no-show transition on next read (see decision
 // #5/§3.4 — both need to be real status values the reservation ledger and
 // list queries can exclude/include on, not just a live display label).
+/**
+ * The shape every loan_request audit entry carries, whatever the
+ * transition.
+ *
+ * Previously each transition logged only what changed — usually just
+ * { status } — so a request's history read as fragments: the create entry
+ * held the items and dates, every entry after it held almost nothing. In
+ * a CSV export that is unusable, because each row has to stand on its
+ * own; you cannot scroll up to the create row to find out what an
+ * "accepted" row was about.
+ *
+ * Every entry is now a complete snapshot of the request at that moment —
+ * reference, staff, dates, messages and the full item list — differing
+ * only in `status` and whatever that transition genuinely changed. Rows
+ * line up column-for-column in the export, and before/after still diff
+ * cleanly on screen, because the unchanged fields are identical on both
+ * sides and FieldDiff filters them out.
+ */
+export type RequestSnapshotLine = {
+  product_id: string
+  product_name: string
+  requested_quantity: number
+  offered_quantity: number
+}
+
+function toSnapshotLines(lines: LoanRequestLine[]): RequestSnapshotLine[] {
+  return lines.map((l) => ({
+    product_id: l.product_id,
+    product_name: l.product_name,
+    requested_quantity: l.requested_quantity,
+    offered_quantity: l.offered_quantity,
+  }))
+}
+
+/**
+ * Build that snapshot. `overrides` sets what this particular transition
+ * changes (status, new dates, an admin message, the fulfilling
+ * transaction); everything else comes from the request as it stands.
+ * Lines are fetched when not supplied — callers that already hold them,
+ * or that need the pre-change versions, pass them in.
+ */
+export async function requestAuditSnapshot(
+  request: LoanRequest,
+  overrides: Record<string, unknown> = {},
+  lines?: RequestSnapshotLine[],
+): Promise<Record<string, unknown>> {
+  let snapshotLines = lines
+  if (!snapshotLines) {
+    try {
+      snapshotLines = toSnapshotLines(await getRequestLines(request.id))
+    } catch {
+      // An audit entry missing its item list beats no audit entry at all,
+      // so a failed read must never block the transition itself.
+      snapshotLines = []
+    }
+  }
+  return {
+    reference_no: request.reference_no ?? null,
+    staff_id: request.staff_id,
+    staff_name: request.staff_name,
+    status: request.status,
+    from_date: request.from_date,
+    to_date: request.to_date,
+    original_from_date: request.original_from_date,
+    original_to_date: request.original_to_date,
+    message: request.message ?? null,
+    admin_message: request.admin_message ?? null,
+    fulfilled_txn_id: request.fulfilled_txn_id ?? null,
+    lines: snapshotLines,
+    line_count: snapshotLines.length,
+    // The agreed quantity — what would actually be handed over. A counter
+    // can reduce offered_quantity below what was requested.
+    total_qty: snapshotLines.reduce((sum, l) => sum + (l.offered_quantity ?? 0), 0),
+    ...overrides,
+  }
+}
+
 // The line items belonging to a request. The same query is currently
 // inlined in stock-out/page.tsx and audit-log/page.tsx; this is the
 // shared version, added for expireIfNeeded's audit snapshot.
@@ -374,55 +451,21 @@ export async function expireIfNeeded(request: LoanRequest): Promise<LoanRequestS
    * entry has to stand on its own in a CSV export, and stay truthful even
    * if the request or its lines are edited or removed afterwards.
    */
-  let lines: LoanRequestLine[] = []
-  try {
-    lines = await getRequestLines(request.id)
-  } catch {
-    // An audit entry missing its item list is worth far more than no
-    // audit entry at all, so a failed read must not block the transition.
-    lines = []
-  }
-
   logAudit({
     // NOT `actor`. This is an automatic transition triggered by a date
     // passing, not a decision anyone made. It fires on whichever page
     // happens to run the lazy pass first — including the borrower's own
     // portal — so attributing it to that person would put their name on
-    // an action they did not take. See ActorInfo callers of this function.
+    // an action they did not take.
     userId: null,
     userName: 'System (automatic)',
     action: 'update', entityType: 'loan_request', entityId: request.id,
-    before: { status: request.status, reference_no: request.reference_no ?? null },
-    after: {
-      status: next,
-      reference_no: request.reference_no ?? null,
-      // Who was meant to collect it, and how to find them.
-      staff_id: request.staff_id,
-      staff_name: request.staff_name,
-      // The agreed pickup window, and what was originally asked for if
-      // Selouna's counter moved it.
-      from_date: request.from_date,
-      to_date: request.to_date,
-      original_from_date: request.original_from_date,
-      original_to_date: request.original_to_date,
-      // What should have been handed over. offered_quantity is the agreed
-      // number (Selouna's counter can reduce it); requested_quantity is
-      // what the staff member originally asked for. Both matter in an
-      // audit, so both are kept — same shape as countered_lines.
-      lines: lines.map((l) => ({
-        product_id: l.product_id,
-        product_name: l.product_name,
-        requested_quantity: l.requested_quantity,
-        offered_quantity: l.offered_quantity,
-      })),
-      line_count: lines.length,
-      total_qty: lines.reduce((sum, l) => sum + (l.offered_quantity ?? 0), 0),
-      // Recorded explicitly, and always null here: a no-show or an expiry
-      // means nothing was ever issued, so no transaction exists to look
-      // up and stock never moved. Stating that is more useful than an
-      // absent field, which reads as missing data rather than as a fact.
-      fulfilled_txn_id: request.fulfilled_txn_id ?? null,
-    },
+    before: await requestAuditSnapshot(request),
+    // fulfilled_txn_id is null here by definition: isNoShowCandidate()
+    // requires it, so a no-show or expiry means nothing was ever issued
+    // and stock never moved. The snapshot records that explicitly rather
+    // than omitting it, since an absent field reads as missing data.
+    after: await requestAuditSnapshot(request, { status: next }),
   })
   return next
 }
@@ -465,11 +508,23 @@ export async function submitLoanRequest(
   // an item summary the same way a transaction's create entry does (see
   // audit-log/page.tsx's LoanRequestSummary/TransactionSummary). The actual
   // product/quantity rows are fetched separately from loan_request_lines.
+  // The cart IS the line set at submission — requested and offered are
+  // equal until Selouna counters — so no read is needed here.
+  const submittedLines: RequestSnapshotLine[] = cart.map((item) => ({
+    product_id: item.product.id.toString(),
+    product_name: item.product.name,
+    requested_quantity: item.quantity,
+    offered_quantity: item.quantity,
+  }))
   logAudit({
     userId: actor.userId, userName: actor.userName,
     action: 'create', entityType: 'loan_request', entityId: reqRef.id,
     before: null,
-    after: { ...reqPayload, line_count: cart.length, total_qty: cart.reduce((s, item) => s + item.quantity, 0) },
+    after: await requestAuditSnapshot(
+      { ...reqPayload, id: reqRef.id } as unknown as LoanRequest,
+      {},
+      submittedLines,
+    ),
   })
 
   for (const item of cart) {
@@ -519,11 +574,12 @@ export async function approveAsIs(request: LoanRequest, lines: LoanRequestLine[]
   )
   const now = new Date().toISOString()
   await updateDoc(doc(db, 'loan_requests', request.id), { status: 'accepted', updated_at: now })
+  const approvedLines = toSnapshotLines(lines)
   logAudit({
     userId: actor.userId, userName: actor.userName,
     action: 'update', entityType: 'loan_request', entityId: request.id,
-    before: { status: request.status, reference_no: request.reference_no ?? null },
-    after: { status: 'accepted', reference_no: request.reference_no ?? null },
+    before: await requestAuditSnapshot(request, {}, approvedLines),
+    after: await requestAuditSnapshot(request, { status: 'accepted' }, approvedLines),
   })
 }
 
@@ -540,6 +596,11 @@ export async function sendCounter(
   const adminMessage = message?.trim() || null
   await assertStillAvailable(request.id, editedLines, fromDate, toDate)
 
+  // Read the lines BEFORE overwriting their offered quantities, so the
+  // `before` snapshot records what was on offer previously rather than
+  // what we are about to replace it with.
+  const linesBefore = toSnapshotLines(await getRequestLines(request.id))
+
   const now = new Date().toISOString()
   await updateDoc(doc(db, 'loan_requests', request.id), {
     status: 'countered', updated_at: now, from_date: fromDate, to_date: toDate, admin_message: adminMessage,
@@ -547,18 +608,21 @@ export async function sendCounter(
   for (const line of editedLines) {
     await updateDoc(doc(db, 'loan_request_lines', line.lineId), { offered_quantity: line.offered_quantity })
   }
+  // The counter only moves offered_quantity; everything else on a line is
+  // unchanged, so apply the edits onto the pre-read lines by product.
+  const editedByProduct = new Map(editedLines.map((l) => [l.product_id, l.offered_quantity]))
+  const linesAfter: RequestSnapshotLine[] = linesBefore.map((l) => ({
+    ...l,
+    offered_quantity: editedByProduct.get(l.product_id) ?? l.offered_quantity,
+  }))
   logAudit({
     userId: actor.userId, userName: actor.userName,
     action: 'update', entityType: 'loan_request', entityId: request.id,
-    before: {
-      status: request.status, from_date: request.from_date, to_date: request.to_date,
-      reference_no: request.reference_no ?? null,
-    },
-    after: {
+    before: await requestAuditSnapshot(request, {}, linesBefore),
+    after: await requestAuditSnapshot(request, {
       status: 'countered', from_date: fromDate, to_date: toDate,
-      reference_no: request.reference_no ?? null,
-      ...(adminMessage ? { admin_message: adminMessage } : {}),
-    },
+      admin_message: adminMessage,
+    }, linesAfter),
   })
 }
 
@@ -582,14 +646,14 @@ export async function declineRequest(
   // still-*pending* request has nothing to freeze here (nothing was
   // countered yet), so this extra context is only added when relevant.
   const wasCountered = request.status === 'countered'
+  const declinedLines = lines ? toSnapshotLines(lines) : undefined
   logAudit({
     userId: actor.userId, userName: actor.userName,
     action: 'update', entityType: 'loan_request', entityId: request.id,
-    before: { status: request.status, reference_no: request.reference_no ?? null },
-    after: {
+    before: await requestAuditSnapshot(request, {}, declinedLines),
+    after: await requestAuditSnapshot(request, {
       status: 'declined',
-      reference_no: request.reference_no ?? null,
-      ...(adminMessage ? { admin_message: adminMessage } : {}),
+      admin_message: adminMessage,
       ...(wasCountered ? {
         staff_message: request.message ?? null,
         counter_message: request.admin_message ?? null,
@@ -599,7 +663,7 @@ export async function declineRequest(
           offered_quantity: l.offered_quantity,
         })),
       } : {}),
-    },
+    }, declinedLines),
   })
 }
 
@@ -610,8 +674,8 @@ async function transitionStatus(request: LoanRequest, next: LoanRequestStatus, a
   logAudit({
     userId: actor.userId, userName: actor.userName,
     action: 'update', entityType: 'loan_request', entityId: request.id,
-    before: { status: request.status, reference_no: request.reference_no ?? null },
-    after: { status: next, reference_no: request.reference_no ?? null },
+    before: await requestAuditSnapshot(request),
+    after: await requestAuditSnapshot(request, { status: next }),
   })
 }
 
@@ -638,12 +702,11 @@ export async function withdrawRequest(
   logAudit({
     userId: actor.userId, userName: actor.userName,
     action: 'update', entityType: 'loan_request', entityId: request.id,
-    before: { status: request.status, reference_no: request.reference_no ?? null },
-    after: {
+    before: await requestAuditSnapshot(request),
+    after: await requestAuditSnapshot(request, {
       status: 'withdrawn',
-      reference_no: request.reference_no ?? null,
       ...(reason ? { cancel_reason: reason } : {}),
-    },
+    }),
   })
 }
 

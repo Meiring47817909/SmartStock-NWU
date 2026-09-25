@@ -518,6 +518,101 @@ function LoanRequestSummary({
   if (!after) return <p className="text-sm text-muted-foreground">No details recorded.</p>
 
   if (before !== null) {
+    // Every transition now writes a full snapshot (requestAuditSnapshot
+    // in loanRequests.ts), so this branch handles them all. It is checked
+    // BEFORE the countered_lines branch below, which only ever applies to
+    // a decline of an already-countered request and would otherwise
+    // shadow the richer view.
+    if (Array.isArray(after.lines)) {
+      const frozen = after.lines as {
+        product_id?: string; product_name?: string
+        requested_quantity?: number; offered_quantity?: number
+      }[]
+      const staffName = typeof after.staff_name === 'string' ? after.staff_name : null
+      const staffId = typeof after.staff_id === 'string' ? after.staff_id : null
+      const fromDate = typeof after.from_date === 'string' ? after.from_date : null
+      const toDate = typeof after.to_date === 'string' ? after.to_date : null
+      const origFrom = typeof after.original_from_date === 'string' ? after.original_from_date : null
+      const origTo = typeof after.original_to_date === 'string' ? after.original_to_date : null
+      const datesMoved = origFrom !== null && (origFrom !== fromDate || origTo !== toDate)
+      const status = typeof after.status === 'string' ? after.status : ''
+
+      const reference = typeof after.reference_no === 'string' ? after.reference_no : null
+
+      return (
+        <div className="flex flex-col gap-1.5 text-sm">
+          {reference && (
+            <div>
+              <span className="font-medium text-foreground">Reference:</span>{' '}
+              <span className="font-mono text-xs text-muted-foreground">{reference}</span>
+            </div>
+          )}
+          {staffName && (
+            <div>
+              <span className="font-medium text-foreground">Staff member:</span> {staffName}
+              {staffId && (
+                <span className="ml-1.5 font-mono text-xs text-muted-foreground">({staffId})</span>
+              )}
+            </div>
+          )}
+          <div>
+            <span className="font-medium text-foreground">
+              {status === 'no_show' || status === 'accepted' || status === 'fulfilled'
+                ? 'Pickup window:'
+                : 'Requested window:'}
+            </span>{' '}
+            {formatLendWindow(fromDate, toDate)}
+            {datesMoved && (
+              <span className="ml-1.5 text-xs text-muted-foreground">
+                (originally {formatLendWindow(origFrom, origTo)})
+              </span>
+            )}
+          </div>
+          <div>
+            <span className="font-medium text-foreground">Items:</span>{' '}
+            {frozen.length} item{frozen.length === 1 ? '' : 's'}
+            {typeof after.total_qty === 'number' && ` · ${after.total_qty} units`}
+          </div>
+          {frozen.length > 0 ? (
+            <ul className="ml-4 list-disc">
+              {frozen.map((l, i) => (
+                <li key={i}>
+                  {l.product_name ?? 'Unknown product'}{' '}
+                  <span className="text-muted-foreground">× {l.offered_quantity ?? 0}</span>
+                  {l.offered_quantity !== l.requested_quantity && (
+                    <span className="text-muted-foreground"> (requested {l.requested_quantity ?? 0})</span>
+                  )}
+                  {l.product_id && (
+                    <span className="ml-1.5 font-mono text-xs text-muted-foreground">{l.product_id}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-muted-foreground">No line items recorded.</p>
+          )}
+          {/* Stated rather than omitted: a no-show or expiry means nothing
+              was ever issued, so there is no transaction to look up and no
+              stock movement. An absent field would read as missing data. */}
+          <div>
+            <span className="font-medium text-foreground">Fulfilled transaction:</span>{' '}
+            {typeof after.fulfilled_txn_id === 'string' && after.fulfilled_txn_id ? (
+              <span className="font-mono text-xs">
+                {typeof after.fulfilled_txn_ref === 'string' && after.fulfilled_txn_ref
+                  ? after.fulfilled_txn_ref
+                  : after.fulfilled_txn_id}
+              </span>
+            ) : status === 'no_show' || status === 'expired' ? (
+              <span className="text-muted-foreground">
+                none — nothing was issued, stock was never taken off the shelf
+              </span>
+            ) : (
+              <span className="text-muted-foreground">not yet issued</span>
+            )}
+          </div>
+        </div>
+      )
+    }
     if (Array.isArray(after.countered_lines)) {
       const staffMessage = typeof after.staff_message === 'string' && after.staff_message ? after.staff_message : null
       const counterMessage = typeof after.counter_message === 'string' && after.counter_message ? after.counter_message : null
@@ -561,88 +656,6 @@ function LoanRequestSummary({
     // entry stands on its own: who was meant to collect, what was in it,
     // and the window that lapsed. Recognised by the frozen `lines` array,
     // the same way the countered case is recognised by countered_lines.
-    if (Array.isArray(after.lines)) {
-      const frozen = after.lines as {
-        product_id?: string; product_name?: string
-        requested_quantity?: number; offered_quantity?: number
-      }[]
-      const staffName = typeof after.staff_name === 'string' ? after.staff_name : null
-      const staffId = typeof after.staff_id === 'string' ? after.staff_id : null
-      const fromDate = typeof after.from_date === 'string' ? after.from_date : null
-      const toDate = typeof after.to_date === 'string' ? after.to_date : null
-      const origFrom = typeof after.original_from_date === 'string' ? after.original_from_date : null
-      const origTo = typeof after.original_to_date === 'string' ? after.original_to_date : null
-      const datesMoved = origFrom !== null && (origFrom !== fromDate || origTo !== toDate)
-      const status = typeof after.status === 'string' ? after.status : ''
-
-      const reference = typeof after.reference_no === 'string' ? after.reference_no : null
-
-      return (
-        <div className="flex flex-col gap-1.5 text-sm">
-          {reference && (
-            <div>
-              <span className="font-medium text-foreground">Reference:</span>{' '}
-              <span className="font-mono text-xs text-muted-foreground">{reference}</span>
-            </div>
-          )}
-          {staffName && (
-            <div>
-              <span className="font-medium text-foreground">Staff member:</span> {staffName}
-              {staffId && (
-                <span className="ml-1.5 font-mono text-xs text-muted-foreground">({staffId})</span>
-              )}
-            </div>
-          )}
-          <div>
-            <span className="font-medium text-foreground">
-              {status === 'no_show' ? 'Pickup window:' : 'Requested window:'}
-            </span>{' '}
-            {formatLendWindow(fromDate, toDate)}
-            {datesMoved && (
-              <span className="ml-1.5 text-xs text-muted-foreground">
-                (originally {formatLendWindow(origFrom, origTo)})
-              </span>
-            )}
-          </div>
-          <div>
-            <span className="font-medium text-foreground">Items:</span>{' '}
-            {frozen.length} item{frozen.length === 1 ? '' : 's'}
-            {typeof after.total_qty === 'number' && ` · ${after.total_qty} units`}
-          </div>
-          {frozen.length > 0 ? (
-            <ul className="ml-4 list-disc">
-              {frozen.map((l, i) => (
-                <li key={i}>
-                  {l.product_name ?? 'Unknown product'}{' '}
-                  <span className="text-muted-foreground">× {l.offered_quantity ?? 0}</span>
-                  {l.offered_quantity !== l.requested_quantity && (
-                    <span className="text-muted-foreground"> (requested {l.requested_quantity ?? 0})</span>
-                  )}
-                  {l.product_id && (
-                    <span className="ml-1.5 font-mono text-xs text-muted-foreground">{l.product_id}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-xs text-muted-foreground">No line items recorded.</p>
-          )}
-          {/* Stated rather than omitted: a no-show or expiry means nothing
-              was ever issued, so there is no transaction to look up and no
-              stock movement. An absent field would read as missing data. */}
-          <div>
-            <span className="font-medium text-foreground">Fulfilled transaction:</span>{' '}
-            {typeof after.fulfilled_txn_id === 'string' && after.fulfilled_txn_id ? (
-              <span className="font-mono text-xs">{after.fulfilled_txn_id}</span>
-            ) : (
-              <span className="text-muted-foreground">
-                none — nothing was issued, stock was never taken off the shelf
-              </span>
-            )}
-          </div>
-        </div>
-      )
-    }
 
     return <FieldDiff before={before} after={after} />
   }
@@ -655,6 +668,11 @@ function LoanRequestSummary({
   const totalQty = typeof after.total_qty === 'number' ? after.total_qty : null
 
   const reference = typeof after.reference_no === 'string' ? after.reference_no : null
+  // Items frozen into the entry at submission. Null for entries written
+  // before submit recorded them, which then fall back to the join.
+  const createFrozenLines = Array.isArray(after.lines)
+    ? (after.lines as { product_name?: string; requested_quantity?: number }[])
+    : null
 
   return (
     <div className="flex flex-col gap-1.5 text-sm">
@@ -686,7 +704,22 @@ function LoanRequestSummary({
           {lineCount ?? '—'} item{lineCount === 1 ? '' : 's'} · {totalQty ?? '—'} units requested
         </div>
       )}
-      {lines === undefined ? (
+      {/* Prefer the items frozen into the entry; fall back to the join for
+          entries written before submit started recording them. */}
+      {createFrozenLines ? (
+        createFrozenLines.length > 0 ? (
+          <ul className="ml-4 list-disc">
+            {createFrozenLines.map((l, i) => (
+              <li key={i}>
+                {l.product_name ?? 'Unknown product'}{' '}
+                <span className="text-muted-foreground">× {l.requested_quantity}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-muted-foreground">No line items recorded.</p>
+        )
+      ) : lines === undefined ? (
         <p className="text-xs text-muted-foreground">Loading items…</p>
       ) : lines.length > 0 ? (
         <ul className="ml-4 list-disc">

@@ -295,6 +295,24 @@ async function createLoanRequest({
     original_from_date: originalFromDate, original_to_date: originalToDate,
     created_at: created, updated_at: updated, fulfilled_txn_id: fulfilledTxnId,
   }
+  // Same shape requestAuditSnapshot() produces in the app, so seeded
+  // history is indistinguishable from history the app writes itself.
+  const snapshotLines = lines.map((l) => ({
+    product_id: l.product.id,
+    product_name: l.product.name,
+    requested_quantity: l.requested,
+    offered_quantity: l.offered ?? l.requested,
+  }))
+  const snapshotBase = {
+    reference_no: requestRef,
+    staff_id: staff.id, staff_name: staff.full_name,
+    status, from_date: fromDate, to_date: toDate,
+    original_from_date: originalFromDate, original_to_date: originalToDate,
+    message, admin_message: adminMessage, fulfilled_txn_id: fulfilledTxnId,
+    lines: snapshotLines,
+    line_count: snapshotLines.length,
+    total_qty: snapshotLines.reduce((s, l) => s + l.offered_quantity, 0),
+  }
   const reqRef = await db.collection('loan_requests').add(reqPayload)
   for (const line of lines) {
     await db.collection('loan_request_lines').add({
@@ -308,16 +326,18 @@ async function createLoanRequest({
     action: 'create', entityType: 'loan_request', entityId: reqRef.id,
     before: null,
     after: {
-      reference_no: requestRef,
-      staff_id: staff.id, staff_name: staff.full_name, status: 'pending', message, admin_message: null,
+      ...snapshotBase,
+      status: 'pending',
       from_date: originalFromDate, to_date: originalToDate,
-      original_from_date: originalFromDate, original_to_date: originalToDate,
-      created_at: created, updated_at: created, fulfilled_txn_id: null,
-      line_count: lines.length, total_qty: lines.reduce((s, l) => s + l.requested, 0),
+      admin_message: null, fulfilled_txn_id: null,
+      // At submission requested and offered are equal — a counter is what
+      // later drives them apart.
+      lines: snapshotLines.map((l) => ({ ...l, offered_quantity: l.requested_quantity })),
+      total_qty: snapshotLines.reduce((s, l) => s + l.requested_quantity, 0),
     },
     createdAt: created,
   })
-  return { id: reqRef.id, reference_no: requestRef, staff, lines }
+  return { id: reqRef.id, reference_no: requestRef, staff, lines, snapshotBase }
 }
 
 async function writeLoanUpdate({ request, before, after, dayOffset, actorName = ADMIN_NAME, actorId = ADMIN_UID }) {
@@ -326,8 +346,11 @@ async function writeLoanUpdate({ request, before, after, dayOffset, actorName = 
     // Every real loan_request transition now carries the reference on both
     // sides (identifying context, never a change), so seeded history has to
     // as well or it won't match what the app produces.
-    before: { ...before, reference_no: request.reference_no ?? null },
-    after: { ...after, reference_no: request.reference_no ?? null },
+    // Every real transition repeats the full request snapshot, differing
+    // only in status and whatever that transition changed — so the seeded
+    // history has to as well, or the CSV columns won't line up.
+    before: { ...(request.snapshotBase ?? {}), ...before },
+    after: { ...(request.snapshotBase ?? {}), ...after },
     createdAt: isoAt(dayOffset),
   })
 }

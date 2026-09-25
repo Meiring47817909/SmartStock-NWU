@@ -7,7 +7,7 @@ import { db } from '@/lib/firebase/config'
 import { collection, query, where, getDocs, getDoc, addDoc, updateDoc, doc, orderBy } from 'firebase/firestore'
 import { logAudit } from '@/lib/firebase/audit'
 import { findProductByBarcode } from '@/lib/firebase/products'
-import { getReservationHolders, reservationStatusLabel, resolutionInstruction, OPEN_ENDED_TO, type ReservationHolder } from '@/lib/firebase/loanRequests'
+import { getReservationHolders, reservationStatusLabel, resolutionInstruction, requestAuditSnapshot, OPEN_ENDED_TO, type ReservationHolder } from '@/lib/firebase/loanRequests'
 import { useAuth } from '@/context/AuthContext'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
@@ -357,19 +357,17 @@ export default function StockOutPage() {
         logAudit({
           userId: user?.uid, userName: profile?.full_name ?? user?.email,
           action: 'update', entityType: 'loan_request', entityId: activeRequest.id,
-          before: {
-            status: 'accepted',
-            reference_no: activeRequest.reference_no ?? null,
-          },
-          after: {
+          // Same full snapshot every other loan_request transition writes,
+          // so the fulfilled row lines up with the rest in the CSV export.
+          before: await requestAuditSnapshot(activeRequest),
+          after: await requestAuditSnapshot(activeRequest, {
             status: 'fulfilled',
-            reference_no: activeRequest.reference_no ?? null,
             fulfilled_txn_id: txnRef.id,
             // The transaction's own reference too: fulfilled_txn_id is a
             // Firestore id, which is not something anyone can look up by
             // eye. This is the half of the join a person can actually use.
             fulfilled_txn_ref: ref,
-          },
+          }),
         })
       }
 
