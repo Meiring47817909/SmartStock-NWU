@@ -911,7 +911,15 @@ export default function AuditLogPage() {
                 </TableRow>
                 {expanded === e.id && (
                   <TableRow className="bg-muted/50">
-                    <TableCell colSpan={6} className="p-4">
+                    {/* TableCell is whitespace-nowrap by default (see
+                        components/ui/table.tsx), which is right for the data
+                        rows but wrong here: this cell holds prose — a staff
+                        member's message can be a paragraph — and nowrap makes
+                        its min-content width the entire message, dragging the
+                        whole table past the viewport. Wrap instead, and
+                        break-words so an unbroken token (a long id, a pasted
+                        URL) still can't push it wide. */}
+                    <TableCell colSpan={6} className="p-4 break-words whitespace-normal">
                       {e.entity_type === 'transaction' ? (
                         e.action === 'resolve' ? (
                           <ResolveSummary after={e.after} />
