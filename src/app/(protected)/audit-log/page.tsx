@@ -964,10 +964,11 @@ export default function AuditLogPage() {
         )}
         <span className="self-end pb-2 text-sm text-muted-foreground">{filtered.length} entries</span>
         {/* Exports every filtered+sorted entry (never just the current
-            pagination page) with the raw before/after JSON each row's own
-            "Show raw data" toggle displays — the full before-vs-after
-            record a formal audit needs, not just the derived Activity
-            label shown in the table. */}
+            pagination page) with the raw after-state JSON each row's own
+            "Show raw data" toggle displays — enough for Selouna to work out
+            what changed by comparing one entity's entries against each
+            other, without carrying the redundant before snapshot (already
+            the previous row's after) on every line. */}
         <ExportCsvButton
           filename={`audit-log-${todayDateStr()}.csv`}
           rows={sorted}
@@ -977,7 +978,6 @@ export default function AuditLogPage() {
             { header: 'Activity', value: (e: AuditLogEntry) => activityLabel(activityKey(e)) },
             { header: 'Entity', value: (e: AuditLogEntry) => ENTITY_LABEL[e.entity_type] ?? e.entity_type },
             { header: 'Entity ID', value: (e: AuditLogEntry) => e.entity_id },
-            { header: 'Before', value: (e: AuditLogEntry) => e.before ? JSON.stringify(e.before, null, 2) : '— (none)' },
             { header: 'After', value: (e: AuditLogEntry) => e.after ? JSON.stringify(e.after, null, 2) : '— (none)' },
           ]}
         />
