@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -577,12 +578,10 @@ function ReturnsReport() {
         {(fromDate || toDate) && undatedCount > 0 && (
           <div className="grid gap-1">
             <Label htmlFor="returns-include-undated" className="text-xs">
-              <input
+              <Switch
                 id="returns-include-undated"
-                type="checkbox"
-                className="size-3.5 accent-primary"
                 checked={includeUndated}
-                onChange={e => setIncludeUndated(e.target.checked)}
+                onCheckedChange={checked => setIncludeUndated(checked)}
               />
               Include {undatedCount} with no expected date
             </Label>
