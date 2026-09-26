@@ -442,6 +442,25 @@ function returnRowStatus(t: any): { label: string; className: string } | null {
   return { label: 'Late', className: 'bg-red-100 text-red-800' }
 }
 
+// Both ends bound t.expected_date — the lend_to copied off the Stock Out this
+// return settles. That is already a plain YYYY-MM-DD string, so it compares
+// directly and must NOT go through withinDateRange(), which is for reading a
+// UTC ISO timestamp as a local day.
+//
+// A return whose expected date is unknown is never excluded: either the Stock
+// Out it settles set no return date, or it is not linked to one at all. Same
+// call as on Issued per Staff — those are the loosest records in the store and
+// an audit wants them visible. The cost here is different, though: with both
+// ends on this one field, such a row has nothing left to bound it, so it shows
+// up under every window rather than under the wrong one.
+function expectedInRange(t: any, from: string, to: string): boolean {
+  if (!from && !to) return true
+  if (!t.expected_date) return true
+  if (from && t.expected_date < from) return false
+  if (to && t.expected_date > to) return false
+  return true
+}
+
 function ReturnsReport() {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -523,17 +542,24 @@ function ReturnsReport() {
     load()
   }, [])
 
-  // The range narrows which returns are listed, by the date each return was
-  // made. It deliberately does not narrow the outstanding-balance maths above:
-  // what is still owed on a Stock Out is a live figure across every return on
+  // A true range this time, both ends on ONE field: the date the item was due
+  // back. "Expected from 21 Sep, Expected to 26 Sep" is everything that was
+  // supposed to be returned in that week, whenever it actually came back —
+  // which is the question worth asking of a returns report, since the answer
+  // includes the things that came back late.
+  //
+  // It deliberately does not narrow the outstanding-balance maths above: what
+  // is still owed on a Stock Out is a live figure across every return on
   // record, so a Partial row keeps telling the truth even when the return that
   // settled the rest of it falls outside the selected window.
-  const returns = data.filter((t: any) => withinDateRange(t.created_at, fromDate, toDate))
+  const returns = data.filter((t: any) => expectedInRange(t, fromDate, toDate))
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <DateRangeFilter
         idPrefix="returns"
+        fromLabel="Expected from"
+        toLabel="Expected to"
         fromDate={fromDate}
         toDate={toDate}
         onFromChange={setFromDate}
@@ -541,7 +567,7 @@ function ReturnsReport() {
       >
         <span className="text-sm text-muted-foreground">
           {returns.length} {returns.length === 1 ? 'return' : 'returns'}
-          {(fromDate || toDate) && <> · by date returned</>}
+          {(fromDate || toDate) && <> · by date expected back</>}
         </span>
       </DateRangeFilter>
       <Card className="min-h-0 flex-1 py-0">
@@ -563,7 +589,7 @@ function ReturnsReport() {
           {loading && <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
           {!loading && returns.length === 0 && (
             <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
-              {fromDate || toDate ? 'No returns in the selected date range' : 'No returns recorded yet'}
+              {fromDate || toDate ? 'No returns were expected in the selected date range' : 'No returns recorded yet'}
             </TableCell></TableRow>
           )}
           {returns.map((t: any) => {
