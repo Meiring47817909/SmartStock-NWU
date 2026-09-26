@@ -1209,6 +1209,24 @@ function ReturnsReport() {
   })
   const sortedReturns = table.getSortedRowModel().rows.map(r => r.original)
 
+  // Same flattening the Issued per Staff export does: one row per line of
+  // detail the table only shows on expand. Here that's the "Still
+  // outstanding on <ref>: ..." list under a Partial row, so a Partial
+  // return gets one CSV row per outstanding product line, repeating its
+  // own columns on each — a non-partial return (or, in principle, a
+  // Partial one with nothing left in outstandingLines) keeps its single
+  // row, with the two outstanding-balance columns left blank since there's
+  // nothing to report.
+  const returnsCsvRows = sortedReturns.flatMap((t: any) => {
+    const outstanding = t.outstandingLines || []
+    if (outstanding.length === 0) return [{ ...t, outstandingProduct: null, outstandingQty: null }]
+    return outstanding.map((l: any) => ({
+      ...t,
+      outstandingProduct: l.product_name,
+      outstandingQty: l.outstanding,
+    }))
+  })
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <DateRangeFilter
@@ -1240,7 +1258,7 @@ function ReturnsReport() {
         <SearchBox value={search} onChange={setSearch} placeholder="Search reference, staff, item…" className="flex-1" />
         <ExportCsvButton
           filename={`returns-${todayDateStr()}.csv`}
-          rows={sortedReturns}
+          rows={returnsCsvRows}
           columns={[
             { header: 'Reference', value: (t: any) => t.reference_no },
             { header: 'Staff', value: (t: any) => t.staff_name ?? '—' },
@@ -1253,6 +1271,8 @@ function ReturnsReport() {
             { header: 'Status', value: (t: any) => returnRowStatus(t)?.label ?? '' },
             { header: 'Expected', value: (t: any) => formatDateOnly(t.expected_date) },
             { header: 'Date Returned', value: (t: any) => formatDate(t.created_at) },
+            { header: 'Outstanding Product', value: (t: any) => t.outstandingProduct ?? '—' },
+            { header: 'Outstanding Qty', value: (t: any) => t.outstandingQty ?? '—' },
           ]}
         />
       </DateRangeFilter>
