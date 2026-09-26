@@ -789,6 +789,30 @@ function IssuedPerStaffReport() {
 
   const rangeTxns = sortedStaff.reduce((n: number, s: any) => n + s.txns.length, 0)
   const rangeItems = sortedStaff.reduce((n: number, s: any) => n + s.totalQty, 0)
+
+  // The CSV export flattens to one row per product line, the same shape the
+  // expanded detail rows already take on screen (see the comment on that
+  // flatMap below — "matching the one-row-per-product-line shape the CSV
+  // export will take"): the staff totals repeat on every line of theirs, the
+  // same way Reference and Issued At already repeat across a multi-item
+  // transaction's own lines. A staff member with no transactions in range
+  // still gets exactly one row — the roster line the table itself shows for
+  // them — with the transaction-level columns left blank, since there is no
+  // transaction to report.
+  const staffCsvRows = sortedStaff.flatMap((s: any) => {
+    if (s.txns.length === 0) return [{ ...s, ref: null, issuedAt: null, product: null, quantity: null }]
+    return s.txns.flatMap((t: any) => {
+      const tLines = t.transaction_lines || []
+      const lineRows = tLines.length > 0 ? tLines : [null]
+      return lineRows.map((l: any) => ({
+        ...s,
+        ref: t.reference_no,
+        issuedAt: t.created_at,
+        product: l ? (l.product_name ?? '?') : 'No items recorded',
+        quantity: l ? l.quantity : null,
+      }))
+    })
+  })
   // Counted over the transactions that already clear issued-from, since those
   // are the ones the toggle decides. Unlike Returns — where both ends test the
   // one field, so an undated row is counted against the whole set — here the
@@ -827,12 +851,16 @@ function IssuedPerStaffReport() {
         </span>
         <ExportCsvButton
           filename={`issued-per-staff-${todayDateStr()}.csv`}
-          rows={sortedStaff}
+          rows={staffCsvRows}
           columns={[
             { header: 'Staff Member', value: (s: any) => s.full_name },
             { header: 'Department', value: (s: any) => s.department ?? '—' },
             { header: 'Total OUT Transactions', value: (s: any) => s.txns.length },
             { header: 'Total Items Issued', value: (s: any) => s.totalQty },
+            { header: 'Transaction ID', value: (s: any) => s.ref ?? '—' },
+            { header: 'Issued At', value: (s: any) => s.issuedAt ? formatDate(s.issuedAt) : '—' },
+            { header: 'Product', value: (s: any) => s.product ?? '—' },
+            { header: 'Quantity', value: (s: any) => s.quantity ?? '—' },
           ]}
         />
       </DateRangeFilter>
@@ -880,7 +908,7 @@ function IssuedPerStaffReport() {
                     // numbers with unaligned prose underneath. No colSpan, for
                     // the same reason. Reference and issue date repeat on every
                     // line of a multi-item transaction, matching the one-row-
-                    // per-product-line shape the CSV export will take.
+                    // per-product-line shape staffCsvRows below now takes too.
                     const tLines = t.transaction_lines || []
                     const rows = tLines.length > 0 ? tLines : [null]
                     return rows.map((l: any, idx: number) => (
