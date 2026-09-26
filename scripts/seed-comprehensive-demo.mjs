@@ -258,7 +258,18 @@ async function recordTxn({
   await writeAudit({
     userId: actorId, userName: actorName, action: 'create', entityType: 'transaction', entityId: txnRef.id,
     before: null,
-    after: { ...txnPayload, line_count: items.length, total_qty: items.reduce((s, i) => s + i.quantity, 0) },
+    after: {
+      ...txnPayload,
+      line_count: items.length,
+      total_qty: items.reduce((s, i) => s + i.quantity, 0),
+      // Frozen product lines, matching the shape stock-in/stock-out/returns'
+      // own page.tsx files freeze into `after.lines` (see commit 7907272).
+      // Without this, the Audit Log's raw-data view and CSV export have
+      // nothing to show for which products moved -- only the on-screen
+      // friendly summary would still work, via its separate fallback join
+      // to transaction_lines.
+      lines: items.map(i => ({ product_id: i.product.id, product_name: i.product.name, quantity: i.quantity })),
+    },
     createdAt: issuedAt,
   })
   return { id: txnRef.id, reference_no: ref }
