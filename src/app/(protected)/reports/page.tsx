@@ -105,8 +105,20 @@ function UndatedToggle({
             explain it, and htmlFor still makes the whole thing click to toggle.
             Focusing the switch inside opens it too — focus bubbles to the label
             through React's synthetic events, which is what keyboard users get,
-            since a label cannot take focus itself. */}
-        <TooltipTrigger render={<Label htmlFor={id} className="cursor-help text-xs" />}>
+            since a label cannot take focus itself.
+
+            It also carries the card: h-8 and rounded-lg are the Input's own, so
+            the control sits on the line the date boxes sit on rather than
+            floating between them, and bg-card + ring-foreground/10 is the Card's
+            own outline, so the white block reads as part of the same set. */}
+        <TooltipTrigger
+          render={
+            <Label
+              htmlFor={id}
+              className="h-8 cursor-help rounded-lg bg-card px-2.5 text-xs ring-1 ring-foreground/10"
+            />
+          }
+        >
           <Switch id={id} checked={checked} onCheckedChange={c => onCheckedChange(c)} />
           <span className="underline decoration-dotted underline-offset-2">
             Include {count} with no expected date
