@@ -1115,7 +1115,7 @@ export default function AuditLogPage() {
             { header: 'Activity', value: (e: AuditLogEntry) => activityLabel(activityKey(e)) },
             { header: 'Entity', value: (e: AuditLogEntry) => ENTITY_LABEL[e.entity_type] ?? e.entity_type },
             { header: 'Entity ID', value: (e: AuditLogEntry) => e.entity_id },
-            { header: 'After', value: (e: AuditLogEntry) => flattenAfterForCsv(reorderForDisplay(e.entity_type, e.action, e.after)) },
+            { header: 'Details', value: (e: AuditLogEntry) => flattenAfterForCsv(reorderForDisplay(e.entity_type, e.action, e.after)) },
           ]}
         />
       </div>
