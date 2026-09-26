@@ -1,12 +1,14 @@
 'use client'
 
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
 import { formatDate, formatDateOnly, isoToLocalDateStr } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { loadWaivedByTxn, waivedQty } from '@/lib/firebase/waivers'
 import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore'
+import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -24,6 +26,60 @@ const TABS: { id: ReportTab; label: string }[] = [
 ]
 
 const ALL_CATEGORIES = '__all__'
+
+// Both date-bounded reports compare on the LOCAL calendar date a
+// transaction was recorded, not on its raw `created_at` string: those are
+// written as new Date().toISOString(), i.e. UTC, so a 01:00 SAST movement is
+// stored under the previous UTC day and a naive string compare would drop it
+// out of the day the store actually handled it. An empty end is open-ended.
+function withinDateRange(createdAt: string | null | undefined, from: string, to: string): boolean {
+  if (!from && !to) return true
+  if (!createdAt) return false
+  const day = isoToLocalDateStr(createdAt)
+  if (from && day < from) return false
+  if (to && day > to) return false
+  return true
+}
+
+// Labelled From/To pair, matching the Audit Log's filter row. A date input
+// ignores `placeholder`, so without these labels the browser's own dd/mm/yyyy
+// hint is all there is to say which end of the range each control sets.
+// htmlFor/id so clicking a label focuses its input; `idPrefix` keeps those ids
+// unique, since two tabs each render a pair. `children` is the report's own
+// summary line, sharing the row's items-end alignment.
+function DateRangeFilter({
+  idPrefix, fromDate, toDate, onFromChange, onToChange, children,
+}: {
+  idPrefix: string
+  fromDate: string
+  toDate: string
+  onFromChange: (v: string) => void
+  onToChange: (v: string) => void
+  children?: ReactNode
+}) {
+  return (
+    <div className="mb-4 flex flex-wrap items-end gap-3">
+      <div className="grid gap-1.5">
+        <label htmlFor={`${idPrefix}-from-date`} className="text-xs font-medium text-muted-foreground">
+          From date
+        </label>
+        <Input id={`${idPrefix}-from-date`} type="date" className="w-40"
+          value={fromDate} onChange={e => onFromChange(e.target.value)} />
+      </div>
+      <div className="grid gap-1.5">
+        <label htmlFor={`${idPrefix}-to-date`} className="text-xs font-medium text-muted-foreground">
+          To date
+        </label>
+        <Input id={`${idPrefix}-to-date`} type="date" className="w-40"
+          value={toDate} onChange={e => onToChange(e.target.value)} />
+      </div>
+      {(fromDate || toDate) && (
+        <Button variant="ghost" onClick={() => { onFromChange(''); onToChange('') }}>Clear dates</Button>
+      )}
+      {children}
+    </div>
+  )
+}
 
 const STATUS_BADGE_CLASS: Record<string, string> = {
   'OUT OF STOCK': 'bg-red-100 text-red-800',
@@ -199,7 +255,8 @@ function IssuedPerStaffReport() {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const { isExpanded: rowExpanded, toggle: toggleRow } = useExpandedRows()
-  const [lines, setLines] = useState<Record<string, any[]>>({})
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -233,21 +290,43 @@ function IssuedPerStaffReport() {
     load()
   }, [])
 
-  async function toggleExpand(staffId: string) {
-    // toggle() reports whether the row just opened; collapsing needs no
-    // fetch.
-    if (!toggleRow(staffId)) return
-    // we already fetched the txns and they are embedded in 'data' under 's.txns', we just need to group and show them
-    if (lines[staffId]) return
-    const staffMember = data.find(s => s.id === staffId)
-    if (staffMember) {
-      const sortedTxns = [...staffMember.txns].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      setLines(prev => ({ ...prev, [staffId]: sortedTxns }))
-    }
-  }
+  // Each staff member with their OUT transactions narrowed to the selected
+  // range, newest first, and the totals recomputed over what survives — so the
+  // counts on a row always describe the rows underneath it. Derived on render
+  // rather than cached when a row expands: the whole set is already in memory
+  // (load() fetches it up front), and a cache keyed only by staff id would keep
+  // serving the previous range's transactions after the dates change.
+  const staff = data
+    .map((s: any) => {
+      const txns = s.txns
+        .filter((t: any) => withinDateRange(t.created_at, fromDate, toDate))
+        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      const totalQty = txns.reduce((sum: number, t: any) =>
+        sum + (t.transaction_lines || []).reduce((s2: number, l: any) => s2 + (l.quantity || 0), 0), 0)
+      return { ...s, txns, totalQty }
+    })
+    // With a range set the question is who took stock out during it, so a staff
+    // member with nothing in it is noise. Unfiltered, the report stays what it
+    // was: a roster of every active staff member, zeroes included.
+    .filter((s: any) => (!fromDate && !toDate) || s.txns.length > 0)
+
+  const rangeTxns = staff.reduce((n: number, s: any) => n + s.txns.length, 0)
+  const rangeItems = staff.reduce((n: number, s: any) => n + s.totalQty, 0)
 
   return (
-    <Card className="h-full min-h-0 py-0">
+    <div className="flex h-full min-h-0 flex-col">
+      <DateRangeFilter
+        idPrefix="issued"
+        fromDate={fromDate}
+        toDate={toDate}
+        onFromChange={setFromDate}
+        onToChange={setToDate}
+      >
+        <span className="text-sm text-muted-foreground">
+          {staff.length} staff · {rangeTxns} transactions · {rangeItems} items
+        </span>
+      </DateRangeFilter>
+      <Card className="min-h-0 flex-1 py-0">
       <div className="min-h-0 flex-1 overflow-y-auto">
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-card">
@@ -261,23 +340,24 @@ function IssuedPerStaffReport() {
         </TableHeader>
         <TableBody>
           {loading && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
-          {data.map((s: any) => {
+          {!loading && staff.length === 0 && (
+            <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+              {fromDate || toDate ? 'No stock issued in the selected date range' : 'No active staff members'}
+            </TableCell></TableRow>
+          )}
+          {staff.map((s: any) => {
             const txns = s.txns
-            const totalQty = txns.reduce((sum: number, t: any) => {
-              const tLines = t.transaction_lines || []
-              return sum + tLines.reduce((s2: number, l: any) => s2 + (l.quantity || 0), 0)
-            }, 0)
             return (
               <Fragment key={s.id}>
-                <TableRow className="cursor-pointer" onClick={() => toggleExpand(s.id)}>
+                <TableRow className="cursor-pointer" onClick={() => toggleRow(s.id)}>
                   <TableCell className="font-medium">{s.full_name}</TableCell>
                   <TableCell className="text-muted-foreground">{s.department ?? '—'}</TableCell>
                   <TableCell className="font-semibold">{txns.length}</TableCell>
-                  <TableCell className="font-semibold">{totalQty}</TableCell>
+                  <TableCell className="font-semibold">{s.totalQty}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{rowExpanded(s.id) ? '▲' : '▼'}</TableCell>
                 </TableRow>
-                {rowExpanded(s.id) && lines[s.id] && (
-                  lines[s.id].flatMap((t: any) => {
+                {rowExpanded(s.id) && (
+                  txns.flatMap((t: any) => {
                     // One row per line item on the transaction (not one row
                     // per transaction with every item mashed into a single
                     // comma-joined cell) — a multi-item Stock Out needs each
@@ -305,7 +385,8 @@ function IssuedPerStaffReport() {
         </TableBody>
       </Table>
       </div>
-    </Card>
+      </Card>
+    </div>
   )
 }
 
@@ -328,6 +409,8 @@ function ReturnsReport() {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const { isExpanded: rowExpanded, toggle: toggleRow } = useExpandedRows()
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -375,9 +458,9 @@ function ReturnsReport() {
         const outTxn = t.linked_txn_id ? outTxnById[t.linked_txn_id] : null
         // The raw Firestore doc ID (t.linked_txn_id) means nothing to
         // Selouna — she only ever sees the human reference number
-        // (TXN-XXXXXXXX) elsewhere in the app (Stock Out, Transaction
-        // History, the Returns page itself). Surface that instead so she
-        // can actually match this return back to the Stock Out it settles.
+        // (TXN-XXXXXXXX) elsewhere in the app (Stock Out, the Returns page
+        // itself, the Audit Log). Surface that instead so she can actually
+        // match this return back to the Stock Out it settles.
         t.linked_txn_ref = outTxn?.reference_no ?? null
         t.expected_date = outTxn?.lend_to ?? null
         const outLines = outTxn ? (linesByTxn[outTxn.id] || []) : []
@@ -403,8 +486,28 @@ function ReturnsReport() {
     load()
   }, [])
 
+  // The range narrows which returns are listed, by the date each return was
+  // made. It deliberately does not narrow the outstanding-balance maths above:
+  // what is still owed on a Stock Out is a live figure across every return on
+  // record, so a Partial row keeps telling the truth even when the return that
+  // settled the rest of it falls outside the selected window.
+  const returns = data.filter((t: any) => withinDateRange(t.created_at, fromDate, toDate))
+
   return (
-    <Card className="h-full min-h-0 py-0">
+    <div className="flex h-full min-h-0 flex-col">
+      <DateRangeFilter
+        idPrefix="returns"
+        fromDate={fromDate}
+        toDate={toDate}
+        onFromChange={setFromDate}
+        onToChange={setToDate}
+      >
+        <span className="text-sm text-muted-foreground">
+          {returns.length} {returns.length === 1 ? 'return' : 'returns'}
+          {(fromDate || toDate) && <> · by date returned</>}
+        </span>
+      </DateRangeFilter>
+      <Card className="min-h-0 flex-1 py-0">
       <div className="min-h-0 flex-1 overflow-y-auto">
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-card">
@@ -421,8 +524,12 @@ function ReturnsReport() {
         </TableHeader>
         <TableBody>
           {loading && <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
-          {!loading && data.length === 0 && <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">No returns recorded yet</TableCell></TableRow>}
-          {data.map((t: any) => {
+          {!loading && returns.length === 0 && (
+            <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+              {fromDate || toDate ? 'No returns in the selected date range' : 'No returns recorded yet'}
+            </TableCell></TableRow>
+          )}
+          {returns.map((t: any) => {
             const tLines = t.transaction_lines || []
             const status = returnRowStatus(t)
             const isExpanded = rowExpanded(t.id)
@@ -469,6 +576,7 @@ function ReturnsReport() {
         </TableBody>
       </Table>
       </div>
-    </Card>
+      </Card>
+    </div>
   )
 }
