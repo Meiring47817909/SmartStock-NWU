@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -75,6 +76,45 @@ function DateRangeFilter({
       )}
       {children}
     </div>
+  )
+}
+
+// Both date-bounded reports have the same edge case — a row with no expected
+// date, which the expected-date end of the filter has nothing to test — and
+// offer Selouna the same choice about it, so they share one control rather than
+// two near-identical blocks that could drift apart.
+//
+// The reason why lives in a tooltip, not under the label. Printed inline it was
+// a full sentence sitting next to the summary counts, and the two ran together
+// into one unreadable strip across the filter row. The label keeps the count,
+// which is the part worth seeing without being asked for; the explanation is
+// one hover away. The dotted underline is what says there is something to hover.
+function UndatedToggle({
+  id, count, checked, onCheckedChange, explanation,
+}: {
+  id: string
+  count: number
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+  explanation: string
+}) {
+  return (
+    <TooltipProvider delay={200}>
+      <Tooltip>
+        {/* The Label is the trigger, so hovering the switch or its text both
+            explain it, and htmlFor still makes the whole thing click to toggle.
+            Focusing the switch inside opens it too — focus bubbles to the label
+            through React's synthetic events, which is what keyboard users get,
+            since a label cannot take focus itself. */}
+        <TooltipTrigger render={<Label htmlFor={id} className="cursor-help text-xs" />}>
+          <Switch id={id} checked={checked} onCheckedChange={c => onCheckedChange(c)} />
+          <span className="underline decoration-dotted underline-offset-2">
+            Include {count} with no expected date
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{explanation}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 
@@ -358,19 +398,13 @@ function IssuedPerStaffReport() {
             issued date, so issued-from never meets an undated row. Hidden until
             that date is set and there is at least one such row to decide. */}
         {toDate && undatedCount > 0 && (
-          <div className="grid gap-1">
-            <Label htmlFor="issued-include-undated" className="text-xs">
-              <Switch
-                id="issued-include-undated"
-                checked={includeUndated}
-                onCheckedChange={checked => setIncludeUndated(checked)}
-              />
-              Include {undatedCount} with no expected date
-            </Label>
-            <span className="text-xs text-muted-foreground">
-              Issued with no return date agreed, so nothing for Expected back by to test
-            </span>
-          </div>
+          <UndatedToggle
+            id="issued-include-undated"
+            count={undatedCount}
+            checked={includeUndated}
+            onCheckedChange={setIncludeUndated}
+            explanation="These were issued with no return date agreed, so Expected back by has nothing to test them against. They still obey Issued from."
+          />
         )}
         <span className="text-sm text-muted-foreground">
           {staff.length} staff · {rangeTxns} transactions · {rangeItems} items
@@ -602,19 +636,13 @@ function ReturnsReport() {
             all in view anyway — and only when there is at least one such row to
             decide about. */}
         {(fromDate || toDate) && undatedCount > 0 && (
-          <div className="grid gap-1">
-            <Label htmlFor="returns-include-undated" className="text-xs">
-              <Switch
-                id="returns-include-undated"
-                checked={includeUndated}
-                onCheckedChange={checked => setIncludeUndated(checked)}
-              />
-              Include {undatedCount} with no expected date
-            </Label>
-            <span className="text-xs text-muted-foreground">
-              No due date to place them in a range, so they show under every window
-            </span>
-          </div>
+          <UndatedToggle
+            id="returns-include-undated"
+            count={undatedCount}
+            checked={includeUndated}
+            onCheckedChange={setIncludeUndated}
+            explanation="The Stock Out these settle set no return date, or they are not linked to one. With no due date to place them in a range, they show under every window."
+          />
         )}
         <span className="text-sm text-muted-foreground">
           {returns.length} {returns.length === 1 ? 'return' : 'returns'}
