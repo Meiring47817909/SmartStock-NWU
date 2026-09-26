@@ -775,6 +775,46 @@ function LoanRequestSummary({
   )
 }
 
+// Flattens an audit entry's `after` snapshot into one plain-text line for
+// the CSV export — every field it has, formatted with the same
+// friendlyLabel/friendlyValue this file already uses for the on-screen
+// diff view, joined as "Label: value | Label: value" rather than left as
+// a pretty-printed multi-line JSON blob. A JSON dump wraps across several
+// rows once opened in Excel (each embedded newline starts a new visual
+// line inside the cell); this stays one line per entry, and reads as
+// English instead of braces and quotes.
+function flattenValueForCsv(key: string, value: unknown): string {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '—'
+    // An array of line items (after.lines, countered_lines, etc.) — show
+    // each as "Product × qty", the same shorthand the on-screen item lists
+    // already use, rather than a raw object dump. A plain array of
+    // primitives (e.g. a product's barcodes) falls through to friendlyValue.
+    if (typeof value[0] === 'object' && value[0] !== null) {
+      return (value as Record<string, unknown>[]).map((item) => {
+        const name = item.product_name ?? item.name
+        const qty = item.quantity ?? item.offered_quantity ?? item.requested_quantity
+        if (typeof name === 'string') return qty !== undefined && qty !== null ? `${name} × ${qty}` : name
+        return JSON.stringify(item)
+      }).join(', ')
+    }
+    return friendlyValue(key, value)
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([k, v]) => `${friendlyLabel(k)}: ${friendlyValue(k, v)}`)
+      .join(', ')
+  }
+  return friendlyValue(key, value)
+}
+
+function flattenAfterForCsv(after: Record<string, unknown> | null): string {
+  if (!after) return '— (none)'
+  return Object.keys(after)
+    .map((key) => `${friendlyLabel(key)}: ${flattenValueForCsv(key, after[key])}`)
+    .join(' | ')
+}
+
 // Sortable columns for the table header — same shadcn-data-table pattern
 // (and the same shared columnHelper/SortableHead) as the four Reports
 // tables. Activity and Entity sort on the same derived display text the
@@ -964,11 +1004,14 @@ export default function AuditLogPage() {
         )}
         <span className="self-end pb-2 text-sm text-muted-foreground">{filtered.length} entries</span>
         {/* Exports every filtered+sorted entry (never just the current
-            pagination page) with the raw after-state JSON each row's own
-            "Show raw data" toggle displays — enough for Selouna to work out
-            what changed by comparing one entity's entries against each
-            other, without carrying the redundant before snapshot (already
-            the previous row's after) on every line. */}
+            pagination page) with the after state flattened to one
+            plain-text line per entry (flattenAfterForCsv) rather than
+            pretty-printed JSON — a JSON dump's embedded newlines wrap a
+            single entry across several visual lines once opened in Excel.
+            Enough for Selouna to work out what changed by comparing one
+            entity's entries against each other, without carrying the
+            redundant before snapshot (already the previous row's after)
+            on every line. */}
         <ExportCsvButton
           filename={`audit-log-${todayDateStr()}.csv`}
           rows={sorted}
@@ -978,7 +1021,7 @@ export default function AuditLogPage() {
             { header: 'Activity', value: (e: AuditLogEntry) => activityLabel(activityKey(e)) },
             { header: 'Entity', value: (e: AuditLogEntry) => ENTITY_LABEL[e.entity_type] ?? e.entity_type },
             { header: 'Entity ID', value: (e: AuditLogEntry) => e.entity_id },
-            { header: 'After', value: (e: AuditLogEntry) => e.after ? JSON.stringify(e.after, null, 2) : '— (none)' },
+            { header: 'After', value: (e: AuditLogEntry) => flattenAfterForCsv(e.after) },
           ]}
         />
       </div>
