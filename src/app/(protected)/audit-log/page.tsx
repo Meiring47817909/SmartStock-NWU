@@ -232,6 +232,92 @@ function friendlyValue(key: string, value: unknown): string {
   return String(value)
 }
 
+// Canonical display field order per entity_type (and, where the action
+// changes the field vocabulary entirely rather than just adding a field,
+// per entity_type+action) — independent of whatever order the CODE PATH
+// that wrote a given entry happened to build its object literal in. Real
+// app writes, seed-script writes, and old historical data have all drifted
+// from each other in practice (see the 2026-09-26 field-order audit); this
+// is what makes every entry for the same kind of record look the same to
+// Selouna regardless of which of those wrote it. Order was chosen to read
+// naturally (identity/what-changed fields first, bookkeeping fields last),
+// not copied from any one write path.
+const AUDIT_FIELD_ORDER: Record<string, string[]> = {
+  product: [
+    'name', 'category_name', 'category_id', 'description', 'barcodes',
+    'quantity_on_hand', 'reorder_threshold', 'available', 'location',
+    'lend_from', 'lend_to', 'lending_interval', 'images', 'created_at', 'updated_at',
+  ],
+  category: ['name', 'description', 'created_at'],
+  // Staff's three action families genuinely don't share a field vocabulary
+  // (a status flip carries none of a profile edit's fields, and granting
+  // portal access carries almost none of either) -- keyed by action family
+  // via auditFieldOrderKey() below, not by entity_type alone.
+  'staff:record': [
+    'name', 'surname', 'full_name', 'email', 'department', 'card_uid',
+    'is_active', 'uid', 'auth_email_synced', 'created_at', 'updated_at',
+  ],
+  'staff:status': ['is_active', 'name', 'surname', 'full_name', 'email'],
+  'staff:access': ['full_name', 'email', 'uid'],
+  // Same story for transactions: a resolved (written-off) return is logged
+  // against the transaction it originated from but carries return_waivers'
+  // own fields, not a transaction's -- see waivers.ts / ResolveSummary.
+  'transaction:record': [
+    'transaction_type', 'reference_no', 'staff_id', 'staff_name', 'user_id',
+    'operator_name', 'manual_override', 'notes', 'return_date', 'linked_txn_id',
+    'lend_from', 'lend_to', 'linked_request_id', 'linked_request_ref',
+    'created_at', 'line_count', 'total_qty', 'lines',
+  ],
+  'transaction:resolve': [
+    'product_id', 'product_name', 'quantity', 'staff_id', 'staff_name', 'reason',
+    'transaction_id', 'created_at', 'resolved_by_uid', 'resolved_by_name',
+  ],
+  // Every loan_request transition already funnels through one shared
+  // snapshot builder (requestAuditSnapshot in loanRequests.ts), so a single
+  // order covers create and every update -- a handful of actions just
+  // append 1-3 extra context fields, listed here at the end.
+  loan_request: [
+    'reference_no', 'staff_id', 'staff_name', 'status', 'from_date', 'to_date',
+    'original_from_date', 'original_to_date', 'message', 'admin_message',
+    'fulfilled_txn_id', 'fulfilled_txn_ref', 'lines', 'line_count', 'total_qty',
+    'staff_message', 'counter_message', 'countered_lines', 'cancel_reason',
+    'created_at', 'updated_at',
+  ],
+}
+
+function auditFieldOrderKey(entityType: AuditEntityType, action: AuditAction): string {
+  if (entityType === 'staff') {
+    if (action === 'activate' || action === 'deactivate') return 'staff:status'
+    if (action === 'grant_access' || action === 'resend_access') return 'staff:access'
+    return 'staff:record'
+  }
+  if (entityType === 'transaction') {
+    return action === 'resolve' ? 'transaction:resolve' : 'transaction:record'
+  }
+  return entityType
+}
+
+// Returns a NEW object with the same fields as `obj`, reordered to the
+// canonical order above -- never filtered. A field the canonical list
+// doesn't know about (a future field nobody's added here yet, or one only
+// an old write path ever set) is appended at the end in its original
+// order, so nothing already in the entry can silently disappear from
+// either the raw-data view or the CSV export.
+function reorderForDisplay(
+  entityType: AuditEntityType, action: AuditAction, obj: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!obj) return null
+  const order = AUDIT_FIELD_ORDER[auditFieldOrderKey(entityType, action)] ?? []
+  const result: Record<string, unknown> = {}
+  for (const key of order) {
+    if (key in obj) result[key] = obj[key]
+  }
+  for (const key of Object.keys(obj)) {
+    if (!(key in result)) result[key] = obj[key]
+  }
+  return result
+}
+
 // Plain-language before/after view for product, category and staff entries.
 // On a create, `before` is null, so every field in `after` is just listed.
 // On an update, both are full-object snapshots — only the fields that
@@ -1021,7 +1107,7 @@ export default function AuditLogPage() {
             { header: 'Activity', value: (e: AuditLogEntry) => activityLabel(activityKey(e)) },
             { header: 'Entity', value: (e: AuditLogEntry) => ENTITY_LABEL[e.entity_type] ?? e.entity_type },
             { header: 'Entity ID', value: (e: AuditLogEntry) => e.entity_id },
-            { header: 'After', value: (e: AuditLogEntry) => flattenAfterForCsv(e.after) },
+            { header: 'After', value: (e: AuditLogEntry) => flattenAfterForCsv(reorderForDisplay(e.entity_type, e.action, e.after)) },
           ]}
         />
       </div>
@@ -1088,13 +1174,13 @@ export default function AuditLogPage() {
                           <div>
                             <div className="mb-1 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">Before</div>
                             <pre className="m-0 overflow-x-auto rounded-md border bg-background p-3 text-xs whitespace-pre-wrap break-words text-muted-foreground">
-                              {e.before ? JSON.stringify(e.before, null, 2) : '— (none)'}
+                              {e.before ? JSON.stringify(reorderForDisplay(e.entity_type, e.action, e.before), null, 2) : '— (none)'}
                             </pre>
                           </div>
                           <div>
                             <div className="mb-1 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">After</div>
                             <pre className="m-0 overflow-x-auto rounded-md border bg-background p-3 text-xs whitespace-pre-wrap break-words text-muted-foreground">
-                              {e.after ? JSON.stringify(e.after, null, 2) : '— (none)'}
+                              {e.after ? JSON.stringify(reorderForDisplay(e.entity_type, e.action, e.after), null, 2) : '— (none)'}
                             </pre>
                           </div>
                         </div>
