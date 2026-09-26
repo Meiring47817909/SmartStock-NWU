@@ -695,7 +695,17 @@ function ReturnsReport() {
                 >
                   <TableCell className="font-mono text-xs">{t.reference_no}</TableCell>
                   <TableCell className="font-medium">{t.staff_name ?? '—'}</TableCell>
-                  <TableCell className="text-sm">
+                  {/* TableCell defaults to whitespace-nowrap, which is fine for
+                      every other column here but not this one: a return with
+                      several product lines comma-joins into a single unbroken
+                      string, and nowrap forces the table's own min-content width
+                      out to fit it on one line — the table then overflows past
+                      the screen (the horizontal scrollbar Occusoft saw), rather
+                      than growing this one row taller. max-w-xs bounds how much
+                      of the row this column is allowed to claim before it has to
+                      wrap, so a return with many items grows down, not the table
+                      out. Same fix as the Audit Log's expanded detail cell. */}
+                  <TableCell className="max-w-xs text-sm break-words whitespace-normal">
                     {tLines.map((l: any) => `${l.product_name ?? '?'} ×${l.quantity}`).join(', ')}
                   </TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">
