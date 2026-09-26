@@ -11,7 +11,9 @@ import {
   tableFeatures,
   type Column,
 } from '@tanstack/react-table'
-import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, Download } from 'lucide-react'
+import { downloadCsv } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 import { CardFooter } from '@/components/ui/card'
 import {
   Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious,
@@ -70,6 +72,37 @@ export function SortableHead({
           : <ArrowUpDown className="size-3.5 text-muted-foreground/50" />}
       </button>
     </TableHead>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// CSV export — one button, shared by every table on this app (originally the
+// four Reports tabs, now the Audit Log too), exporting exactly the rows the
+// caller hands it — after every filter, the search box, and the current
+// sort, but never just the current pagination page — in the same column
+// order the table shows them. `columns` reuses each cell's own display
+// value rather than re-deriving a second version of it, so the CSV reads as
+// the same table Selouna is looking at, not a different cut of it. Disabled
+// rather than hidden when there is nothing to export — the button stays in
+// the same place in the row either way, and a disabled state says why more
+// plainly than the button just vanishing would.
+export function ExportCsvButton<T>({
+  filename, columns, rows,
+}: {
+  filename: string
+  columns: { header: string; value: (row: T) => string | number | null | undefined }[]
+  rows: T[]
+}) {
+  return (
+    <Button
+      variant="outline"
+      className="ml-auto"
+      disabled={rows.length === 0}
+      onClick={() => downloadCsv(filename, columns, rows)}
+    >
+      <Download className="size-3.5" />
+      Export CSV
+    </Button>
   )
 }
 

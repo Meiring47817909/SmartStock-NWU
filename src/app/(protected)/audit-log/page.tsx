@@ -2,13 +2,13 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
-import { formatDate, formatDateOnly, formatLendWindow, withinDateRange } from '@/lib/utils'
+import { formatDate, formatDateOnly, formatLendWindow, todayDateStr, withinDateRange } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { LENDING_INTERVALS } from '@/lib/firebase/loanRequests'
 import { collection, query, orderBy, getDocs, where } from 'firebase/firestore'
 import { useTable, type SortingState } from '@tanstack/react-table'
 import {
-  SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead,
+  SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead, ExportCsvButton,
   type PageSize, paginate, TablePagination,
 } from '@/components/data-table-helpers'
 import { Card } from '@/components/ui/card'
@@ -963,6 +963,24 @@ export default function AuditLogPage() {
           <Button variant="ghost" onClick={() => { setEntityFilter(''); setActionFilter(''); setFromDate(''); setToDate('') }}>Clear filters</Button>
         )}
         <span className="self-end pb-2 text-sm text-muted-foreground">{filtered.length} entries</span>
+        {/* Exports every filtered+sorted entry (never just the current
+            pagination page) with the raw before/after JSON each row's own
+            "Show raw data" toggle displays — the full before-vs-after
+            record a formal audit needs, not just the derived Activity
+            label shown in the table. */}
+        <ExportCsvButton
+          filename={`audit-log-${todayDateStr()}.csv`}
+          rows={sorted}
+          columns={[
+            { header: 'Date', value: (e: AuditLogEntry) => formatDate(e.created_at) },
+            { header: 'User', value: (e: AuditLogEntry) => e.user_name ?? '—' },
+            { header: 'Activity', value: (e: AuditLogEntry) => activityLabel(activityKey(e)) },
+            { header: 'Entity', value: (e: AuditLogEntry) => ENTITY_LABEL[e.entity_type] ?? e.entity_type },
+            { header: 'Entity ID', value: (e: AuditLogEntry) => e.entity_id },
+            { header: 'Before', value: (e: AuditLogEntry) => e.before ? JSON.stringify(e.before, null, 2) : '— (none)' },
+            { header: 'After', value: (e: AuditLogEntry) => e.after ? JSON.stringify(e.after, null, 2) : '— (none)' },
+          ]}
+        />
       </div>
 
       <Card className="min-h-0 flex-1 py-0">

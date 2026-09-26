@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
-import { downloadCsv, formatDate, formatDateOnly, isoToLocalDateStr, todayDateStr, withinDateRange } from '@/lib/utils'
+import { formatDate, formatDateOnly, isoToLocalDateStr, todayDateStr, withinDateRange } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { loadWaivedByTxn, waivedQty } from '@/lib/firebase/waivers'
 import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore'
@@ -11,11 +11,12 @@ import {
   SORTABLE_TABLE_FEATURES as REPORT_TABLE_FEATURES,
   sortableColumnHelper as columnHelper,
   SortableHead,
+  ExportCsvButton,
   type PageSize,
   paginate,
   TablePagination,
 } from '@/components/data-table-helpers'
-import { ChevronDown, Download, Search } from 'lucide-react'
+import { ChevronDown, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import {
@@ -96,35 +97,6 @@ function SelectAllMenuItems({ onSelectAll, onUnselectAll }: { onSelectAll: () =>
       <DropdownMenuItem closeOnClick={false} onClick={onUnselectAll}>Unselect all</DropdownMenuItem>
       <DropdownMenuSeparator />
     </>
-  )
-}
-
-// One button, shared by all four reports, exporting exactly the rows on
-// screen — after every filter, the search box, and the current sort — in
-// the same column order the table shows them. `columns` reuses each cell's
-// own display value (formatDateOnly(t.expected_date), the comma-joined item
-// list, etc.) rather than re-deriving a second version of it, so the CSV
-// reads as the same report Selouna is looking at, not a different cut of it.
-// Disabled rather than hidden when there is nothing to export — the button
-// stays in the same place in the row either way, and a disabled state says
-// why more plainly than the button just vanishing would.
-function ExportCsvButton<T>({
-  filename, columns, rows,
-}: {
-  filename: string
-  columns: { header: string; value: (row: T) => string | number | null | undefined }[]
-  rows: T[]
-}) {
-  return (
-    <Button
-      variant="outline"
-      className="ml-auto"
-      disabled={rows.length === 0}
-      onClick={() => downloadCsv(filename, columns, rows)}
-    >
-      <Download className="size-3.5" />
-      Export CSV
-    </Button>
   )
 }
 
