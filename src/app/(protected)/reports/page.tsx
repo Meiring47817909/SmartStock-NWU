@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
-import { formatDate, formatDateOnly, isoToLocalDateStr, withinDateRange } from '@/lib/utils'
+import { downloadCsv, formatDate, formatDateOnly, isoToLocalDateStr, todayDateStr, withinDateRange } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { loadWaivedByTxn, waivedQty } from '@/lib/firebase/waivers'
 import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore'
@@ -18,7 +18,7 @@ import {
   type Column,
   type SortingState,
 } from '@tanstack/react-table'
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Search } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Download, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import {
@@ -152,6 +152,35 @@ function SelectAllMenuItems({ onSelectAll, onUnselectAll }: { onSelectAll: () =>
       <DropdownMenuItem closeOnClick={false} onClick={onUnselectAll}>Unselect all</DropdownMenuItem>
       <DropdownMenuSeparator />
     </>
+  )
+}
+
+// One button, shared by all four reports, exporting exactly the rows on
+// screen — after every filter, the search box, and the current sort — in
+// the same column order the table shows them. `columns` reuses each cell's
+// own display value (formatDateOnly(t.expected_date), the comma-joined item
+// list, etc.) rather than re-deriving a second version of it, so the CSV
+// reads as the same report Selouna is looking at, not a different cut of it.
+// Disabled rather than hidden when there is nothing to export — the button
+// stays in the same place in the row either way, and a disabled state says
+// why more plainly than the button just vanishing would.
+function ExportCsvButton<T>({
+  filename, columns, rows,
+}: {
+  filename: string
+  columns: { header: string; value: (row: T) => string | number | null | undefined }[]
+  rows: T[]
+}) {
+  return (
+    <Button
+      variant="outline"
+      className="ml-auto"
+      disabled={rows.length === 0}
+      onClick={() => downloadCsv(filename, columns, rows)}
+    >
+      <Download className="size-3.5" />
+      Export CSV
+    </Button>
   )
 }
 
@@ -495,6 +524,17 @@ function StockLevelsReport() {
         <CategoryFilter selected={catFilter} onChange={setCatFilter} cats={cats} />
         <StockStatusFilter selected={statusFilter} onChange={setStatusFilter} />
         <span className="text-sm text-muted-foreground">{sorted.length} products · {totalUnits} total units</span>
+        <ExportCsvButton
+          filename={`stock-levels-${todayDateStr()}.csv`}
+          rows={sorted}
+          columns={[
+            { header: 'Product', value: (p: any) => p.name },
+            { header: 'Category', value: (p: any) => p.category_name ?? '—' },
+            { header: 'Qty On Hand', value: (p: any) => p.qty },
+            { header: 'Threshold', value: (p: any) => p.threshold },
+            { header: 'Status', value: (p: any) => p.status },
+          ]}
+        />
       </div>
       <Card className="min-h-0 flex-1 py-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -589,6 +629,17 @@ function LowStockReport() {
           </div>
         )}
         <SearchBox value={search} onChange={setSearch} placeholder="Search name, category…" className="max-w-80 flex-1" />
+        <ExportCsvButton
+          filename={`low-stock-${todayDateStr()}.csv`}
+          rows={sorted}
+          columns={[
+            { header: 'Product', value: (p: any) => p.name },
+            { header: 'Category', value: (p: any) => p.category_name ?? '—' },
+            { header: 'Qty On Hand', value: (p: any) => p.quantity_on_hand },
+            { header: 'Threshold', value: (p: any) => p.reorder_threshold },
+            { header: 'Shortage', value: (p: any) => p.quantity_on_hand - p.reorder_threshold },
+          ]}
+        />
       </div>
       <Card className="min-h-0 flex-1 py-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -774,6 +825,16 @@ function IssuedPerStaffReport() {
         <span className="text-sm text-muted-foreground">
           {sortedStaff.length} staff · {rangeTxns} transactions · {rangeItems} items
         </span>
+        <ExportCsvButton
+          filename={`issued-per-staff-${todayDateStr()}.csv`}
+          rows={sortedStaff}
+          columns={[
+            { header: 'Staff Member', value: (s: any) => s.full_name },
+            { header: 'Department', value: (s: any) => s.department ?? '—' },
+            { header: 'Total OUT Transactions', value: (s: any) => s.txns.length },
+            { header: 'Total Items Issued', value: (s: any) => s.totalQty },
+          ]}
+        />
       </DateRangeFilter>
       <Card className="min-h-0 flex-1 py-0">
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -1149,6 +1210,23 @@ function ReturnsReport() {
           {sortedReturns.length} {sortedReturns.length === 1 ? 'return' : 'returns'}
           {(fromDate || toDate) && <> · by date expected back</>}
         </span>
+        <ExportCsvButton
+          filename={`returns-${todayDateStr()}.csv`}
+          rows={sortedReturns}
+          columns={[
+            { header: 'Reference', value: (t: any) => t.reference_no },
+            { header: 'Staff', value: (t: any) => t.staff_name ?? '—' },
+            {
+              header: 'Items Returned',
+              value: (t: any) => (t.transaction_lines || [])
+                .map((l: any) => `${l.product_name ?? '?'} ×${l.quantity}`).join(', '),
+            },
+            { header: 'Returning For', value: (t: any) => t.linked_txn_ref ?? '—' },
+            { header: 'Status', value: (t: any) => returnRowStatus(t)?.label ?? '' },
+            { header: 'Expected', value: (t: any) => formatDateOnly(t.expected_date) },
+            { header: 'Date Returned', value: (t: any) => formatDate(t.created_at) },
+          ]}
+        />
       </DateRangeFilter>
       <Card className="min-h-0 flex-1 py-0">
       <div className="min-h-0 flex-1 overflow-y-auto">

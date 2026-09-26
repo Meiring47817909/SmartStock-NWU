@@ -158,3 +158,41 @@ export function stockStatusLabel(qty: number, threshold: number): string {
   if (qty <= threshold) return 'Low stock'
   return 'In stock'
 }
+
+// Shared by every report's Export CSV button. `columns` pairs each CSV
+// column's header with how to read that column out of a row, so a caller
+// states "what goes in this column" once and this handles the RFC
+// 4180-ish escaping and the browser download the same way everywhere it's
+// used, rather than four near-identical one-off exporters.
+//
+// Callers pass the exact same value already shown on screen for that cell
+// (formatDateOnly(t.expected_date), the comma-joined item list, etc.) —
+// same principle noted in the Audit Log's TransactionSummary: what a CSV
+// export carries should read as the same thing the screen showed, not a
+// second, differently-formatted version of it.
+export function downloadCsv<T>(
+  filename: string,
+  columns: { header: string; value: (row: T) => string | number | null | undefined }[],
+  rows: T[],
+): void {
+  const escape = (v: string | number | null | undefined): string => {
+    const s = v === null || v === undefined ? '' : String(v)
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const lines = [
+    columns.map(c => escape(c.header)).join(','),
+    ...rows.map(row => columns.map(c => escape(c.value(row))).join(',')),
+  ]
+  // Leading BOM so Excel — still where an exported CSV most often gets
+  // opened — reads it as UTF-8 rather than mis-decoding anything outside
+  // plain ASCII.
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
