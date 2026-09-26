@@ -348,15 +348,30 @@ function IssuedPerStaffReport() {
                     // per transaction with every item mashed into a single
                     // comma-joined cell) — a multi-item Stock Out needs each
                     // product and its own quantity to be its own line here.
+                    //
+                    // Each cell sits under the parent column it belongs to —
+                    // product under Total OUT Transactions, quantity under
+                    // Total Items Issued — so a staff member's totals read as
+                    // the sum of the lines beneath them rather than as two
+                    // numbers with unaligned prose underneath. No colSpan, for
+                    // the same reason. Reference and issue date repeat on every
+                    // line of a multi-item transaction, matching the one-row-
+                    // per-product-line shape the CSV export will take.
                     const tLines = t.transaction_lines || []
                     const rows = tLines.length > 0 ? tLines : [null]
                     return rows.map((l: any, idx: number) => (
                       <TableRow key={`${t.id}_${idx}`} className="bg-muted/50">
-                        <TableCell colSpan={2} className="pl-8 font-mono text-xs text-muted-foreground">
-                          {t.reference_no} · {formatDate(t.created_at)}
+                        <TableCell className="pl-8 font-mono text-xs text-muted-foreground">
+                          {t.reference_no}
                         </TableCell>
-                        <TableCell colSpan={2} className="text-xs text-muted-foreground">
-                          {l ? `${l.product_name ?? '?'} ×${l.quantity}` : 'No items recorded'}
+                        <TableCell className="text-xs text-muted-foreground">
+                          Issued at {formatDate(t.created_at)}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {l ? (l.product_name ?? '?') : 'No items recorded'}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {l ? l.quantity : '—'}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {t.lend_to ? <>Expected {formatDateOnly(t.lend_to)}</> : '—'}
