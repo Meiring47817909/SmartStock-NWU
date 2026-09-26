@@ -18,9 +18,12 @@ import {
   type Column,
   type SortingState,
 } from '@tanstack/react-table'
-import { ArrowDown, ArrowUp, ArrowUpDown, Search } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import {
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -745,6 +748,82 @@ function expectedInRange(t: any, from: string, to: string, includeUndated: boole
 // falls out of the way rather than landing arbitrarily in the middle.
 const RETURN_STATUS_RANK: Record<string, number> = { Partial: 0, Late: 1, 'On time': 2, Early: 3 }
 
+// The five values the Status filter offers — the four labels
+// returnRowStatus() can produce, in the same urgency order as
+// RETURN_STATUS_RANK, plus 'none' as a fifth, explicit option for the rows
+// it returns null for (no due date on record at all). Same principle as the
+// undated toggle elsewhere on this page: a return with nothing to judge it
+// against doesn't get silently swept into "matches every filter" or
+// "matches none" — it's a choice Selouna can see and make herself.
+const RETURN_STATUS_VALUES = ['Partial', 'Late', 'On time', 'Early', 'none'] as const
+type ReturnStatusValue = typeof RETURN_STATUS_VALUES[number]
+
+const RETURN_STATUS_META: Record<ReturnStatusValue, { label: string; dotClass: string }> = {
+  Partial:   { label: 'Partial',   dotClass: 'bg-amber-500' },
+  Late:      { label: 'Late',      dotClass: 'bg-red-500' },
+  'On time': { label: 'On time',   dotClass: 'bg-sky-500' },
+  Early:     { label: 'Early',     dotClass: 'bg-emerald-500' },
+  none:      { label: 'No status', dotClass: 'bg-muted-foreground/40' },
+}
+
+function returnStatusValue(t: any): ReturnStatusValue {
+  return (returnRowStatus(t)?.label as ReturnStatusValue | undefined) ?? 'none'
+}
+
+// The trigger's own text, driven entirely by what's checked: one status
+// shows its own name, every status shows "All statuses", nothing shows "No
+// statuses" (this is an inclusion filter — an empty selection matches
+// nothing, the same as every individual checkbox unticked meaning "don't
+// include this one"), and any other combination — e.g. Partial + Late —
+// shows "Custom", exactly as asked.
+function statusFilterLabel(selected: Set<ReturnStatusValue>): string {
+  if (selected.size === 0) return 'No statuses'
+  if (selected.size === RETURN_STATUS_VALUES.length) return 'All statuses'
+  if (selected.size === 1) return RETURN_STATUS_META[[...selected][0]].label
+  return 'Custom'
+}
+
+// A menu, not a shadcn Select: Select is single-choice by design (choosing
+// one value closes it), and this needs several boxes tickable in one visit
+// without the list closing after each click. DropdownMenuCheckboxItem is
+// built on Base UI's Menu.CheckboxItem, whose closeOnClick defaults to
+// false — exactly the "stay open across multiple picks" behaviour a
+// multi-select needs, with no extra prop required to get it.
+function StatusFilter({
+  selected, onChange,
+}: {
+  selected: Set<ReturnStatusValue>
+  onChange: (next: Set<ReturnStatusValue>) => void
+}) {
+  function toggle(value: ReturnStatusValue, checked: boolean) {
+    const next = new Set(selected)
+    if (checked) next.add(value)
+    else next.delete(value)
+    onChange(next)
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="outline" className="w-40 justify-between font-normal" />}>
+        <span className="truncate">{statusFilterLabel(selected)}</span>
+        <ChevronDown className="size-3.5 text-muted-foreground" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-44">
+        {RETURN_STATUS_VALUES.map(value => (
+          <DropdownMenuCheckboxItem
+            key={value}
+            checked={selected.has(value)}
+            onCheckedChange={checked => toggle(value, checked)}
+          >
+            <span className={`size-2 rounded-full ${RETURN_STATUS_META[value].dotClass}`} />
+            {RETURN_STATUS_META[value].label}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 const RETURNS_COLUMNS = columnHelper.columns([
   columnHelper.accessor('reference_no', { id: 'reference_no', header: 'Reference', sortFn: 'alphanumeric' }),
   columnHelper.accessor('staff_name', { id: 'staff_name', header: 'Staff', sortFn: 'alphanumeric' }),
@@ -775,6 +854,10 @@ function ReturnsReport() {
   const [includeUndated, setIncludeUndated] = useState(true)
   const [search, setSearch] = useState('')
   const [sorting, setSorting] = useState<SortingState>([])
+  // All five checked by default, so the filter starts out invisible — every
+  // row that was showing before this control existed keeps showing until
+  // Selouna actively narrows it, same as every other filter default here.
+  const [statusFilter, setStatusFilter] = useState<Set<ReturnStatusValue>>(new Set(RETURN_STATUS_VALUES))
 
   useEffect(() => {
     async function load() {
@@ -867,7 +950,13 @@ function ReturnsReport() {
   // search finds a row, it doesn't change what the toggle is deciding.
   const undatedCount = data.filter((t: any) => !t.expected_date).length
 
-  const searched = returns.filter((t: any) =>
+  // Applied after the date range, before search: which statuses count is a
+  // separate decision from which date window and which search term, and
+  // ordering it this way means the search box only ever searches within
+  // whatever the status filter has already let through.
+  const statusFiltered = returns.filter((t: any) => statusFilter.has(returnStatusValue(t)))
+
+  const searched = statusFiltered.filter((t: any) =>
     matchesSearch(search, t.reference_no, t.staff_name, t.linked_txn_ref,
       ...(t.transaction_lines || []).map((l: any) => l.product_name)))
 
@@ -892,6 +981,7 @@ function ReturnsReport() {
         onToChange={setToDate}
       >
         <SearchBox value={search} onChange={setSearch} placeholder="Search reference, staff, item…" />
+        <StatusFilter selected={statusFilter} onChange={setStatusFilter} />
         {/* Only worth showing once a range is set — with no dates the rows are
             all in view anyway — and only when there is at least one such row to
             decide about. */}
@@ -928,7 +1018,10 @@ function ReturnsReport() {
           {loading && <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
           {!loading && sortedReturns.length === 0 && (
             <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
-              {search ? `No returns match "${search}"` : fromDate || toDate ? 'No returns were expected in the selected date range' : 'No returns recorded yet'}
+              {search ? `No returns match "${search}"`
+                : statusFilter.size === 0 ? 'No statuses selected'
+                : fromDate || toDate ? 'No returns were expected in the selected date range'
+                : 'No returns recorded yet'}
             </TableCell></TableRow>
           )}
           {sortedReturns.map((t: any) => {
