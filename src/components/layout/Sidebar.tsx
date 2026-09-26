@@ -97,19 +97,24 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
   return (
     <SidebarPrimitive collapsible="none" className="h-screen">
       <SidebarHeader className="border-b border-sidebar-border px-4 py-4">
-        {/* SmartStock-NWU logo replaces the old "BICS" text lockup — the
-            logo's own white rounded-square badge already carries the brand
-            colours, so it sits directly on the purple sidebar background
-            with no extra wrapper needed. */}
-        <Image
-          src="/smartstock-nwu-logo.png"
-          alt="SmartStock-NWU"
-          width={480}
-          height={480}
-          priority
-          className="mx-auto h-auto w-[168px]"
-        />
-        <div className="mt-1.5 text-center text-[0.7rem] text-white/65">NWU IT Store · Potch</div>
+        {/* SmartStock-NWU logo replaces the old "BICS" text lockup. The
+            logo's own darkest purple is the exact same NWU brand purple as
+            this sidebar background (#6C3D91), so laid directly on it the
+            mark all but disappears — it needs the white it was designed
+            against. A small white rounded card gives it that white ground
+            as a deliberate "logo badge" rather than a stray white square
+            butted up against the purple. */}
+        <div className="mx-auto w-fit rounded-xl bg-white p-2.5 shadow-sm">
+          <Image
+            src="/smartstock-nwu-logo.png"
+            alt="SmartStock-NWU"
+            width={640}
+            height={512}
+            priority
+            className="h-auto w-[176px]"
+          />
+        </div>
+        <div className="mt-2 text-center text-[0.7rem] text-white/65">NWU IT Store · Potch</div>
       </SidebarHeader>
 
       <SidebarContent className="px-1.5 py-2">
