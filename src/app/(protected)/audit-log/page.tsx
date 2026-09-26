@@ -862,13 +862,16 @@ function LoanRequestSummary({
 }
 
 // Flattens an audit entry's `after` snapshot into one plain-text line for
-// the CSV export — every field it has, formatted with the same
-// friendlyLabel/friendlyValue this file already uses for the on-screen
-// diff view, joined as "Label: value | Label: value" rather than left as
-// a pretty-printed multi-line JSON blob. A JSON dump wraps across several
-// rows once opened in Excel (each embedded newline starts a new visual
-// line inside the cell); this stays one line per entry, and reads as
-// English instead of braces and quotes.
+// the CSV export — every field it has, joined as "field_name: value |
+// field_name: value" rather than left as a pretty-printed multi-line JSON
+// blob. A JSON dump wraps across several rows once opened in Excel (each
+// embedded newline starts a new visual line inside the cell); this stays
+// one line per entry. Field NAMES are kept exactly as they are in
+// Firestore (reference_no, not "Reference") rather than run through
+// friendlyLabel — Selouna cross-references these against the raw-data
+// JSON view, so the two need to say the same thing. Field VALUES still go
+// through friendlyValue for the same date/status/boolean formatting the
+// on-screen views use.
 function flattenValueForCsv(key: string, value: unknown): string {
   if (Array.isArray(value)) {
     if (value.length === 0) return '—'
@@ -888,7 +891,7 @@ function flattenValueForCsv(key: string, value: unknown): string {
   }
   if (value !== null && typeof value === 'object') {
     return Object.entries(value as Record<string, unknown>)
-      .map(([k, v]) => `${friendlyLabel(k)}: ${friendlyValue(k, v)}`)
+      .map(([k, v]) => `${k}: ${friendlyValue(k, v)}`)
       .join(', ')
   }
   return friendlyValue(key, value)
@@ -897,7 +900,7 @@ function flattenValueForCsv(key: string, value: unknown): string {
 function flattenAfterForCsv(after: Record<string, unknown> | null): string {
   if (!after) return '— (none)'
   return Object.keys(after)
-    .map((key) => `${friendlyLabel(key)}: ${flattenValueForCsv(key, after[key])}`)
+    .map((key) => `${key}: ${flattenValueForCsv(key, after[key])}`)
     .join(' | ')
 }
 
