@@ -1105,3 +1105,55 @@ User hit `Firebase: Error (auth/user-not-found)` logging into the BICS login pag
 Verified with `node --check` and `npx eslint` (both clean) — same live-emulator caveat as cont. 13: this session can't run the emulator itself (broken local `firebase-tools` install, pre-existing and unrelated to this work), so this hasn't been exercised end-to-end. `upsertUser`'s get-or-create means re-running the script is still safe for the Auth accounts themselves, though re-running will add a second batch of ledger/loan-request/audit data same as before.
 
 `node --check scripts/seed-comprehensive-demo.mjs` and `npx eslint scripts/seed-comprehensive-demo.mjs` both pass clean.
+
+## Session Handoff — 2026-09-26: Audit Log — sortable columns, pagination, and CSV export
+
+Long-term goal for this stretch of work: make the Audit Log analysable for a formal audit, per Selouna's needs.
+
+**Sortable columns + pagination** (`audit-log/page.tsx`): added the same TanStack-Table-driven sortable column headers and 10/20/All pagination already used on the Reports page's four tabs (Date, User, Activity, Entity, Entity ID — all sortable). To avoid duplicating that machinery a third time, extracted the shared pieces out of `reports/page.tsx` into a new module, **`src/components/data-table-helpers.tsx`**: `SORTABLE_TABLE_FEATURES`/`sortableColumnHelper` (the TanStack Table instance and column helper — used purely as a sort-order engine, never `FlexRender`; every row still renders through the page's own JSX), `SortableHead` (clickable header, cycles unsorted → asc → desc), `PageSize`/`pageCountFor`/`paginate`/`TablePagination` (10/20/All rows-per-page + Previous/Next), and `ExportCsvButton` (see below). `reports/page.tsx` now imports the same helpers (aliased `SORTABLE_TABLE_FEATURES as REPORT_TABLE_FEATURES`, `sortableColumnHelper as columnHelper`) instead of its own copies.
+
+**CSV export**: added an Export CSV button next to the filters. Since it wasn't obvious from the request alone how much detail Selouna needed in the export, asked her directly — she confirmed she wants the raw Before + After JSON detail, not just a friendly on-screen-style summary, so the exported rows carry the same before/after snapshots the raw-data expand view shows (this shape changed several times over the rest of the day — see below). Uses the existing `downloadCsv()` in `lib/utils.ts` (already-correct RFC-4180-ish escaping, including embedded newlines, so no changes needed there).
+
+`npx tsc --noEmit` clean; `npx eslint` shows only the pre-existing baseline (`@typescript-eslint/no-explicit-any` throughout, 1 pre-existing `react-hooks/set-state-in-effect`) — no new categories.
+
+## Session Handoff — 2026-09-26 (cont. 1): root-caused a demo audit entry that didn't say which item was involved
+
+Selouna noticed a Stock Out audit entry for a single item didn't say anywhere in its After raw data *which* item it was — screenshotted an example. Traced it: the real write paths (Stock In/Out/Returns pages) already freeze the transaction's `lines` (product id/name/quantity) into the audit entry's `after` snapshot as of an earlier commit — but this was a demo entry written by `scripts/seed-comprehensive-demo.mjs`'s *own*, separate `writeAudit()` helper inside `recordTxn()`, which had never been updated to match that change. Confirmed the root cause with the user (yes — bad data from `npm run seed:comprehensive`, not a live-app bug) before fixing it.
+
+**Fix**: `recordTxn()` in `scripts/seed-comprehensive-demo.mjs` now freezes the same `lines: items.map(i => ({ product_id, product_name, quantity }))` (plus `line_count`/`total_qty`) into its `after` payload that the real app writes, so every transaction the comprehensive seed produces matches the real shape going forward. Existing emulator data written before this fix is still wrong (audit_log is append-only — nothing retroactively fixes old entries at the source), which is exactly why the next entry below takes a display-time approach instead.
+
+## Session Handoff — 2026-09-26 (cont. 2): canonical field order for raw before/after JSON, and several rounds of CSV "After" formatting
+
+Selouna compared the raw-data view of a product **update** entry against a product **create** entry and noticed the JSON fields weren't in the same order between the two — asked for that to be fixed everywhere, and to be told which entities had the same inconsistency for the same activity.
+
+**Investigation**: checked every real write path (product/category/staff/transaction/loan_request across the whole app) plus every seed script for what fields each actually writes and in what order. Since `audit_log` is append-only, no amount of fixing write paths could ever retroactively reorder already-written historical/seed data — so rather than rewriting several files, implemented **display-time normalization** instead, which fixes both future and all past data uniformly:
+
+- **`AUDIT_FIELD_ORDER: Record<string, string[]>`** (`audit-log/page.tsx`) — the canonical field order per entity, keyed by `entity_type`, except `staff` and `transaction` which are split further by *action* (`staff:record` / `staff:status` / `staff:access`, `transaction:record` / `transaction:resolve`) because their field vocabulary genuinely differs by action, not just its order.
+- **`auditFieldOrderKey(entityType, action)`** — picks the right key above.
+- **`reorderForDisplay(entityType, action, obj)`** — rebuilds an object with keys in that canonical order (any field not listed falls back to its original position, so nothing silently disappears if the write path ever adds a new field).
+
+Applied uniformly to both the on-screen raw-data `<pre>` JSON blocks and the CSV export, so the two always read consistently no matter when the underlying entry was written.
+
+**CSV "After" column — several rounds of refinement**, each a direct response to Selouna trying the export and coming back with feedback:
+1. Dropped the CSV's **Before** column entirely — she only wants After; with field order now consistent, she can tell what changed between transactions without a separate Before/After diff in the file itself.
+2. First pass at "not JSON, one line" formatting: `flattenAfterForCsv()`/`flattenValueForCsv()` (new helpers) turned each entry's After snapshot into `"key: value | key: value | ..."`, reusing the existing `friendlyValue()` formatter for dates/booleans/statuses (array line-items render as `"Product × qty"`, nested objects as `"k: v, k: v"`).
+3. Field *labels* switched from the friendly on-screen labels (e.g. "Reference") to the raw JSON key names (`reference_no`) — so the CSV cross-references cleanly against the raw-data JSON view instead of using two different vocabularies for the same field.
+4. Asked which of three concrete layouts she wanted for the After cell (single "|"-joined line / one field per line via embedded newlines / a hybrid) — she picked one-field-per-line: `downloadCsv()`'s existing quoting already handles embedded newlines correctly, so this stays one CSV cell that Excel renders as a multi-line "card" with Wrap Text on.
+5. Final tweak: keep a trailing `" |"` on every line in addition to the line break, so each line reads `key: value |` — the pipe look she's used to, plus the line break doing the actual visual separation.
+6. Renamed the export column header from **"After"** to **"Details"**, since by this point it's a formatted, flattened rendering rather than a literal dump of the `after` field.
+
+**Advisory only, no code** — also walked Selouna through two related questions, in-chat rather than in the app: (a) why a `.csv` she'd already saved and reopened came back corrupted (Excel had re-saved it with a regional semicolon delimiter, splitting Date's internal comma across columns — confirmed the export's own CSV was fine; the corruption happened after the fact in Excel) and how to re-export cleanly and turn it into a proper Excel Table + PivotTable/filters for an audit; (b) whether Excel can do a "pivot with expandable detail rows" — explained PivotTable drill-through and column Grouping/Outline as the closest equivalents, being upfront that Excel has no native per-row expand/collapse toggle.
+
+`npx tsc --noEmit` clean at every step; `npx eslint` never introduced a new warning category beyond the pre-existing baseline.
+
+## Session Handoff — 2026-09-26 (cont. 3): sidebar logo — two attempts, the first didn't work
+
+Replaced the "BICS" bullet + text lockup at the top of `Sidebar.tsx`'s `SidebarHeader` with the actual SmartStock-NWU logo the user supplied.
+
+**First attempt**: downscaled the source artwork (a 2048×2048 JPG — a rounded purple-bordered square containing the "S" icon and the "SmartStock-NWU" wordmark) to 480×480, saved as `public/smartstock-nwu-logo.png`, and rendered it with `next/image` (the first use of `next/image` anywhere in this codebase — every other image reference is a plain `<img>` or absent) directly in the header, in place of the old text.
+
+**That didn't work** — Selouna flagged it looked bad, screenshotted it: the logo's own white background rendered as a plain white square butted directly up against the purple sidebar. Investigated properly before just stripping the white background to transparent: the logo's *darkest* purple turns out to be `#6C3D91` — the exact same NWU brand purple as `--sidebar` in `globals.css`. A transparent-background version was tried first (background keyed to alpha via a min-channel threshold) but made the mark itself nearly disappear into the identically-coloured sidebar rather than fixing anything, confirmed against a rendered preview before touching the component.
+
+**Actual fix**: re-cropped the source artwork tighter (trimmed the large outer white margin around the bordered box, using an eroded near-white pixel mask to ignore JPEG noise in the margin rather than a naive threshold) but *kept* its white background, then wrapped it in a small white rounded card in the sidebar itself — `rounded-xl bg-white p-2.5 shadow-sm` — so the white now reads as a deliberate logo badge rather than an artifact of the source image. `public/smartstock-nwu-logo.png` now holds this re-cropped 640×512 version. Rendered and eyeballed a composite preview (logo over the actual sidebar purple) before committing, to confirm it actually looked right this time rather than guessing again.
+
+`npx tsc --noEmit` clean both times; `npx eslint` unchanged from this file's pre-existing 2 `react-hooks/exhaustive-deps` warnings (both in unrelated `useEffect` dependency arrays this work never touched).
