@@ -6,6 +6,19 @@ import { formatDate, formatDateOnly, isoToLocalDateStr, withinDateRange } from '
 import { db } from '@/lib/firebase/config'
 import { loadWaivedByTxn, waivedQty } from '@/lib/firebase/waivers'
 import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore'
+import {
+  createColumnHelper,
+  createSortedRowModel,
+  rowSortingFeature,
+  sortFn_alphanumeric,
+  sortFn_datetime,
+  sortFn_text,
+  tableFeatures,
+  useTable,
+  type Column,
+  type SortingState,
+} from '@tanstack/react-table'
+import { ArrowDown, ArrowUp, ArrowUpDown, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -29,6 +42,97 @@ const TABS: { id: ReportTab; label: string }[] = [
 ]
 
 const ALL_CATEGORIES = '__all__'
+
+// ---------------------------------------------------------------------------
+// Sorting — shadcn's data-table pattern (an actual @tanstack/react-table
+// instance driving column-header sorting), NOT the abandoned DataTables.net
+// spike from earlier. That was a different library entirely (a jQuery-adjacent
+// widget that rendered its own DOM); this is a headless state manager that
+// only computes row ORDER — every row still renders through the same
+// TableRow/TableCell JSX already written below, Fragment blocks, expandable
+// detail rows, badges and all. Nothing here uses table.FlexRender or column
+// `cell` renderers: a column definition exists purely to give a header
+// something to click and a comparator to sort by.
+//
+// One features object and one columnHelper, shared by all four reports —
+// the feature set (which comparators exist) doesn't vary by table, and this
+// file's own convention (loose `any` typing everywhere, deliberately — see
+// the manual_override discussion elsewhere in this codebase) means every
+// report's rows can share one `TData = any` helper rather than four
+// near-identical typed ones.
+const REPORT_TABLE_FEATURES = tableFeatures({
+  rowSortingFeature,
+  sortedRowModel: createSortedRowModel(),
+  sortFns: { alphanumeric: sortFn_alphanumeric, text: sortFn_text, datetime: sortFn_datetime },
+})
+
+const columnHelper = createColumnHelper<typeof REPORT_TABLE_FEATURES, any>()
+
+// A clickable TableHead wired to one column's sort state — click to cycle
+// unsorted → ascending → descending → unsorted, same as clicking any other
+// sortable column header. The icon says which state a column is in without
+// needing to click it to find out.
+function SortableHead({
+  column, children, className,
+}: {
+  column: Column<typeof REPORT_TABLE_FEATURES, any, unknown>
+  children: ReactNode
+  className?: string
+}) {
+  const sorted = column.getIsSorted()
+  return (
+    <TableHead className={className}>
+      <button
+        type="button"
+        onClick={column.getToggleSortingHandler()}
+        className="-ml-2 inline-flex cursor-pointer items-center gap-1 rounded px-2 py-1 hover:bg-muted"
+      >
+        {children}
+        {sorted === 'asc' ? <ArrowUp className="size-3.5" />
+          : sorted === 'desc' ? <ArrowDown className="size-3.5" />
+          : <ArrowUpDown className="size-3.5 text-muted-foreground/50" />}
+      </button>
+    </TableHead>
+  )
+}
+
+// The same Search-icon-and-Input idiom already used on Products/Staff/Stock
+// Out/Returns (see products/page.tsx) — reused rather than reinvented, so a
+// search box looks the same wherever it appears in the app. No label: none
+// of those pages give theirs one either, and the placeholder says what it's
+// for. `className` overrides the width to fit whichever filter row it sits
+// in — a flex-1 hero search on its own row, or a fixed width alongside the
+// date pickers on Issued per Staff / Returns.
+function SearchBox({
+  value, onChange, placeholder, className = 'w-56',
+}: {
+  value: string
+  onChange: (v: string) => void
+  placeholder: string
+  className?: string
+}) {
+  return (
+    <div className={`relative ${className}`}>
+      <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        className="pl-8"
+        placeholder={placeholder}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+      />
+    </div>
+  )
+}
+
+// Case-insensitive "does the search text appear in any of these fields"
+// check, shared by every report's search box rather than re-implemented
+// four times. An empty (or whitespace-only) search matches everything, same
+// as an empty date range matching everything.
+function matchesSearch(search: string, ...fields: (string | null | undefined)[]): boolean {
+  const needle = search.trim().toLowerCase()
+  if (!needle) return true
+  return fields.some(f => f?.toLowerCase().includes(needle))
+}
 
 // Labelled date pair, matching the Audit Log's filter row. A date input
 // ignores `placeholder`, so without these labels the browser's own dd/mm/yyyy
@@ -136,6 +240,23 @@ const STATUS_BADGE_CLASS: Record<string, string> = {
   'IN STOCK': 'bg-emerald-100 text-emerald-800',
 }
 
+// Ranked by urgency, not alphabetically — "IN STOCK" < "LOW STOCK" < "OUT OF
+// STOCK" would sort the healthiest items to the top, which is backwards for
+// a column whose whole job is to surface what needs attention first.
+const STATUS_RANK: Record<string, number> = { 'OUT OF STOCK': 0, 'LOW STOCK': 1, 'IN STOCK': 2 }
+
+const STOCK_LEVELS_COLUMNS = columnHelper.columns([
+  columnHelper.accessor('name', { id: 'name', header: 'Product', sortFn: 'alphanumeric' }),
+  columnHelper.accessor('category_name', { id: 'category_name', header: 'Category', sortFn: 'alphanumeric' }),
+  columnHelper.accessor('qty', { id: 'qty', header: 'Qty On Hand', sortFn: (a: any, b: any) => a.original.qty - b.original.qty }),
+  columnHelper.accessor('threshold', { id: 'threshold', header: 'Threshold', sortFn: (a: any, b: any) => a.original.threshold - b.original.threshold }),
+  columnHelper.accessor('status', {
+    id: 'status',
+    header: 'Status',
+    sortFn: (a: any, b: any) => STATUS_RANK[a.original.status] - STATUS_RANK[b.original.status],
+  }),
+])
+
 export default function ReportsPage() {
   const [tab, setTab] = useState<ReportTab>('stock-levels')
 
@@ -167,6 +288,8 @@ function StockLevelsReport() {
   const [loading, setLoading] = useState(true)
   const [catFilter, setCatFilter] = useState('')
   const [cats, setCats] = useState<any[]>([])
+  const [search, setSearch] = useState('')
+  const [sorting, setSorting] = useState<SortingState>([])
 
   useEffect(() => {
     getDocs(query(collection(db, 'categories'), orderBy('name'))).then(snap => {
@@ -187,11 +310,32 @@ function StockLevelsReport() {
     })
   }, [catFilter])
 
-  const totalUnits = data.reduce((s, p) => s + (p.quantity_on_hand || 0), 0)
+  // qty/threshold/status precomputed once here rather than inline per row —
+  // the Status column needs a plain field to sort on, not a value recomputed
+  // fresh inside the render loop each time.
+  const rows = data.map((p: any) => {
+    const qty = p.quantity_on_hand || 0
+    const threshold = p.reorder_threshold || 0
+    const status = qty === 0 ? 'OUT OF STOCK' : qty <= threshold ? 'LOW STOCK' : 'IN STOCK'
+    return { ...p, qty, threshold, status }
+  })
+  const searched = rows.filter((p: any) => matchesSearch(search, p.name, p.category_name))
+
+  const table = useTable({
+    features: REPORT_TABLE_FEATURES,
+    columns: STOCK_LEVELS_COLUMNS,
+    data: searched,
+    state: { sorting },
+    onSortingChange: setSorting,
+  })
+  const sorted = table.getSortedRowModel().rows.map(r => r.original)
+
+  const totalUnits = sorted.reduce((s: number, p: any) => s + p.qty, 0)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-4 flex items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <SearchBox value={search} onChange={setSearch} placeholder="Search name, category…" className="max-w-80 flex-1" />
         <Select
           items={{ [ALL_CATEGORIES]: 'All categories', ...Object.fromEntries(cats.map((c: any) => [c.id, c.name])) }}
           value={catFilter || ALL_CATEGORIES}
@@ -203,36 +347,36 @@ function StockLevelsReport() {
             {cats.map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
           </SelectContent>
         </Select>
-        <span className="text-sm text-muted-foreground">{data.length} products · {totalUnits} total units</span>
+        <span className="text-sm text-muted-foreground">{sorted.length} products · {totalUnits} total units</span>
       </div>
       <Card className="min-h-0 flex-1 py-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
-              <TableHead>Product</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead>Qty On Hand</TableHead>
-              <TableHead>Threshold</TableHead>
-              <TableHead>Status</TableHead>
+              <SortableHead column={table.getColumn('name')!}>Product</SortableHead>
+              <SortableHead column={table.getColumn('category_name')!}>Category</SortableHead>
+              <SortableHead column={table.getColumn('qty')!}>Qty On Hand</SortableHead>
+              <SortableHead column={table.getColumn('threshold')!}>Threshold</SortableHead>
+              <SortableHead column={table.getColumn('status')!}>Status</SortableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
-            {data.map((p: any) => {
-              const qty = p.quantity_on_hand || 0
-              const threshold = p.reorder_threshold || 0
-              const status = qty === 0 ? 'OUT OF STOCK' : qty <= threshold ? 'LOW STOCK' : 'IN STOCK'
-              return (
-                <TableRow key={p.id}>
-                  <TableCell className="font-medium">{p.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{p.category_name ?? '—'}</TableCell>
-                  <TableCell className="font-semibold">{qty}</TableCell>
-                  <TableCell className="text-muted-foreground">{threshold}</TableCell>
-                  <TableCell><Badge className={STATUS_BADGE_CLASS[status]}>{status}</Badge></TableCell>
-                </TableRow>
-              )
-            })}
+            {!loading && sorted.length === 0 && (
+              <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                {search ? `No products match "${search}"` : 'No products found'}
+              </TableCell></TableRow>
+            )}
+            {sorted.map((p: any) => (
+              <TableRow key={p.id}>
+                <TableCell className="font-medium">{p.name}</TableCell>
+                <TableCell className="text-muted-foreground">{p.category_name ?? '—'}</TableCell>
+                <TableCell className="font-semibold">{p.qty}</TableCell>
+                <TableCell className="text-muted-foreground">{p.threshold}</TableCell>
+                <TableCell><Badge className={STATUS_BADGE_CLASS[p.status]}>{p.status}</Badge></TableCell>
+              </TableRow>
+            ))}
           </TableBody>
         </Table>
         </div>
@@ -241,9 +385,24 @@ function StockLevelsReport() {
   )
 }
 
+const LOW_STOCK_COLUMNS = columnHelper.columns([
+  columnHelper.accessor('name', { id: 'name', header: 'Product', sortFn: 'alphanumeric' }),
+  columnHelper.accessor('category_name', { id: 'category_name', header: 'Category', sortFn: 'alphanumeric' }),
+  columnHelper.accessor('quantity_on_hand', { id: 'qty', header: 'Qty On Hand', sortFn: (a: any, b: any) => a.original.quantity_on_hand - b.original.quantity_on_hand }),
+  columnHelper.accessor('reorder_threshold', { id: 'threshold', header: 'Threshold', sortFn: (a: any, b: any) => a.original.reorder_threshold - b.original.reorder_threshold }),
+  columnHelper.accessor((p: any) => p.reorder_threshold - p.quantity_on_hand, {
+    id: 'shortage',
+    header: 'Shortage',
+    sortFn: (a: any, b: any) =>
+      (a.original.reorder_threshold - a.original.quantity_on_hand) - (b.original.reorder_threshold - b.original.quantity_on_hand),
+  }),
+])
+
 function LowStockReport() {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [sorting, setSorting] = useState<SortingState>([])
 
   useEffect(() => {
     getDocs(query(collection(db, 'products'))).then(snap => {
@@ -255,31 +414,52 @@ function LowStockReport() {
     })
   }, [])
 
+  // The severity banner below reads off `data` — the true, unfiltered count
+  // of everything at or below threshold — never off the search box. Search
+  // is here to help Selouna find one item, not to change how many the store
+  // considers low; narrowing the search shouldn't make the banner claim
+  // fewer items need attention than actually do.
+  const searched = data.filter((p: any) => matchesSearch(search, p.name, p.category_name))
+
+  const table = useTable({
+    features: REPORT_TABLE_FEATURES,
+    columns: LOW_STOCK_COLUMNS,
+    data: searched,
+    state: { sorting },
+    onSortingChange: setSorting,
+  })
+  const sorted = table.getSortedRowModel().rows.map(r => r.original)
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         {!loading && (
           <div className={`text-sm font-semibold ${data.length > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
             {data.length === 0 ? '✓ All stock levels are healthy' : `${data.length} item${data.length !== 1 ? 's' : ''} at or below reorder threshold`}
           </div>
         )}
+        <SearchBox value={search} onChange={setSearch} placeholder="Search name, category…" className="max-w-80 flex-1" />
       </div>
       <Card className="min-h-0 flex-1 py-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
-              <TableHead>Product</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead>Qty On Hand</TableHead>
-              <TableHead>Threshold</TableHead>
-              <TableHead>Shortage</TableHead>
+              <SortableHead column={table.getColumn('name')!}>Product</SortableHead>
+              <SortableHead column={table.getColumn('category_name')!}>Category</SortableHead>
+              <SortableHead column={table.getColumn('qty')!}>Qty On Hand</SortableHead>
+              <SortableHead column={table.getColumn('threshold')!}>Threshold</SortableHead>
+              <SortableHead column={table.getColumn('shortage')!}>Shortage</SortableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
-            {!loading && data.length === 0 && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">No low stock items</TableCell></TableRow>}
-            {data.map((p: any) => {
+            {!loading && sorted.length === 0 && (
+              <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                {search ? `No low stock items match "${search}"` : 'No low stock items'}
+              </TableCell></TableRow>
+            )}
+            {sorted.map((p: any) => {
               const qty = p.quantity_on_hand
               const threshold = p.reorder_threshold
               return (
@@ -326,6 +506,13 @@ function expectedBy(t: any, to: string, includeUndated: boolean): boolean {
   return t.lend_to <= to
 }
 
+const ISSUED_PER_STAFF_COLUMNS = columnHelper.columns([
+  columnHelper.accessor('full_name', { id: 'full_name', header: 'Staff Member', sortFn: 'alphanumeric' }),
+  columnHelper.accessor('department', { id: 'department', header: 'Department', sortFn: 'alphanumeric' }),
+  columnHelper.accessor((s: any) => s.txns.length, { id: 'txn_count', header: 'Total OUT Transactions', sortFn: (a: any, b: any) => a.original.txns.length - b.original.txns.length }),
+  columnHelper.accessor('totalQty', { id: 'totalQty', header: 'Total Items Issued', sortFn: (a: any, b: any) => a.original.totalQty - b.original.totalQty }),
+])
+
 function IssuedPerStaffReport() {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -333,6 +520,8 @@ function IssuedPerStaffReport() {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [includeUndated, setIncludeUndated] = useState(true)
+  const [search, setSearch] = useState('')
+  const [sorting, setSorting] = useState<SortingState>([])
 
   useEffect(() => {
     async function load() {
@@ -386,12 +575,25 @@ function IssuedPerStaffReport() {
     // a roster of every active staff member, zeroes included.
     .filter((s: any) => (!fromDate && !toDate) || s.txns.length > 0)
 
-  const rangeTxns = staff.reduce((n: number, s: any) => n + s.txns.length, 0)
-  const rangeItems = staff.reduce((n: number, s: any) => n + s.totalQty, 0)
+  const searched = staff.filter((s: any) => matchesSearch(search, s.full_name, s.department))
+
+  const table = useTable({
+    features: REPORT_TABLE_FEATURES,
+    columns: ISSUED_PER_STAFF_COLUMNS,
+    data: searched,
+    state: { sorting },
+    onSortingChange: setSorting,
+  })
+  const sortedStaff = table.getSortedRowModel().rows.map(r => r.original)
+
+  const rangeTxns = sortedStaff.reduce((n: number, s: any) => n + s.txns.length, 0)
+  const rangeItems = sortedStaff.reduce((n: number, s: any) => n + s.totalQty, 0)
   // Counted over the transactions that already clear issued-from, since those
   // are the ones the toggle decides. Unlike Returns — where both ends test the
   // one field, so an undated row is counted against the whole set — here the
-  // issued-from end still bounds them, and the count should say so.
+  // issued-from end still bounds them, and the count should say so. Kept off
+  // `data` rather than the search-narrowed set: the search box is for finding
+  // a row, not for changing the size of the decision the toggle offers.
   const undatedCount = data.reduce((n: number, s: any) =>
     n + s.txns.filter((t: any) => !t.lend_to && issuedFrom(t, fromDate)).length, 0)
 
@@ -406,6 +608,7 @@ function IssuedPerStaffReport() {
         onFromChange={setFromDate}
         onToChange={setToDate}
       >
+        <SearchBox value={search} onChange={setSearch} placeholder="Search staff, department…" />
         {/* Only bears on the expected-back-by end: every transaction has an
             issued date, so issued-from never meets an undated row. Hidden until
             that date is set and there is at least one such row to decide. */}
@@ -419,7 +622,7 @@ function IssuedPerStaffReport() {
           />
         )}
         <span className="text-sm text-muted-foreground">
-          {staff.length} staff · {rangeTxns} transactions · {rangeItems} items
+          {sortedStaff.length} staff · {rangeTxns} transactions · {rangeItems} items
         </span>
       </DateRangeFilter>
       <Card className="min-h-0 flex-1 py-0">
@@ -427,21 +630,21 @@ function IssuedPerStaffReport() {
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-card">
           <TableRow>
-            <TableHead>Staff Member</TableHead>
-            <TableHead>Department</TableHead>
-            <TableHead>Total OUT Transactions</TableHead>
-            <TableHead>Total Items Issued</TableHead>
+            <SortableHead column={table.getColumn('full_name')!}>Staff Member</SortableHead>
+            <SortableHead column={table.getColumn('department')!}>Department</SortableHead>
+            <SortableHead column={table.getColumn('txn_count')!}>Total OUT Transactions</SortableHead>
+            <SortableHead column={table.getColumn('totalQty')!}>Total Items Issued</SortableHead>
             <TableHead></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {loading && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
-          {!loading && staff.length === 0 && (
+          {!loading && sortedStaff.length === 0 && (
             <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-              {fromDate || toDate ? 'No transactions match the selected dates' : 'No active staff members'}
+              {search ? `No staff match "${search}"` : fromDate || toDate ? 'No transactions match the selected dates' : 'No active staff members'}
             </TableCell></TableRow>
           )}
-          {staff.map((s: any) => {
+          {sortedStaff.map((s: any) => {
             const txns = s.txns
             return (
               <Fragment key={s.id}>
@@ -536,6 +739,33 @@ function expectedInRange(t: any, from: string, to: string, includeUndated: boole
   return true
 }
 
+// Ranked so the rows worth a second look surface first: an unsettled balance,
+// then a late return, then on time, then early. A row with no status at all
+// (no due date on record) sorts last — there's nothing to rank it by, so it
+// falls out of the way rather than landing arbitrarily in the middle.
+const RETURN_STATUS_RANK: Record<string, number> = { Partial: 0, Late: 1, 'On time': 2, Early: 3 }
+
+const RETURNS_COLUMNS = columnHelper.columns([
+  columnHelper.accessor('reference_no', { id: 'reference_no', header: 'Reference', sortFn: 'alphanumeric' }),
+  columnHelper.accessor('staff_name', { id: 'staff_name', header: 'Staff', sortFn: 'alphanumeric' }),
+  columnHelper.accessor('linked_txn_ref', { id: 'linked_txn_ref', header: 'Returning For', sortFn: 'alphanumeric' }),
+  columnHelper.accessor((t: any) => returnRowStatus(t)?.label ?? '', {
+    id: 'status',
+    header: 'Status',
+    sortFn: (a: any, b: any) => {
+      const ra = RETURN_STATUS_RANK[returnRowStatus(a.original)?.label ?? ''] ?? 99
+      const rb = RETURN_STATUS_RANK[returnRowStatus(b.original)?.label ?? ''] ?? 99
+      return ra - rb
+    },
+  }),
+  // expected_date is a plain YYYY-MM-DD string (or null) — 'text' sorts it
+  // correctly since that format is already chronological lexicographically,
+  // no datetime parsing needed. Coerced to '' so a null sorts to one
+  // consistent end rather than wherever the comparator happens to place it.
+  columnHelper.accessor((t: any) => t.expected_date ?? '', { id: 'expected_date', header: 'Expected', sortFn: 'text' }),
+  columnHelper.accessor('created_at', { id: 'created_at', header: 'Date Returned', sortFn: 'datetime' }),
+])
+
 function ReturnsReport() {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -543,6 +773,8 @@ function ReturnsReport() {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [includeUndated, setIncludeUndated] = useState(true)
+  const [search, setSearch] = useState('')
+  const [sorting, setSorting] = useState<SortingState>([])
 
   useEffect(() => {
     async function load() {
@@ -631,7 +863,22 @@ function ReturnsReport() {
   const returns = data.filter((t: any) => expectedInRange(t, fromDate, toDate, includeUndated))
   // Counted over the whole set, not the filtered one: this is the size of the
   // decision the checkbox offers, so it has to stay steady as the dates move.
+  // Left off the search-narrowed set for the same reason as Issued per Staff:
+  // search finds a row, it doesn't change what the toggle is deciding.
   const undatedCount = data.filter((t: any) => !t.expected_date).length
+
+  const searched = returns.filter((t: any) =>
+    matchesSearch(search, t.reference_no, t.staff_name, t.linked_txn_ref,
+      ...(t.transaction_lines || []).map((l: any) => l.product_name)))
+
+  const table = useTable({
+    features: REPORT_TABLE_FEATURES,
+    columns: RETURNS_COLUMNS,
+    data: searched,
+    state: { sorting },
+    onSortingChange: setSorting,
+  })
+  const sortedReturns = table.getSortedRowModel().rows.map(r => r.original)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -644,6 +891,7 @@ function ReturnsReport() {
         onFromChange={setFromDate}
         onToChange={setToDate}
       >
+        <SearchBox value={search} onChange={setSearch} placeholder="Search reference, staff, item…" />
         {/* Only worth showing once a range is set — with no dates the rows are
             all in view anyway — and only when there is at least one such row to
             decide about. */}
@@ -657,7 +905,7 @@ function ReturnsReport() {
           />
         )}
         <span className="text-sm text-muted-foreground">
-          {returns.length} {returns.length === 1 ? 'return' : 'returns'}
+          {sortedReturns.length} {sortedReturns.length === 1 ? 'return' : 'returns'}
           {(fromDate || toDate) && <> · by date expected back</>}
         </span>
       </DateRangeFilter>
@@ -666,24 +914,24 @@ function ReturnsReport() {
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-card">
           <TableRow>
-            <TableHead>Reference</TableHead>
-            <TableHead>Staff</TableHead>
+            <SortableHead column={table.getColumn('reference_no')!}>Reference</SortableHead>
+            <SortableHead column={table.getColumn('staff_name')!}>Staff</SortableHead>
             <TableHead>Items Returned</TableHead>
-            <TableHead>Returning For</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Expected</TableHead>
-            <TableHead>Date Returned</TableHead>
+            <SortableHead column={table.getColumn('linked_txn_ref')!}>Returning For</SortableHead>
+            <SortableHead column={table.getColumn('status')!}>Status</SortableHead>
+            <SortableHead column={table.getColumn('expected_date')!}>Expected</SortableHead>
+            <SortableHead column={table.getColumn('created_at')!}>Date Returned</SortableHead>
             <TableHead></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {loading && <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
-          {!loading && returns.length === 0 && (
+          {!loading && sortedReturns.length === 0 && (
             <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
-              {fromDate || toDate ? 'No returns were expected in the selected date range' : 'No returns recorded yet'}
+              {search ? `No returns match "${search}"` : fromDate || toDate ? 'No returns were expected in the selected date range' : 'No returns recorded yet'}
             </TableCell></TableRow>
           )}
-          {returns.map((t: any) => {
+          {sortedReturns.map((t: any) => {
             const tLines = t.transaction_lines || []
             const status = returnRowStatus(t)
             const isExpanded = rowExpanded(t.id)
