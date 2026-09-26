@@ -266,6 +266,65 @@ const STATUS_BADGE_CLASS: Record<string, string> = {
 // a column whose whole job is to surface what needs attention first.
 const STATUS_RANK: Record<string, number> = { 'OUT OF STOCK': 0, 'LOW STOCK': 1, 'IN STOCK': 2 }
 
+// Same three values as STATUS_RANK, in the same urgency order. Unlike the
+// Returns status filter there's no 'none' bucket needed here — every
+// product always lands in exactly one of these three, the computation in
+// StockLevelsReport never produces anything else.
+const STOCK_STATUS_VALUES = ['OUT OF STOCK', 'LOW STOCK', 'IN STOCK'] as const
+const STOCK_STATUS_DOT: Record<string, string> = {
+  'OUT OF STOCK': 'bg-red-500',
+  'LOW STOCK': 'bg-amber-500',
+  'IN STOCK': 'bg-emerald-500',
+}
+
+function stockStatusFilterLabel(selected: Set<string>): string {
+  if (selected.size === 0) return 'No statuses'
+  if (selected.size === STOCK_STATUS_VALUES.length) return 'All statuses'
+  if (selected.size === 1) return [...selected][0]
+  return 'Custom'
+}
+
+// Same DropdownMenuCheckboxItem + SelectAllMenuItems pattern as the Returns
+// status filter and the category filter above.
+function StockStatusFilter({
+  selected, onChange,
+}: {
+  selected: Set<string>
+  onChange: (next: Set<string>) => void
+}) {
+  function toggle(value: string, checked: boolean) {
+    const next = new Set(selected)
+    if (checked) next.add(value)
+    else next.delete(value)
+    onChange(next)
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="outline" className="w-40 justify-between font-normal" />}>
+        <span className="truncate">{stockStatusFilterLabel(selected)}</span>
+        <ChevronDown className="size-3.5 text-muted-foreground" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-44">
+        <SelectAllMenuItems
+          onSelectAll={() => onChange(new Set(STOCK_STATUS_VALUES))}
+          onUnselectAll={() => onChange(new Set())}
+        />
+        {STOCK_STATUS_VALUES.map(value => (
+          <DropdownMenuCheckboxItem
+            key={value}
+            checked={selected.has(value)}
+            onCheckedChange={checked => toggle(value, checked)}
+          >
+            <span className={`size-2 rounded-full ${STOCK_STATUS_DOT[value]}`} />
+            {value}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 const STOCK_LEVELS_COLUMNS = columnHelper.columns([
   columnHelper.accessor('name', { id: 'name', header: 'Product', sortFn: 'alphanumeric' }),
   columnHelper.accessor('category_name', { id: 'category_name', header: 'Category', sortFn: 'alphanumeric' }),
@@ -373,6 +432,10 @@ function StockLevelsReport() {
   // All categories plus Uncategorized checked by default, so this filters
   // nothing until touched — see CategoryFilter above for why it starts null.
   const [catFilter, setCatFilter] = useState<Set<string> | null>(null)
+  // All three checked by default, same reasoning as catFilter — this is a
+  // fixed, always-known list (no async load to wait on), so it starts as
+  // the full set right away rather than needing catFilter's null state.
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set(STOCK_STATUS_VALUES))
   const [search, setSearch] = useState('')
   const [sorting, setSorting] = useState<SortingState>([])
 
@@ -411,7 +474,8 @@ function StockLevelsReport() {
   const catFiltered = catFilter === null
     ? rows
     : rows.filter((p: any) => catFilter.has(p.category_id || UNCATEGORIZED_CATEGORY))
-  const searched = catFiltered.filter((p: any) => matchesSearch(search, p.name, p.category_name))
+  const statusFiltered = catFiltered.filter((p: any) => statusFilter.has(p.status))
+  const searched = statusFiltered.filter((p: any) => matchesSearch(search, p.name, p.category_name))
 
   const table = useTable({
     features: REPORT_TABLE_FEATURES,
@@ -429,6 +493,7 @@ function StockLevelsReport() {
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <SearchBox value={search} onChange={setSearch} placeholder="Search name, category…" className="max-w-80 flex-1" />
         <CategoryFilter selected={catFilter} onChange={setCatFilter} cats={cats} />
+        <StockStatusFilter selected={statusFilter} onChange={setStatusFilter} />
         <span className="text-sm text-muted-foreground">{sorted.length} products · {totalUnits} total units</span>
       </div>
       <Card className="min-h-0 flex-1 py-0">
@@ -449,6 +514,7 @@ function StockLevelsReport() {
               <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
                 {search ? `No products match "${search}"`
                   : catFilter?.size === 0 ? 'No categories selected'
+                  : statusFilter.size === 0 ? 'No statuses selected'
                   : 'No products found'}
               </TableCell></TableRow>
             )}
