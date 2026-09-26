@@ -20,13 +20,17 @@ import {
 } from '@tanstack/react-table'
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Download, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Card, CardFooter } from '@/components/ui/card'
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious,
+} from '@/components/ui/pagination'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
@@ -181,6 +185,102 @@ function ExportCsvButton<T>({
       <Download className="size-3.5" />
       Export CSV
     </Button>
+  )
+}
+
+// 10 or 20 rows at a time, or no paging at all. 'all' is a real option here
+// (not just the widest number) — Selouna's audit workflow already leans on
+// the CSV export for the full picture, so "no pagination" has to stay one
+// click away rather than being approximated by picking a very large number.
+type PageSize = 10 | 20 | 'all'
+
+function pageCountFor(totalRows: number, pageSize: PageSize): number {
+  return pageSize === 'all' ? 1 : Math.max(1, Math.ceil(totalRows / pageSize))
+}
+
+// Slices `rows` to the current page. The page index is clamped here rather
+// than corrected with an effect: a filter, a search term, or the page-size
+// control itself can all leave a previously valid index pointing past the
+// new last page, and re-deriving a safe one on every render means there is
+// nothing to resync after the fact — same "derive on render, don't cache
+// and sync" principle already used for Issued per Staff's own txns filter
+// above.
+function paginate<T>(rows: T[], pageIndex: number, pageSize: PageSize): { pageRows: T[]; safeIndex: number } {
+  if (pageSize === 'all') return { pageRows: rows, safeIndex: 0 }
+  const pageCount = pageCountFor(rows.length, pageSize)
+  const safeIndex = Math.min(pageIndex, pageCount - 1)
+  return { pageRows: rows.slice(safeIndex * pageSize, safeIndex * pageSize + pageSize), safeIndex }
+}
+
+// Rows-per-page selector (10 / 20 / All) plus Previous/Next, shared by all
+// four reports and rendered as each table's CardFooter. Deliberately just
+// Previous/Next rather than a row of page-number links — with the row
+// counts this store deals in, "Page 3 of 7" plus two buttons says exactly
+// as much as a page-link row would, with far less UI to keep in sync as
+// filters change the count underneath it. `pageIndex` is the caller's
+// already-clamped safeIndex from paginate(), not raw state, so what this
+// shows never disagrees with which rows are actually on screen.
+function TablePagination({
+  pageIndex, pageSize, totalRows, onPageIndexChange, onPageSizeChange,
+}: {
+  pageIndex: number
+  pageSize: PageSize
+  totalRows: number
+  onPageIndexChange: (index: number) => void
+  onPageSizeChange: (size: PageSize) => void
+}) {
+  const pageCount = pageCountFor(totalRows, pageSize)
+  const from = totalRows === 0 ? 0 : pageSize === 'all' ? 1 : pageIndex * pageSize + 1
+  const to = pageSize === 'all' ? totalRows : Math.min(totalRows, (pageIndex + 1) * pageSize)
+
+  return (
+    <CardFooter className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <span>Rows per page</span>
+        <Select
+          items={{ '10': '10', '20': '20', all: 'All' }}
+          value={String(pageSize)}
+          onValueChange={(v: string | null) => {
+            if (v === null) return
+            onPageSizeChange(v === 'all' ? 'all' : (Number(v) as PageSize))
+            // A deliberate page-size change always starts back at page one —
+            // paginate()'s own clamp only guarantees an in-range page, not
+            // that it's the first one, and landing on "page 1" is what
+            // Selouna expects after asking to see more (or fewer) rows.
+            onPageIndexChange(0)
+          }}
+        >
+          <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="10">10</SelectItem>
+            <SelectItem value="20">20</SelectItem>
+            <SelectItem value="all">All</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex items-center gap-3 text-sm text-muted-foreground">
+        <span>{totalRows === 0 ? '0 of 0' : `${from}–${to} of ${totalRows}`}</span>
+        <Pagination className="mx-0 w-auto">
+          <PaginationContent>
+            <PaginationItem>
+              <PaginationPrevious
+                disabled={pageIndex === 0}
+                onClick={() => onPageIndexChange(Math.max(0, pageIndex - 1))}
+              />
+            </PaginationItem>
+            <PaginationItem>
+              <span className="px-1 text-sm whitespace-nowrap">Page {pageIndex + 1} of {pageCount}</span>
+            </PaginationItem>
+            <PaginationItem>
+              <PaginationNext
+                disabled={pageIndex >= pageCount - 1}
+                onClick={() => onPageIndexChange(Math.min(pageCount - 1, pageIndex + 1))}
+              />
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
+      </div>
+    </CardFooter>
   )
 }
 
@@ -467,6 +567,8 @@ function StockLevelsReport() {
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set(STOCK_STATUS_VALUES))
   const [search, setSearch] = useState('')
   const [sorting, setSorting] = useState<SortingState>([])
+  const [pageIndex, setPageIndex] = useState(0)
+  const [pageSize, setPageSize] = useState<PageSize>(10)
 
   useEffect(() => {
     getDocs(query(collection(db, 'categories'), orderBy('name'))).then(snap => {
@@ -514,6 +616,7 @@ function StockLevelsReport() {
     onSortingChange: setSorting,
   })
   const sorted = table.getSortedRowModel().rows.map(r => r.original)
+  const { pageRows, safeIndex } = paginate(sorted, pageIndex, pageSize)
 
   const totalUnits = sorted.reduce((s: number, p: any) => s + p.qty, 0)
 
@@ -558,7 +661,7 @@ function StockLevelsReport() {
                   : 'No products found'}
               </TableCell></TableRow>
             )}
-            {sorted.map((p: any) => (
+            {pageRows.map((p: any) => (
               <TableRow key={p.id}>
                 <TableCell className="font-medium">{p.name}</TableCell>
                 <TableCell className="text-muted-foreground">{p.category_name ?? '—'}</TableCell>
@@ -570,6 +673,13 @@ function StockLevelsReport() {
           </TableBody>
         </Table>
         </div>
+        <TablePagination
+          pageIndex={safeIndex}
+          pageSize={pageSize}
+          totalRows={sorted.length}
+          onPageIndexChange={setPageIndex}
+          onPageSizeChange={setPageSize}
+        />
       </Card>
     </div>
   )
@@ -593,6 +703,8 @@ function LowStockReport() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [sorting, setSorting] = useState<SortingState>([])
+  const [pageIndex, setPageIndex] = useState(0)
+  const [pageSize, setPageSize] = useState<PageSize>(10)
 
   useEffect(() => {
     getDocs(query(collection(db, 'products'))).then(snap => {
@@ -619,6 +731,7 @@ function LowStockReport() {
     onSortingChange: setSorting,
   })
   const sorted = table.getSortedRowModel().rows.map(r => r.original)
+  const { pageRows, safeIndex } = paginate(sorted, pageIndex, pageSize)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -660,7 +773,7 @@ function LowStockReport() {
                 {search ? `No low stock items match "${search}"` : 'No low stock items'}
               </TableCell></TableRow>
             )}
-            {sorted.map((p: any) => {
+            {pageRows.map((p: any) => {
               const qty = p.quantity_on_hand
               const threshold = p.reorder_threshold
               return (
@@ -676,6 +789,13 @@ function LowStockReport() {
           </TableBody>
         </Table>
         </div>
+        <TablePagination
+          pageIndex={safeIndex}
+          pageSize={pageSize}
+          totalRows={sorted.length}
+          onPageIndexChange={setPageIndex}
+          onPageSizeChange={setPageSize}
+        />
       </Card>
     </div>
   )
@@ -723,6 +843,8 @@ function IssuedPerStaffReport() {
   const [includeUndated, setIncludeUndated] = useState(true)
   const [search, setSearch] = useState('')
   const [sorting, setSorting] = useState<SortingState>([])
+  const [pageIndex, setPageIndex] = useState(0)
+  const [pageSize, setPageSize] = useState<PageSize>(10)
 
   useEffect(() => {
     async function load() {
@@ -786,6 +908,13 @@ function IssuedPerStaffReport() {
     onSortingChange: setSorting,
   })
   const sortedStaff = table.getSortedRowModel().rows.map(r => r.original)
+  // Pages the staff roster, not the transactions underneath it — an
+  // expanded staff row's own detail lines stay with it regardless of which
+  // page it's on. Every count and the CSV export below still read off the
+  // full sortedStaff set, not this slice: pagination is a viewport
+  // convenience, not another filter, so it must never change what a count
+  // reports or what the export carries.
+  const { pageRows: pageStaff, safeIndex } = paginate(sortedStaff, pageIndex, pageSize)
 
   const rangeTxns = sortedStaff.reduce((n: number, s: any) => n + s.txns.length, 0)
   const rangeItems = sortedStaff.reduce((n: number, s: any) => n + s.totalQty, 0)
@@ -883,7 +1012,7 @@ function IssuedPerStaffReport() {
               {search ? `No staff match "${search}"` : fromDate || toDate ? 'No transactions match the selected dates' : 'No active staff members'}
             </TableCell></TableRow>
           )}
-          {sortedStaff.map((s: any) => {
+          {pageStaff.map((s: any) => {
             const txns = s.txns
             return (
               <Fragment key={s.id}>
@@ -938,6 +1067,13 @@ function IssuedPerStaffReport() {
         </TableBody>
       </Table>
       </div>
+      <TablePagination
+        pageIndex={safeIndex}
+        pageSize={pageSize}
+        totalRows={sortedStaff.length}
+        onPageIndexChange={setPageIndex}
+        onPageSizeChange={setPageSize}
+      />
       </Card>
     </div>
   )
@@ -1098,6 +1234,8 @@ function ReturnsReport() {
   // row that was showing before this control existed keeps showing until
   // Selouna actively narrows it, same as every other filter default here.
   const [statusFilter, setStatusFilter] = useState<Set<ReturnStatusValue>>(new Set(RETURN_STATUS_VALUES))
+  const [pageIndex, setPageIndex] = useState(0)
+  const [pageSize, setPageSize] = useState<PageSize>(10)
 
   useEffect(() => {
     async function load() {
@@ -1208,6 +1346,13 @@ function ReturnsReport() {
     onSortingChange: setSorting,
   })
   const sortedReturns = table.getSortedRowModel().rows.map(r => r.original)
+  // Pages the returns, not the outstanding-balance detail nested under a
+  // Partial row's expansion — that stays with its parent row wherever it
+  // lands. Every count and the CSV export below still read off the full
+  // sortedReturns set, not this slice, for the same reason as Issued per
+  // Staff's own pageStaff: pagination is a viewport convenience, never
+  // another filter.
+  const { pageRows: pageReturns, safeIndex } = paginate(sortedReturns, pageIndex, pageSize)
 
   // Same flattening the Issued per Staff export does: one row per line of
   // detail the table only shows on expand. Here that's the "Still
@@ -1301,7 +1446,7 @@ function ReturnsReport() {
                 : 'No returns recorded yet'}
             </TableCell></TableRow>
           )}
-          {sortedReturns.map((t: any) => {
+          {pageReturns.map((t: any) => {
             const tLines = t.transaction_lines || []
             const status = returnRowStatus(t)
             const isExpanded = rowExpanded(t.id)
@@ -1358,6 +1503,13 @@ function ReturnsReport() {
         </TableBody>
       </Table>
       </div>
+      <TablePagination
+        pageIndex={safeIndex}
+        pageSize={pageSize}
+        totalRows={sortedReturns.length}
+        onPageIndexChange={setPageIndex}
+        onPageSizeChange={setPageSize}
+      />
       </Card>
     </div>
   )
