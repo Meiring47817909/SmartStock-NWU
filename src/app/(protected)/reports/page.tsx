@@ -520,10 +520,10 @@ function StockLevelsReport() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <SearchBox value={search} onChange={setSearch} placeholder="Search name, category…" className="max-w-80 flex-1" />
         <CategoryFilter selected={catFilter} onChange={setCatFilter} cats={cats} />
         <StockStatusFilter selected={statusFilter} onChange={setStatusFilter} />
         <span className="text-sm text-muted-foreground">{sorted.length} products · {totalUnits} total units</span>
+        <SearchBox value={search} onChange={setSearch} placeholder="Search name, category…" className="flex-1" />
         <ExportCsvButton
           filename={`stock-levels-${todayDateStr()}.csv`}
           rows={sorted}
@@ -628,7 +628,7 @@ function LowStockReport() {
             {data.length === 0 ? '✓ All stock levels are healthy' : `${data.length} item${data.length !== 1 ? 's' : ''} at or below reorder threshold`}
           </div>
         )}
-        <SearchBox value={search} onChange={setSearch} placeholder="Search name, category…" className="max-w-80 flex-1" />
+        <SearchBox value={search} onChange={setSearch} placeholder="Search name, category…" className="flex-1" />
         <ExportCsvButton
           filename={`low-stock-${todayDateStr()}.csv`}
           rows={sorted}
@@ -833,7 +833,6 @@ function IssuedPerStaffReport() {
         onFromChange={setFromDate}
         onToChange={setToDate}
       >
-        <SearchBox value={search} onChange={setSearch} placeholder="Search staff, department…" />
         {/* Only bears on the expected-back-by end: every transaction has an
             issued date, so issued-from never meets an undated row. Hidden until
             that date is set and there is at least one such row to decide. */}
@@ -849,6 +848,7 @@ function IssuedPerStaffReport() {
         <span className="text-sm text-muted-foreground">
           {sortedStaff.length} staff · {rangeTxns} transactions · {rangeItems} items
         </span>
+        <SearchBox value={search} onChange={setSearch} placeholder="Search staff, department…" className="flex-1" />
         <ExportCsvButton
           filename={`issued-per-staff-${todayDateStr()}.csv`}
           rows={staffCsvRows}
@@ -1220,7 +1220,6 @@ function ReturnsReport() {
         onFromChange={setFromDate}
         onToChange={setToDate}
       >
-        <SearchBox value={search} onChange={setSearch} placeholder="Search reference, staff, item…" />
         <StatusFilter selected={statusFilter} onChange={setStatusFilter} />
         {/* Only worth showing once a range is set — with no dates the rows are
             all in view anyway — and only when there is at least one such row to
@@ -1238,6 +1237,7 @@ function ReturnsReport() {
           {sortedReturns.length} {sortedReturns.length === 1 ? 'return' : 'returns'}
           {(fromDate || toDate) && <> · by date expected back</>}
         </span>
+        <SearchBox value={search} onChange={setSearch} placeholder="Search reference, staff, item…" className="flex-1" />
         <ExportCsvButton
           filename={`returns-${todayDateStr()}.csv`}
           rows={sortedReturns}
