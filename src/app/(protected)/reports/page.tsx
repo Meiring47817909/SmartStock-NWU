@@ -22,7 +22,8 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Search } from 'lucide-rea
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import {
-  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -136,6 +137,22 @@ function matchesSearch(search: string, ...fields: (string | null | undefined)[])
   const needle = search.trim().toLowerCase()
   if (!needle) return true
   return fields.some(f => f?.toLowerCase().includes(needle))
+}
+
+// A bulk-toggle pair for a checkbox dropdown, shared by the Returns status
+// filter and the Stock Levels category filter rather than reimplemented
+// twice. closeOnClick is false — unlike a plain DropdownMenuItem's usual
+// "pick one thing and go", this is a quick toggle you might follow with a
+// few individual unchecks, so it stays open the same way the checkbox items
+// themselves do.
+function SelectAllMenuItems({ onSelectAll, onUnselectAll }: { onSelectAll: () => void; onUnselectAll: () => void }) {
+  return (
+    <>
+      <DropdownMenuItem closeOnClick={false} onClick={onSelectAll}>Select all</DropdownMenuItem>
+      <DropdownMenuItem closeOnClick={false} onClick={onUnselectAll}>Unselect all</DropdownMenuItem>
+      <DropdownMenuSeparator />
+    </>
+  )
 }
 
 // Labelled date pair, matching the Audit Log's filter row. A date input
@@ -331,6 +348,10 @@ function CategoryFilter({
         <ChevronDown className="size-3.5 text-muted-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-52">
+        <SelectAllMenuItems
+          onSelectAll={() => onChange(new Set(options.map((c: any) => c.id)))}
+          onUnselectAll={() => onChange(new Set())}
+        />
         {options.map((c: any) => (
           <DropdownMenuCheckboxItem
             key={c.id}
@@ -869,6 +890,10 @@ function StatusFilter({
         <ChevronDown className="size-3.5 text-muted-foreground" />
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-44">
+        <SelectAllMenuItems
+          onSelectAll={() => onChange(new Set(RETURN_STATUS_VALUES))}
+          onUnselectAll={() => onChange(new Set())}
+        />
         {RETURN_STATUS_VALUES.map(value => (
           <DropdownMenuCheckboxItem
             key={value}
