@@ -107,15 +107,15 @@ function UndatedToggle({
             through React's synthetic events, which is what keyboard users get,
             since a label cannot take focus itself.
 
-            It also carries the card: h-8 and rounded-lg are the Input's own, so
-            the control sits on the line the date boxes sit on rather than
-            floating between them, and bg-card + ring-foreground/10 is the Card's
-            own outline, so the white block reads as part of the same set. */}
+            It also carries the card, and every value in it is the Input's own —
+            h-8, rounded-lg, border-input, the transparent fill and its dark-mode
+            counterpart — so the control reads as a third box in the row rather
+            than as a different kind of thing parked beside the date ones. */}
         <TooltipTrigger
           render={
             <Label
               htmlFor={id}
-              className="h-8 cursor-help rounded-lg bg-card px-2.5 text-xs ring-1 ring-foreground/10"
+              className="h-8 cursor-help rounded-lg border border-input bg-transparent px-2.5 text-xs dark:bg-input/30"
             />
           }
         >
