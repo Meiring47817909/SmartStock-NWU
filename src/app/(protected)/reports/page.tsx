@@ -6,31 +6,24 @@ import { downloadCsv, formatDate, formatDateOnly, isoToLocalDateStr, todayDateSt
 import { db } from '@/lib/firebase/config'
 import { loadWaivedByTxn, waivedQty } from '@/lib/firebase/waivers'
 import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore'
+import { useTable, type SortingState } from '@tanstack/react-table'
 import {
-  createColumnHelper,
-  createSortedRowModel,
-  rowSortingFeature,
-  sortFn_alphanumeric,
-  sortFn_datetime,
-  sortFn_text,
-  tableFeatures,
-  useTable,
-  type Column,
-  type SortingState,
-} from '@tanstack/react-table'
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Download, Search } from 'lucide-react'
+  SORTABLE_TABLE_FEATURES as REPORT_TABLE_FEATURES,
+  sortableColumnHelper as columnHelper,
+  SortableHead,
+  type PageSize,
+  paginate,
+  TablePagination,
+} from '@/components/data-table-helpers'
+import { ChevronDown, Download, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardFooter } from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious,
-} from '@/components/ui/pagination'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
@@ -51,59 +44,6 @@ const TABS: { id: ReportTab; label: string }[] = [
 // with nothing to categorize it shouldn't be silently swept into every
 // filter state or none of them — it gets its own visible checkbox.
 const UNCATEGORIZED_CATEGORY = '__uncategorized__'
-
-// ---------------------------------------------------------------------------
-// Sorting — shadcn's data-table pattern (an actual @tanstack/react-table
-// instance driving column-header sorting), NOT the abandoned DataTables.net
-// spike from earlier. That was a different library entirely (a jQuery-adjacent
-// widget that rendered its own DOM); this is a headless state manager that
-// only computes row ORDER — every row still renders through the same
-// TableRow/TableCell JSX already written below, Fragment blocks, expandable
-// detail rows, badges and all. Nothing here uses table.FlexRender or column
-// `cell` renderers: a column definition exists purely to give a header
-// something to click and a comparator to sort by.
-//
-// One features object and one columnHelper, shared by all four reports —
-// the feature set (which comparators exist) doesn't vary by table, and this
-// file's own convention (loose `any` typing everywhere, deliberately — see
-// the manual_override discussion elsewhere in this codebase) means every
-// report's rows can share one `TData = any` helper rather than four
-// near-identical typed ones.
-const REPORT_TABLE_FEATURES = tableFeatures({
-  rowSortingFeature,
-  sortedRowModel: createSortedRowModel(),
-  sortFns: { alphanumeric: sortFn_alphanumeric, text: sortFn_text, datetime: sortFn_datetime },
-})
-
-const columnHelper = createColumnHelper<typeof REPORT_TABLE_FEATURES, any>()
-
-// A clickable TableHead wired to one column's sort state — click to cycle
-// unsorted → ascending → descending → unsorted, same as clicking any other
-// sortable column header. The icon says which state a column is in without
-// needing to click it to find out.
-function SortableHead({
-  column, children, className,
-}: {
-  column: Column<typeof REPORT_TABLE_FEATURES, any, unknown>
-  children: ReactNode
-  className?: string
-}) {
-  const sorted = column.getIsSorted()
-  return (
-    <TableHead className={className}>
-      <button
-        type="button"
-        onClick={column.getToggleSortingHandler()}
-        className="-ml-2 inline-flex cursor-pointer items-center gap-1 rounded px-2 py-1 hover:bg-muted"
-      >
-        {children}
-        {sorted === 'asc' ? <ArrowUp className="size-3.5" />
-          : sorted === 'desc' ? <ArrowDown className="size-3.5" />
-          : <ArrowUpDown className="size-3.5 text-muted-foreground/50" />}
-      </button>
-    </TableHead>
-  )
-}
 
 // The same Search-icon-and-Input idiom already used on Products/Staff/Stock
 // Out/Returns (see products/page.tsx) — reused rather than reinvented, so a
@@ -185,102 +125,6 @@ function ExportCsvButton<T>({
       <Download className="size-3.5" />
       Export CSV
     </Button>
-  )
-}
-
-// 10 or 20 rows at a time, or no paging at all. 'all' is a real option here
-// (not just the widest number) — Selouna's audit workflow already leans on
-// the CSV export for the full picture, so "no pagination" has to stay one
-// click away rather than being approximated by picking a very large number.
-type PageSize = 10 | 20 | 'all'
-
-function pageCountFor(totalRows: number, pageSize: PageSize): number {
-  return pageSize === 'all' ? 1 : Math.max(1, Math.ceil(totalRows / pageSize))
-}
-
-// Slices `rows` to the current page. The page index is clamped here rather
-// than corrected with an effect: a filter, a search term, or the page-size
-// control itself can all leave a previously valid index pointing past the
-// new last page, and re-deriving a safe one on every render means there is
-// nothing to resync after the fact — same "derive on render, don't cache
-// and sync" principle already used for Issued per Staff's own txns filter
-// above.
-function paginate<T>(rows: T[], pageIndex: number, pageSize: PageSize): { pageRows: T[]; safeIndex: number } {
-  if (pageSize === 'all') return { pageRows: rows, safeIndex: 0 }
-  const pageCount = pageCountFor(rows.length, pageSize)
-  const safeIndex = Math.min(pageIndex, pageCount - 1)
-  return { pageRows: rows.slice(safeIndex * pageSize, safeIndex * pageSize + pageSize), safeIndex }
-}
-
-// Rows-per-page selector (10 / 20 / All) plus Previous/Next, shared by all
-// four reports and rendered as each table's CardFooter. Deliberately just
-// Previous/Next rather than a row of page-number links — with the row
-// counts this store deals in, "Page 3 of 7" plus two buttons says exactly
-// as much as a page-link row would, with far less UI to keep in sync as
-// filters change the count underneath it. `pageIndex` is the caller's
-// already-clamped safeIndex from paginate(), not raw state, so what this
-// shows never disagrees with which rows are actually on screen.
-function TablePagination({
-  pageIndex, pageSize, totalRows, onPageIndexChange, onPageSizeChange,
-}: {
-  pageIndex: number
-  pageSize: PageSize
-  totalRows: number
-  onPageIndexChange: (index: number) => void
-  onPageSizeChange: (size: PageSize) => void
-}) {
-  const pageCount = pageCountFor(totalRows, pageSize)
-  const from = totalRows === 0 ? 0 : pageSize === 'all' ? 1 : pageIndex * pageSize + 1
-  const to = pageSize === 'all' ? totalRows : Math.min(totalRows, (pageIndex + 1) * pageSize)
-
-  return (
-    <CardFooter className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <span>Rows per page</span>
-        <Select
-          items={{ '10': '10', '20': '20', all: 'All' }}
-          value={String(pageSize)}
-          onValueChange={(v: string | null) => {
-            if (v === null) return
-            onPageSizeChange(v === 'all' ? 'all' : (Number(v) as PageSize))
-            // A deliberate page-size change always starts back at page one —
-            // paginate()'s own clamp only guarantees an in-range page, not
-            // that it's the first one, and landing on "page 1" is what
-            // Selouna expects after asking to see more (or fewer) rows.
-            onPageIndexChange(0)
-          }}
-        >
-          <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="10">10</SelectItem>
-            <SelectItem value="20">20</SelectItem>
-            <SelectItem value="all">All</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="flex items-center gap-3 text-sm text-muted-foreground">
-        <span>{totalRows === 0 ? '0 of 0' : `${from}–${to} of ${totalRows}`}</span>
-        <Pagination className="mx-0 w-auto">
-          <PaginationContent>
-            <PaginationItem>
-              <PaginationPrevious
-                disabled={pageIndex === 0}
-                onClick={() => onPageIndexChange(Math.max(0, pageIndex - 1))}
-              />
-            </PaginationItem>
-            <PaginationItem>
-              <span className="px-1 text-sm whitespace-nowrap">Page {pageIndex + 1} of {pageCount}</span>
-            </PaginationItem>
-            <PaginationItem>
-              <PaginationNext
-                disabled={pageIndex >= pageCount - 1}
-                onClick={() => onPageIndexChange(Math.min(pageCount - 1, pageIndex + 1))}
-              />
-            </PaginationItem>
-          </PaginationContent>
-        </Pagination>
-      </div>
-    </CardFooter>
   )
 }
 

@@ -6,6 +6,11 @@ import { formatDate, formatDateOnly, formatLendWindow, withinDateRange } from '@
 import { db } from '@/lib/firebase/config'
 import { LENDING_INTERVALS } from '@/lib/firebase/loanRequests'
 import { collection, query, orderBy, getDocs, where } from 'firebase/firestore'
+import { useTable, type SortingState } from '@tanstack/react-table'
+import {
+  SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead,
+  type PageSize, paginate, TablePagination,
+} from '@/components/data-table-helpers'
 import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
@@ -770,6 +775,20 @@ function LoanRequestSummary({
   )
 }
 
+// Sortable columns for the table header — same shadcn-data-table pattern
+// (and the same shared columnHelper/SortableHead) as the four Reports
+// tables. Activity and Entity sort on the same derived display text the
+// column and its filter dropdown already agree on (activityLabel/
+// ENTITY_LABEL), not the raw action/entity_type, so the sort order matches
+// what's actually printed in the cell.
+const AUDIT_LOG_COLUMNS = sortableColumnHelper.columns([
+  sortableColumnHelper.accessor('created_at', { id: 'created_at', header: 'Date', sortFn: 'datetime' }),
+  sortableColumnHelper.accessor((e: AuditLogEntry) => e.user_name ?? '', { id: 'user_name', header: 'User', sortFn: 'alphanumeric' }),
+  sortableColumnHelper.accessor((e: AuditLogEntry) => activityLabel(activityKey(e)), { id: 'activity', header: 'Activity', sortFn: 'alphanumeric' }),
+  sortableColumnHelper.accessor((e: AuditLogEntry) => ENTITY_LABEL[e.entity_type] ?? e.entity_type, { id: 'entity_type', header: 'Entity', sortFn: 'alphanumeric' }),
+  sortableColumnHelper.accessor('entity_id', { id: 'entity_id', header: 'Entity ID', sortFn: 'alphanumeric' }),
+])
+
 export default function AuditLogPage() {
   const [entries, setEntries] = useState<AuditLogEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -777,6 +796,9 @@ export default function AuditLogPage() {
   const [actionFilter, setActionFilter] = useState('')
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [sorting, setSorting] = useState<SortingState>([])
+  const [pageIndex, setPageIndex] = useState(0)
+  const [pageSize, setPageSize] = useState<PageSize>(10)
   const { isExpanded, toggle: toggleRow } = useExpandedRows()
   // Keyed by transaction entity_id — fetched lazily the first time a
   // transaction row is expanded, then cached so re-expanding is instant.
@@ -806,6 +828,22 @@ export default function AuditLogPage() {
     (!entityFilter || e.entity_type === entityFilter) &&
     (!actionFilter || activityKey(e) === actionFilter)
   )
+
+  const table = useTable({
+    features: SORTABLE_TABLE_FEATURES,
+    columns: AUDIT_LOG_COLUMNS,
+    data: filtered,
+    state: { sorting },
+    onSortingChange: setSorting,
+  })
+  // Cast back to AuditLogEntry: the shared columnHelper types rows as `any`
+  // (see data-table-helpers.tsx — one loose helper shared by every sortable
+  // table rather than a typed one per table), but every row here really is
+  // an AuditLogEntry, and the JSX below indexes ENTITY_LABEL (a strict
+  // Record<AuditEntityType, string>) by e.entity_type — that only
+  // typechecks once `e` is typed again, rather than `any`.
+  const sorted = table.getSortedRowModel().rows.map(r => r.original as AuditLogEntry)
+  const { pageRows, safeIndex } = paginate(sorted, pageIndex, pageSize)
 
   // Picking an entity narrows the Activity dropdown to the activities that
   // entity can actually produce — no point offering "Out" under Staff.
@@ -932,18 +970,18 @@ export default function AuditLogPage() {
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
-              <TableHead>Date</TableHead>
-              <TableHead>User</TableHead>
-              <TableHead>Activity</TableHead>
-              <TableHead>Entity</TableHead>
-              <TableHead>Entity ID</TableHead>
+              <SortableHead column={table.getColumn('created_at')!}>Date</SortableHead>
+              <SortableHead column={table.getColumn('user_name')!}>User</SortableHead>
+              <SortableHead column={table.getColumn('activity')!}>Activity</SortableHead>
+              <SortableHead column={table.getColumn('entity_type')!}>Entity</SortableHead>
+              <SortableHead column={table.getColumn('entity_id')!}>Entity ID</SortableHead>
               <TableHead></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
             {!loading && filtered.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">No audit entries found</TableCell></TableRow>}
-            {filtered.map(e => (
+            {pageRows.map(e => (
               <Fragment key={e.id}>
                 <TableRow className="cursor-pointer" onClick={() => toggleExpand(e)}>
                   <TableCell className="text-xs text-muted-foreground">{formatDate(e.created_at)}</TableCell>
@@ -1008,6 +1046,13 @@ export default function AuditLogPage() {
           </TableBody>
         </Table>
         </div>
+        <TablePagination
+          pageIndex={safeIndex}
+          pageSize={pageSize}
+          totalRows={sorted.length}
+          onPageIndexChange={setPageIndex}
+          onPageSizeChange={setPageSize}
+        />
       </Card>
     </div>
   )
