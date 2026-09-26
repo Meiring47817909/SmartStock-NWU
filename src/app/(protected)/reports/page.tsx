@@ -263,13 +263,14 @@ function issuedFrom(t: any, from: string): boolean {
   return withinDateRange(t.created_at, from, '')
 }
 
-// A Stock Out with no expected date is never excluded here, whatever the
-// expected-by value. Filtering it out would quietly drop the loosest records in
-// the store — items lent with no return date agreed — from the report, and an
-// audit wants those visible, not missing.
-function expectedBy(t: any, to: string): boolean {
+// A Stock Out with no return date agreed has nothing for expected-by to test.
+// Same decision as on Returns, and Selouna makes it the same way, in the filter
+// row: silently keeping those rows hides that they bypassed the filter, and
+// silently dropping them hides the loosest records in the store, which is what
+// an audit is looking for. Defaults to including them.
+function expectedBy(t: any, to: string, includeUndated: boolean): boolean {
   if (!to) return true
-  if (!t.lend_to) return true
+  if (!t.lend_to) return includeUndated
   return t.lend_to <= to
 }
 
@@ -279,6 +280,7 @@ function IssuedPerStaffReport() {
   const { isExpanded: rowExpanded, toggle: toggleRow } = useExpandedRows()
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [includeUndated, setIncludeUndated] = useState(true)
 
   useEffect(() => {
     async function load() {
@@ -321,7 +323,7 @@ function IssuedPerStaffReport() {
   const staff = data
     .map((s: any) => {
       const txns = s.txns
-        .filter((t: any) => issuedFrom(t, fromDate) && expectedBy(t, toDate))
+        .filter((t: any) => issuedFrom(t, fromDate) && expectedBy(t, toDate, includeUndated))
         .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       const totalQty = txns.reduce((sum: number, t: any) =>
         sum + (t.transaction_lines || []).reduce((s2: number, l: any) => s2 + (l.quantity || 0), 0), 0)
@@ -334,6 +336,12 @@ function IssuedPerStaffReport() {
 
   const rangeTxns = staff.reduce((n: number, s: any) => n + s.txns.length, 0)
   const rangeItems = staff.reduce((n: number, s: any) => n + s.totalQty, 0)
+  // Counted over the transactions that already clear issued-from, since those
+  // are the ones the toggle decides. Unlike Returns — where both ends test the
+  // one field, so an undated row is counted against the whole set — here the
+  // issued-from end still bounds them, and the count should say so.
+  const undatedCount = data.reduce((n: number, s: any) =>
+    n + s.txns.filter((t: any) => !t.lend_to && issuedFrom(t, fromDate)).length, 0)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -346,6 +354,24 @@ function IssuedPerStaffReport() {
         onFromChange={setFromDate}
         onToChange={setToDate}
       >
+        {/* Only bears on the expected-back-by end: every transaction has an
+            issued date, so issued-from never meets an undated row. Hidden until
+            that date is set and there is at least one such row to decide. */}
+        {toDate && undatedCount > 0 && (
+          <div className="grid gap-1">
+            <Label htmlFor="issued-include-undated" className="text-xs">
+              <Switch
+                id="issued-include-undated"
+                checked={includeUndated}
+                onCheckedChange={checked => setIncludeUndated(checked)}
+              />
+              Include {undatedCount} with no expected date
+            </Label>
+            <span className="text-xs text-muted-foreground">
+              Issued with no return date agreed, so nothing for Expected back by to test
+            </span>
+          </div>
+        )}
         <span className="text-sm text-muted-foreground">
           {staff.length} staff · {rangeTxns} transactions · {rangeItems} items
         </span>
