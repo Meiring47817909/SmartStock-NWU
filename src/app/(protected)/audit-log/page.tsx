@@ -862,19 +862,21 @@ function LoanRequestSummary({
 }
 
 // Flattens an audit entry's `after` snapshot into plain text for the CSV
-// export — every field it has, as "field_name: value", one field per LINE
-// rather than left as a pretty-printed multi-line JSON blob. This still
-// produces one CSV cell (downloadCsv quotes any value containing a
+// export — every field it has, as "field_name: value |", one field per
+// LINE, rather than left as a pretty-printed multi-line JSON blob. This
+// still produces one CSV cell (downloadCsv quotes any value containing a
 // newline, so it stays one cell, not extra rows) -- the embedded line
-// breaks are deliberate this time: with Excel's Wrap Text turned on, each
-// field renders on its own line inside that one cell, like a small card,
-// which reads far better than either a single "|"-joined line or a raw
-// JSON dump. Field NAMES are kept exactly as they are in Firestore
-// (reference_no, not "Reference") rather than run through friendlyLabel —
-// Selouna cross-references these against the raw-data JSON view, so the
-// two need to say the same thing. Field VALUES still go through
-// friendlyValue for the same date/status/boolean formatting the on-screen
-// views use.
+// breaks are deliberate: with Excel's Wrap Text turned on, each field
+// renders on its own line inside that one cell, like a small card. The
+// trailing " |" on every line but the last keeps the pipe-separator look
+// Selouna already knows, while the line break does the actual visual
+// separating -- this reads far better than either a single "|"-joined
+// line or a raw JSON dump. Field NAMES are kept exactly as they are in
+// Firestore (reference_no, not "Reference") rather than run through
+// friendlyLabel — Selouna cross-references these against the raw-data
+// JSON view, so the two need to say the same thing. Field VALUES still go
+// through friendlyValue for the same date/status/boolean formatting the
+// on-screen views use.
 function flattenValueForCsv(key: string, value: unknown): string {
   if (Array.isArray(value)) {
     if (value.length === 0) return '—'
@@ -904,7 +906,7 @@ function flattenAfterForCsv(after: Record<string, unknown> | null): string {
   if (!after) return '— (none)'
   return Object.keys(after)
     .map((key) => `${key}: ${flattenValueForCsv(key, after[key])}`)
-    .join('\n')
+    .join(' |\n')
 }
 
 // Sortable columns for the table header — same shadcn-data-table pattern
