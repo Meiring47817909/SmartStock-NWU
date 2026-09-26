@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
-import { formatDate, formatDateOnly, isoToLocalDateStr } from '@/lib/utils'
+import { formatDate, formatDateOnly, isoToLocalDateStr, withinDateRange } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { loadWaivedByTxn, waivedQty } from '@/lib/firebase/waivers'
 import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore'
@@ -26,20 +26,6 @@ const TABS: { id: ReportTab; label: string }[] = [
 ]
 
 const ALL_CATEGORIES = '__all__'
-
-// Both date-bounded reports compare on the LOCAL calendar date a
-// transaction was recorded, not on its raw `created_at` string: those are
-// written as new Date().toISOString(), i.e. UTC, so a 01:00 SAST movement is
-// stored under the previous UTC day and a naive string compare would drop it
-// out of the day the store actually handled it. An empty end is open-ended.
-function withinDateRange(createdAt: string | null | undefined, from: string, to: string): boolean {
-  if (!from && !to) return true
-  if (!createdAt) return false
-  const day = isoToLocalDateStr(createdAt)
-  if (from && day < from) return false
-  if (to && day > to) return false
-  return true
-}
 
 // Labelled From/To pair, matching the Audit Log's filter row. A date input
 // ignores `placeholder`, so without these labels the browser's own dd/mm/yyyy

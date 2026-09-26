@@ -85,6 +85,30 @@ export function isoToLocalDateStr(iso: string): string {
   return dateStrFromDate(new Date(iso))
 }
 
+// Is an ISO `created_at` timestamp inside a YYYY-MM-DD..YYYY-MM-DD range, as
+// picked in a pair of <input type="date"> filters? Either end may be '' for
+// open-ended. Compares on the LOCAL calendar date via isoToLocalDateStr, NOT
+// on the raw ISO string: created_at is written as new Date().toISOString(),
+// i.e. UTC, so a 00:01 SAST movement is stored under the PREVIOUS UTC day. A
+// naive `created_at >= `${from}T00:00:00`` therefore drops it out of the day
+// the store actually handled it, and lumps the previous day's late-evening
+// entries in instead — a two-hour slice wrong at both ends of the range, which
+// for an audit extract means a real stock movement simply missing from the day
+// it happened on. Shared by the Audit Log and the Reports date filters so the
+// two can't disagree about which day an entry belongs to.
+export function withinDateRange(
+  createdAt: string | null | undefined,
+  from: string,
+  to: string,
+): boolean {
+  if (!from && !to) return true
+  if (!createdAt) return false
+  const day = isoToLocalDateStr(createdAt)
+  if (from && day < from) return false
+  if (to && day > to) return false
+  return true
+}
+
 // Adds (or subtracts, with a negative `days`) whole days to a YYYY-MM-DD
 // date-only string, returning another YYYY-MM-DD string. Goes through the
 // local-date-safe dateStrFromDate/Date(y,m,d) construction rather than

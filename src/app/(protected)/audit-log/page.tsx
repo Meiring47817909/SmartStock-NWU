@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
-import { formatDate, formatDateOnly, formatLendWindow } from '@/lib/utils'
+import { formatDate, formatDateOnly, formatLendWindow, withinDateRange } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { LENDING_INTERVALS } from '@/lib/firebase/loanRequests'
 import { collection, query, orderBy, getDocs, where } from 'firebase/firestore'
@@ -790,8 +790,11 @@ export default function AuditLogPage() {
       const snap = await getDocs(query(collection(db, 'audit_log'), orderBy('created_at', 'desc')))
       let items = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as AuditLogEntry[]
 
-      if (fromDate) items = items.filter(e => e.created_at >= `${fromDate}T00:00:00`)
-      if (toDate) items = items.filter(e => e.created_at <= `${toDate}T23:59:59`)
+      // Both ends inclusive, on the LOCAL calendar day the entry was written
+      // — see withinDateRange(). An entry timestamped 00:01 belongs to the day
+      // that has just started, which is not what its UTC `created_at` string
+      // says while the local clock runs ahead of UTC.
+      items = items.filter(e => withinDateRange(e.created_at, fromDate, toDate))
 
       setEntries(items)
       setLoading(false)
