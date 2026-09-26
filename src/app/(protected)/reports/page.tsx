@@ -31,9 +31,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
 
 type ReportTab = 'stock-levels' | 'low-stock' | 'issued-per-staff' | 'returns'
 
@@ -44,7 +41,11 @@ const TABS: { id: ReportTab; label: string }[] = [
   { id: 'returns',             label: 'Returns' },
 ]
 
-const ALL_CATEGORIES = '__all__'
+// The bucket a product with no category_id falls into. Named like the
+// Returns report's 'none' status value for the same reason: a product
+// with nothing to categorize it shouldn't be silently swept into every
+// filter state or none of them — it gets its own visible checkbox.
+const UNCATEGORIZED_CATEGORY = '__uncategorized__'
 
 // ---------------------------------------------------------------------------
 // Sorting — shadcn's data-table pattern (an actual @tanstack/react-table
@@ -286,32 +287,94 @@ export default function ReportsPage() {
   )
 }
 
+// selected === null means "not yet initialized" (the categories list is
+// still loading) — treated as "everything" everywhere below, so the table
+// never flashes empty while the checkbox list is still catching up.
+function categoryFilterLabel(selected: Set<string> | null, cats: any[]): string {
+  const total = cats.length + 1 // + Uncategorized
+  if (selected === null || selected.size === total) return 'All categories'
+  if (selected.size === 0) return 'No categories'
+  if (selected.size === 1) {
+    const id = [...selected][0]
+    if (id === UNCATEGORIZED_CATEGORY) return 'Uncategorized'
+    return cats.find((c: any) => c.id === id)?.name ?? 'Category'
+  }
+  return 'Custom'
+}
+
+// Same DropdownMenuCheckboxItem pattern as the Returns report's status
+// filter — a Select can only ever hold one value, so it can't express
+// "these three categories" the way this needs to; the checkbox menu can,
+// and stays open across picks without any extra prop (Base UI's
+// Menu.CheckboxItem defaults closeOnClick to false, unlike Radix).
+function CategoryFilter({
+  selected, onChange, cats,
+}: {
+  selected: Set<string> | null
+  onChange: (next: Set<string>) => void
+  cats: any[]
+}) {
+  const options = [...cats, { id: UNCATEGORIZED_CATEGORY, name: 'Uncategorized' }]
+  const effective = selected ?? new Set(options.map((c: any) => c.id))
+
+  function toggle(id: string, checked: boolean) {
+    const next = new Set(effective)
+    if (checked) next.add(id)
+    else next.delete(id)
+    onChange(next)
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="outline" className="w-48 justify-between font-normal" />}>
+        <span className="truncate">{categoryFilterLabel(selected, cats)}</span>
+        <ChevronDown className="size-3.5 text-muted-foreground" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-52">
+        {options.map((c: any) => (
+          <DropdownMenuCheckboxItem
+            key={c.id}
+            checked={effective.has(c.id)}
+            onCheckedChange={checked => toggle(c.id, checked)}
+          >
+            {c.name}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function StockLevelsReport() {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [catFilter, setCatFilter] = useState('')
   const [cats, setCats] = useState<any[]>([])
+  // All categories plus Uncategorized checked by default, so this filters
+  // nothing until touched — see CategoryFilter above for why it starts null.
+  const [catFilter, setCatFilter] = useState<Set<string> | null>(null)
   const [search, setSearch] = useState('')
   const [sorting, setSorting] = useState<SortingState>([])
 
   useEffect(() => {
     getDocs(query(collection(db, 'categories'), orderBy('name'))).then(snap => {
-      setCats(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      setCats(list)
+      setCatFilter(new Set([...list.map((c: any) => c.id), UNCATEGORIZED_CATEGORY]))
     })
   }, [])
 
+  // No longer depends on the category filter — that's now applied client
+  // side below (a multi-select can't be expressed as a single Firestore
+  // `where` clause), so this fetches the product list exactly once.
   useEffect(() => {
     setLoading(true)
-    let q = query(collection(db, 'products'))
-    if (catFilter) q = query(collection(db, 'products'), where('category_id', '==', catFilter))
-
-    getDocs(q).then(snap => {
-      let items = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    getDocs(collection(db, 'products')).then(snap => {
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }))
       items.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''))
       setData(items)
       setLoading(false)
     })
-  }, [catFilter])
+  }, [])
 
   // qty/threshold/status precomputed once here rather than inline per row —
   // the Status column needs a plain field to sort on, not a value recomputed
@@ -322,7 +385,12 @@ function StockLevelsReport() {
     const status = qty === 0 ? 'OUT OF STOCK' : qty <= threshold ? 'LOW STOCK' : 'IN STOCK'
     return { ...p, qty, threshold, status }
   })
-  const searched = rows.filter((p: any) => matchesSearch(search, p.name, p.category_name))
+  // null (categories still loading) means "don't filter yet" — see
+  // catFilter's declaration above.
+  const catFiltered = catFilter === null
+    ? rows
+    : rows.filter((p: any) => catFilter.has(p.category_id || UNCATEGORIZED_CATEGORY))
+  const searched = catFiltered.filter((p: any) => matchesSearch(search, p.name, p.category_name))
 
   const table = useTable({
     features: REPORT_TABLE_FEATURES,
@@ -339,17 +407,7 @@ function StockLevelsReport() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <SearchBox value={search} onChange={setSearch} placeholder="Search name, category…" className="max-w-80 flex-1" />
-        <Select
-          items={{ [ALL_CATEGORIES]: 'All categories', ...Object.fromEntries(cats.map((c: any) => [c.id, c.name])) }}
-          value={catFilter || ALL_CATEGORIES}
-          onValueChange={v => setCatFilter(v && v !== ALL_CATEGORIES ? v : '')}
-        >
-          <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_CATEGORIES}>All categories</SelectItem>
-            {cats.map((c: any) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <CategoryFilter selected={catFilter} onChange={setCatFilter} cats={cats} />
         <span className="text-sm text-muted-foreground">{sorted.length} products · {totalUnits} total units</span>
       </div>
       <Card className="min-h-0 flex-1 py-0">
@@ -368,7 +426,9 @@ function StockLevelsReport() {
             {loading && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
             {!loading && sorted.length === 0 && (
               <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                {search ? `No products match "${search}"` : 'No products found'}
+                {search ? `No products match "${search}"`
+                  : catFilter?.size === 0 ? 'No categories selected'
+                  : 'No products found'}
               </TableCell></TableRow>
             )}
             {sorted.map((p: any) => (
