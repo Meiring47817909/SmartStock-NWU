@@ -27,14 +27,21 @@ const TABS: { id: ReportTab; label: string }[] = [
 
 const ALL_CATEGORIES = '__all__'
 
-// Labelled From/To pair, matching the Audit Log's filter row. A date input
+// Labelled date pair, matching the Audit Log's filter row. A date input
 // ignores `placeholder`, so without these labels the browser's own dd/mm/yyyy
-// hint is all there is to say which end of the range each control sets.
-// htmlFor/id so clicking a label focuses its input; `idPrefix` keeps those ids
-// unique, since two tabs each render a pair. `children` is the report's own
-// summary line, sharing the row's items-end alignment.
+// hint is all there is to say what each control does. htmlFor/id so clicking a
+// label focuses its input; `idPrefix` keeps those ids unique, since two tabs
+// each render a pair. `children` is the report's own summary line, sharing the
+// row's items-end alignment.
+//
+// The labels are overridable because the two ends do not always bound the same
+// field: Returns brackets one date (when the return was made), while Issued per
+// Staff bounds two different ones (issued from / expected back by). Where that
+// is so, the labels are the only thing telling Selouna which is which, so they
+// say the field rather than just the end of a range.
 function DateRangeFilter({
   idPrefix, fromDate, toDate, onFromChange, onToChange, children,
+  fromLabel = 'From date', toLabel = 'To date',
 }: {
   idPrefix: string
   fromDate: string
@@ -42,19 +49,21 @@ function DateRangeFilter({
   onFromChange: (v: string) => void
   onToChange: (v: string) => void
   children?: ReactNode
+  fromLabel?: string
+  toLabel?: string
 }) {
   return (
     <div className="mb-4 flex flex-wrap items-end gap-3">
       <div className="grid gap-1.5">
         <label htmlFor={`${idPrefix}-from-date`} className="text-xs font-medium text-muted-foreground">
-          From date
+          {fromLabel}
         </label>
         <Input id={`${idPrefix}-from-date`} type="date" className="w-40"
           value={fromDate} onChange={e => onFromChange(e.target.value)} />
       </div>
       <div className="grid gap-1.5">
         <label htmlFor={`${idPrefix}-to-date`} className="text-xs font-medium text-muted-foreground">
-          To date
+          {toLabel}
         </label>
         <Input id={`${idPrefix}-to-date`} type="date" className="w-40"
           value={toDate} onChange={e => onToChange(e.target.value)} />
@@ -237,6 +246,31 @@ function LowStockReport() {
   )
 }
 
+// The two ends of this report's filter bound DIFFERENT fields, so they are two
+// tests rather than one range: "issued from <date>" opens the window on when
+// the item left the store, "expected by <date>" closes it on when it is due
+// back. Together they answer "what went out since X that should be back by Y".
+//
+// Issued-from goes through withinDateRange because created_at is a full UTC ISO
+// timestamp that has to be read as a local calendar day. Expected-by must NOT:
+// lend_to is already a plain YYYY-MM-DD date-only string, straight off an
+// <input type="date">, so it compares directly against the filter value. Putting
+// it through new Date() would reintroduce exactly the timezone shift that
+// withinDateRange exists to remove.
+function issuedFrom(t: any, from: string): boolean {
+  return withinDateRange(t.created_at, from, '')
+}
+
+// A Stock Out with no expected date is never excluded here, whatever the
+// expected-by value. Filtering it out would quietly drop the loosest records in
+// the store — items lent with no return date agreed — from the report, and an
+// audit wants those visible, not missing.
+function expectedBy(t: any, to: string): boolean {
+  if (!to) return true
+  if (!t.lend_to) return true
+  return t.lend_to <= to
+}
+
 function IssuedPerStaffReport() {
   const [data, setData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -277,7 +311,7 @@ function IssuedPerStaffReport() {
   }, [])
 
   // Each staff member with their OUT transactions narrowed to the selected
-  // range, newest first, and the totals recomputed over what survives — so the
+  // dates, newest first, and the totals recomputed over what survives — so the
   // counts on a row always describe the rows underneath it. Derived on render
   // rather than cached when a row expands: the whole set is already in memory
   // (load() fetches it up front), and a cache keyed only by staff id would keep
@@ -285,15 +319,15 @@ function IssuedPerStaffReport() {
   const staff = data
     .map((s: any) => {
       const txns = s.txns
-        .filter((t: any) => withinDateRange(t.created_at, fromDate, toDate))
+        .filter((t: any) => issuedFrom(t, fromDate) && expectedBy(t, toDate))
         .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
       const totalQty = txns.reduce((sum: number, t: any) =>
         sum + (t.transaction_lines || []).reduce((s2: number, l: any) => s2 + (l.quantity || 0), 0), 0)
       return { ...s, txns, totalQty }
     })
-    // With a range set the question is who took stock out during it, so a staff
-    // member with nothing in it is noise. Unfiltered, the report stays what it
-    // was: a roster of every active staff member, zeroes included.
+    // With either date set the question is who took stock out, so a staff member
+    // with nothing matching is noise. Unfiltered, the report stays what it was:
+    // a roster of every active staff member, zeroes included.
     .filter((s: any) => (!fromDate && !toDate) || s.txns.length > 0)
 
   const rangeTxns = staff.reduce((n: number, s: any) => n + s.txns.length, 0)
@@ -303,6 +337,8 @@ function IssuedPerStaffReport() {
     <div className="flex h-full min-h-0 flex-col">
       <DateRangeFilter
         idPrefix="issued"
+        fromLabel="Issued from"
+        toLabel="Expected back by"
         fromDate={fromDate}
         toDate={toDate}
         onFromChange={setFromDate}
@@ -328,7 +364,7 @@ function IssuedPerStaffReport() {
           {loading && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
           {!loading && staff.length === 0 && (
             <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-              {fromDate || toDate ? 'No stock issued in the selected date range' : 'No active staff members'}
+              {fromDate || toDate ? 'No transactions match the selected dates' : 'No active staff members'}
             </TableCell></TableRow>
           )}
           {staff.map((s: any) => {
