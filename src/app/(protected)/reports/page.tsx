@@ -9,6 +9,7 @@ import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebas
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -447,15 +448,16 @@ function returnRowStatus(t: any): { label: string; className: string } | null {
 // directly and must NOT go through withinDateRange(), which is for reading a
 // UTC ISO timestamp as a local day.
 //
-// A return whose expected date is unknown is never excluded: either the Stock
-// Out it settles set no return date, or it is not linked to one at all. Same
-// call as on Issued per Staff — those are the loosest records in the store and
-// an audit wants them visible. The cost here is different, though: with both
-// ends on this one field, such a row has nothing left to bound it, so it shows
-// up under every window rather than under the wrong one.
-function expectedInRange(t: any, from: string, to: string): boolean {
+// A return whose expected date is unknown — its Stock Out set no return date,
+// or it is not linked to one at all — has nothing for either end to test. With
+// both ends on this one field there is no other bound left, so such a row would
+// otherwise appear under every window Selouna picks. Dropping it silently is
+// worse: those are the loosest records in the store and are exactly what an
+// audit is looking for. So the choice is hers, made in the filter row rather
+// than decided here; `includeUndated` carries it. Defaults to including them.
+function expectedInRange(t: any, from: string, to: string, includeUndated: boolean): boolean {
   if (!from && !to) return true
-  if (!t.expected_date) return true
+  if (!t.expected_date) return includeUndated
   if (from && t.expected_date < from) return false
   if (to && t.expected_date > to) return false
   return true
@@ -467,6 +469,7 @@ function ReturnsReport() {
   const { isExpanded: rowExpanded, toggle: toggleRow } = useExpandedRows()
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [includeUndated, setIncludeUndated] = useState(true)
 
   useEffect(() => {
     async function load() {
@@ -552,7 +555,10 @@ function ReturnsReport() {
   // is still owed on a Stock Out is a live figure across every return on
   // record, so a Partial row keeps telling the truth even when the return that
   // settled the rest of it falls outside the selected window.
-  const returns = data.filter((t: any) => expectedInRange(t, fromDate, toDate))
+  const returns = data.filter((t: any) => expectedInRange(t, fromDate, toDate, includeUndated))
+  // Counted over the whole set, not the filtered one: this is the size of the
+  // decision the checkbox offers, so it has to stay steady as the dates move.
+  const undatedCount = data.filter((t: any) => !t.expected_date).length
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -565,6 +571,26 @@ function ReturnsReport() {
         onFromChange={setFromDate}
         onToChange={setToDate}
       >
+        {/* Only worth showing once a range is set — with no dates the rows are
+            all in view anyway — and only when there is at least one such row to
+            decide about. */}
+        {(fromDate || toDate) && undatedCount > 0 && (
+          <div className="grid gap-1">
+            <Label htmlFor="returns-include-undated" className="text-xs">
+              <input
+                id="returns-include-undated"
+                type="checkbox"
+                className="size-3.5 accent-primary"
+                checked={includeUndated}
+                onChange={e => setIncludeUndated(e.target.checked)}
+              />
+              Include {undatedCount} with no expected date
+            </Label>
+            <span className="text-xs text-muted-foreground">
+              No due date to place them in a range, so they show under every window
+            </span>
+          </div>
+        )}
         <span className="text-sm text-muted-foreground">
           {returns.length} {returns.length === 1 ? 'return' : 'returns'}
           {(fromDate || toDate) && <> · by date expected back</>}
