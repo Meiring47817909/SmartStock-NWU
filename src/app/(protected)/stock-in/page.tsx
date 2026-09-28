@@ -172,8 +172,8 @@ export default function StockInPage() {
                 <TableBody>
                   {cart.map(item => (
                     <TableRow key={item.product.id}>
-                      <TableCell>
-                        <div className="font-medium">{item.product.name}</div>
+                      <TableCell className="max-w-xs whitespace-normal">
+                        <div className="break-words font-medium">{item.product.name}</div>
                       </TableCell>
                       <TableCell className="text-muted-foreground">{item.product.quantity_on_hand}</TableCell>
                       <TableCell>

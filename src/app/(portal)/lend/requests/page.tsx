@@ -5,11 +5,13 @@ import { toast } from 'sonner'
 import { db } from '@/lib/firebase/config'
 import { collection, query, where, getDocs } from 'firebase/firestore'
 import { useStaffPortal } from '@/context/StaffPortalContext'
-import { acceptCounter, declineCounter, withdrawRequest, expireIfNeeded } from '@/lib/firebase/loanRequests'
+import { acceptCounter, declineCounter, withdrawRequest, expireIfNeeded, computeExpiryDate, effectiveToDate, OPEN_ENDED_TO } from '@/lib/firebase/loanRequests'
 import { formatDateOnly, formatLendWindow } from '@/lib/utils'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { PortalPagination, paginateList, type PortalPageSize } from '@/components/portal-pagination'
 import type { LoanRequest, LoanRequestLine, LoanRequestStatus } from '@/types/database'
 
 const STATUS_BADGE_CLASS: Record<LoanRequestStatus, string> = {
@@ -24,6 +26,8 @@ const STATUS_BADGE_CLASS: Record<LoanRequestStatus, string> = {
 }
 
 const TERMINAL: LoanRequestStatus[] = ['declined', 'expired', 'withdrawn', 'fulfilled', 'no_show']
+
+type RequestTab = 'countered' | 'pending' | 'accepted' | 'history'
 
 function RequestCard({
   request, lines, busy, onAccept, onDecline, onWithdraw,
@@ -119,6 +123,11 @@ export default function MyRequestsPage() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
 
+  const [tab, setTab] = useState<RequestTab>('countered')
+  const [pageIndex, setPageIndex] = useState(0)
+  // Fixed at 10 rows per page, no rows-per-page selector.
+  const pageSize: PortalPageSize = 10
+
   useEffect(() => {
     if (staffMember) load()
   }, [staffMember]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -188,63 +197,165 @@ export default function MyRequestsPage() {
     setBusy(null)
   }
 
-  const countered = requests.filter((r) => r.status === 'countered')
-  const pending = requests.filter((r) => r.status === 'pending')
-  const accepted = requests.filter((r) => r.status === 'accepted')
-  const history = requests.filter((r) => TERMINAL.includes(r.status)).sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+  // Needs your response / Awaiting Selouna: soonest-to-expire first, using
+  // the SAME computed expiry expireIfNeeded() itself acts on --
+  // computeExpiryDate() = min(updated_at + 30 days, from_date) -- rather
+  // than just the lend window's start date. A request sitting untouched
+  // for weeks can be closer to silently expiring than one with a nearer
+  // from_date, so this is the actual "act on this first" order, not an
+  // approximation of it. (computeExpiryDate only returns null for a
+  // non-pending/countered request, which never happens here since both
+  // arrays are already filtered to those statuses -- the OPEN_ENDED_TO
+  // fallback just satisfies the return type.)
+  const byExpiryAsc = (a: LoanRequest, b: LoanRequest) =>
+    (computeExpiryDate(a) ?? OPEN_ENDED_TO).localeCompare(computeExpiryDate(b) ?? OPEN_ENDED_TO)
+
+  // Upcoming: soonest-to-lapse-into-a-no-show first, using the window's end
+  // date (effectiveToDate -- "never" for an Indefinite item), the same date
+  // isNoShowCandidate() checks. That's the pickup actually at risk of being
+  // missed, not necessarily the one that merely starts soonest.
+  const byWindowEndAsc = (a: LoanRequest, b: LoanRequest) =>
+    effectiveToDate(a.to_date).localeCompare(effectiveToDate(b.to_date))
+
+  // History: nothing here is actionable, so it's just newest-first by the
+  // request's own lend window start date (from_date -- the date shown on
+  // each card), matching what you're actually looking at.
+  const byFromDateDesc = (a: LoanRequest, b: LoanRequest) => b.from_date.localeCompare(a.from_date)
+
+  const countered = requests.filter((r) => r.status === 'countered').sort(byExpiryAsc)
+  const pending = requests.filter((r) => r.status === 'pending').sort(byExpiryAsc)
+  const accepted = requests.filter((r) => r.status === 'accepted').sort(byWindowEndAsc)
+  const history = requests.filter((r) => TERMINAL.includes(r.status)).sort(byFromDateDesc)
+
+  // Every tab's own paginateList call, all sharing one pageIndex/pageSize —
+  // only the active tab's slice and pagination footer are ever visible, and
+  // switching tabs resets pageIndex (below) so "page 2" never carries over
+  // into a differently-sized section.
+  const covPage = paginateList(countered, pageIndex, pageSize)
+  const penPage = paginateList(pending, pageIndex, pageSize)
+  const accPage = paginateList(accepted, pageIndex, pageSize)
+  const hisPage = paginateList(history, pageIndex, pageSize)
+
+  function changeTab(next: string) {
+    setTab(next as RequestTab)
+    setPageIndex(0)
+  }
 
   if (loading) return <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>
 
   return (
-    <div className="flex max-w-[700px] flex-col gap-8">
+    // Centered within the now-wider portal layout (see (portal)/lend/layout.tsx)
+    // and as wide as Cart's own content, rather than sitting flush-left in
+    // the extra space at 700px.
+    <div className="mx-auto flex max-w-[1000px] flex-col gap-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">My Requests</h1>
         <p className="mt-1 text-sm text-muted-foreground">Track your lending requests and respond to Selouna&apos;s counters.</p>
       </div>
 
-      {requests.length === 0 && (
+      {requests.length === 0 ? (
         <p className="text-sm text-muted-foreground">You haven&apos;t submitted any requests yet.</p>
-      )}
+      ) : (
+        <Tabs value={tab} onValueChange={changeTab} className="flex flex-col gap-4">
+          {/* Same segmented-control tab bar as the Reports page: a bordered
+              light-grey track, each tab flex-1 across the full width, the
+              active one a white pill with NWU-purple text. Forced !h-14/!h-11
+              heights (rather than h-auto) because TabsTrigger's own base
+              class hardcodes h-[calc(100%-1px)], which otherwise wins and
+              stretches every tab to the track's full height with no
+              breathing room top/bottom. */}
+          <TabsList className="flex w-full !h-14 gap-0 overflow-hidden rounded-lg border border-(--nwu-purple)/30 bg-border p-1.5">
+            <TabsTrigger
+              value="countered"
+              className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+            >
+              Needs your response
+              {countered.length > 0 && <Badge className="bg-sky-100 text-sky-800">{countered.length}</Badge>}
+            </TabsTrigger>
+            <TabsTrigger
+              value="pending"
+              className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+            >
+              Awaiting Selouna
+              {pending.length > 0 && <Badge className="bg-amber-100 text-amber-800">{pending.length}</Badge>}
+            </TabsTrigger>
+            <TabsTrigger
+              value="accepted"
+              className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+            >
+              Upcoming
+              {accepted.length > 0 && <Badge className="bg-emerald-100 text-emerald-800">{accepted.length}</Badge>}
+            </TabsTrigger>
+            <TabsTrigger
+              value="history"
+              className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+            >
+              History
+              {history.length > 0 && <Badge className="bg-muted text-muted-foreground">{history.length}</Badge>}
+            </TabsTrigger>
+          </TabsList>
 
-      {countered.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-bold tracking-wide text-muted-foreground uppercase">Needs your response</h2>
-          {countered.map((r) => (
-            <Fragment key={r.id}>
-              <RequestCard request={r} lines={linesByRequest[r.id] ?? []} busy={busy === r.id}
-                onAccept={() => handleAccept(r)} onDecline={() => handleDecline(r)} />
-            </Fragment>
-          ))}
-        </section>
-      )}
+          <TabsContent value="countered" className="flex flex-col gap-3">
+            {covPage.pageRows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nothing needs your response right now.</p>
+            ) : (
+              covPage.pageRows.map((r) => (
+                <Fragment key={r.id}>
+                  <RequestCard request={r} lines={linesByRequest[r.id] ?? []} busy={busy === r.id}
+                    onAccept={() => handleAccept(r)} onDecline={() => handleDecline(r)} />
+                </Fragment>
+              ))
+            )}
+            {countered.length > 0 && (
+              <PortalPagination pageIndex={covPage.safeIndex} pageSize={pageSize} totalRows={countered.length}
+                onPageIndexChange={setPageIndex} />
+            )}
+          </TabsContent>
 
-      {pending.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-bold tracking-wide text-muted-foreground uppercase">Awaiting Selouna</h2>
-          {pending.map((r) => (
-            <RequestCard key={r.id} request={r} lines={linesByRequest[r.id] ?? []} busy={busy === r.id}
-              onWithdraw={() => handleWithdraw(r)} />
-          ))}
-        </section>
-      )}
+          <TabsContent value="pending" className="flex flex-col gap-3">
+            {penPage.pageRows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No pending requests.</p>
+            ) : (
+              penPage.pageRows.map((r) => (
+                <RequestCard key={r.id} request={r} lines={linesByRequest[r.id] ?? []} busy={busy === r.id}
+                  onWithdraw={() => handleWithdraw(r)} />
+              ))
+            )}
+            {pending.length > 0 && (
+              <PortalPagination pageIndex={penPage.safeIndex} pageSize={pageSize} totalRows={pending.length}
+                onPageIndexChange={setPageIndex} />
+            )}
+          </TabsContent>
 
-      {accepted.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-bold tracking-wide text-muted-foreground uppercase">Upcoming</h2>
-          {accepted.map((r) => (
-            <RequestCard key={r.id} request={r} lines={linesByRequest[r.id] ?? []} busy={busy === r.id}
-              onWithdraw={() => handleWithdraw(r)} />
-          ))}
-        </section>
-      )}
+          <TabsContent value="accepted" className="flex flex-col gap-3">
+            {accPage.pageRows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nothing upcoming.</p>
+            ) : (
+              accPage.pageRows.map((r) => (
+                <RequestCard key={r.id} request={r} lines={linesByRequest[r.id] ?? []} busy={busy === r.id}
+                  onWithdraw={() => handleWithdraw(r)} />
+              ))
+            )}
+            {accepted.length > 0 && (
+              <PortalPagination pageIndex={accPage.safeIndex} pageSize={pageSize} totalRows={accepted.length}
+                onPageIndexChange={setPageIndex} />
+            )}
+          </TabsContent>
 
-      {history.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-bold tracking-wide text-muted-foreground uppercase">History</h2>
-          {history.map((r) => (
-            <RequestCard key={r.id} request={r} lines={linesByRequest[r.id] ?? []} busy={busy === r.id} />
-          ))}
-        </section>
+          <TabsContent value="history" className="flex flex-col gap-3">
+            {hisPage.pageRows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No history yet.</p>
+            ) : (
+              hisPage.pageRows.map((r) => (
+                <RequestCard key={r.id} request={r} lines={linesByRequest[r.id] ?? []} busy={busy === r.id} />
+              ))
+            )}
+            {history.length > 0 && (
+              <PortalPagination pageIndex={hisPage.safeIndex} pageSize={pageSize} totalRows={history.length}
+                onPageIndexChange={setPageIndex} />
+            )}
+          </TabsContent>
+        </Tabs>
       )}
     </div>
   )

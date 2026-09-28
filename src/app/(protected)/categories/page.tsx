@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Plus, Pencil, Tag } from 'lucide-react'
+import { Plus, Pencil, Tag, Trash2 } from 'lucide-react'
 import { db } from '@/lib/firebase/config'
-import { collection, query, orderBy, getDocs, addDoc, updateDoc, doc } from 'firebase/firestore'
+import { collection, query, where, orderBy, getDocs, getCountFromServer, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore'
 import { logAudit } from '@/lib/firebase/audit'
 import { useAuth } from '@/context/AuthContext'
 import { Card } from '@/components/ui/card'
@@ -30,6 +30,11 @@ export default function CategoriesPage() {
   const [form, setForm] = useState<FormData>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [deleting, setDeleting] = useState<Category | null>(null)
+  const [productCount, setProductCount] = useState<number | null>(null)
+  const [checkingDelete, setCheckingDelete] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   async function load() {
     setLoading(true)
@@ -52,6 +57,53 @@ export default function CategoriesPage() {
     setForm({ name: c.name, description: c.description ?? '' })
     setError('')
     setShowModal(true)
+  }
+
+  // Delete — the only guard a category needs is "does any product still
+  // point at it", unlike a product's own delete guard (outstanding loans +
+  // pending requests), since a category itself is never lent out. Opens
+  // the confirm dialog right away in a "checking" state, same as the
+  // Products page's own delete flow.
+  async function openDelete(c: Category) {
+    setDeleting(c)
+    setProductCount(null)
+    setDeleteError('')
+    setCheckingDelete(true)
+    try {
+      const snap = await getCountFromServer(query(collection(db, 'products'), where('category_id', '==', c.id)))
+      setProductCount(snap.data().count)
+    } catch {
+      setDeleteError("Could not check this category's products.")
+      setDeleting(null)
+    } finally {
+      setCheckingDelete(false)
+    }
+  }
+
+  function closeDelete() {
+    setDeleting(null)
+    setProductCount(null)
+    setDeleteError('')
+  }
+
+  async function confirmDelete() {
+    if (!deleting || productCount === null || productCount > 0) return
+    setDeleteBusy(true)
+    try {
+      await deleteDoc(doc(db, 'categories', deleting.id))
+      logAudit({
+        userId: user?.uid, userName: profile?.full_name ?? user?.email,
+        action: 'delete', entityType: 'category', entityId: deleting.id,
+        before: { name: deleting.name, description: deleting.description },
+        after: null,
+      })
+      closeDelete()
+      load()
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Could not delete this category.')
+    } finally {
+      setDeleteBusy(false)
+    }
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -112,16 +164,26 @@ export default function CategoriesPage() {
             {!loading && categories.length === 0 && <TableRow><TableCell colSpan={3} className="py-8 text-center text-muted-foreground">No categories yet</TableCell></TableRow>}
             {categories.map(c => (
               <TableRow key={c.id}>
-                <TableCell className="font-medium">
-                  <span className="inline-flex items-center gap-1.5">
-                    <Tag className="size-3.5 text-muted-foreground" /> {c.name}
+                <TableCell className="max-w-xs font-medium whitespace-normal">
+                  <span className="inline-flex min-w-0 items-start gap-1.5">
+                    <Tag className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 break-words">{c.name}</span>
                   </span>
                 </TableCell>
-                <TableCell className="whitespace-normal text-muted-foreground">{c.description ?? '—'}</TableCell>
+                <TableCell className="max-w-xs whitespace-normal break-words text-muted-foreground">{c.description ?? '—'}</TableCell>
                 <TableCell>
-                  <Button variant="ghost" size="icon-sm" onClick={() => openEdit(c)}>
-                    <Pencil className="size-3.5" />
-                  </Button>
+                  <div className="flex gap-1">
+                    <Button variant="ghost" size="icon-sm" onClick={() => openEdit(c)}>
+                      <Pencil className="size-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost" size="icon-sm"
+                      onClick={() => openDelete(c)}
+                      className="text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -161,6 +223,51 @@ export default function CategoriesPage() {
               <Button type="submit" disabled={saving}>{saving ? 'Saving…' : editing ? 'Save Changes' : 'Add Category'}</Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleting !== null} onOpenChange={(open) => { if (!open) closeDelete() }}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>Delete category?</DialogTitle>
+          </DialogHeader>
+          {deleting && (
+            <p className="text-sm">
+              <span className="inline-flex items-center gap-1.5">
+                <Tag className="size-3.5 text-muted-foreground" />
+                <strong className="text-foreground">{deleting.name}</strong>
+              </span>
+            </p>
+          )}
+          {checkingDelete ? (
+            <p className="text-sm text-muted-foreground">Checking how many products use this category…</p>
+          ) : productCount !== null && productCount > 0 ? (
+            <Alert variant="destructive">
+              <AlertDescription>
+                {productCount} product{productCount === 1 ? '' : 's'} still {productCount === 1 ? 'uses' : 'use'} this category. Move or delete {productCount === 1 ? 'it' : 'them'} first.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No products use this category, so this is safe. This can&apos;t be undone.
+            </p>
+          )}
+          {deleteError && (
+            <Alert variant="destructive">
+              <AlertDescription>{deleteError}</AlertDescription>
+            </Alert>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeDelete} disabled={deleteBusy}>Cancel</Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={checkingDelete || deleteBusy || productCount === null || productCount > 0}
+              onClick={confirmDelete}
+            >
+              {deleteBusy ? 'Deleting…' : 'Delete'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -33,19 +33,36 @@ export default function LendCartPage() {
   // which item is tightest), so the effect must still run on a blank toDate
   // rather than skipping validation entirely the way it used to.
   useEffect(() => {
-    if (cart.length === 0 || !fromDate) { setErrors([]); return }
+    // loan_requests/loan_request_lines (read inside validateCartDates, for
+    // the live availability check) stay signed-in-only in firestore.rules —
+    // unlike `products`, that wasn't opened up to guests. A guest can still
+    // fill in dates and see errors clear, but the actual conflict check
+    // only runs once there's a real linked account to run it against; it
+    // re-runs on its own once they sign in (staffMember becomes truthy).
+    if (!staffMember || cart.length === 0 || !fromDate) { setErrors([]); return }
     let cancelled = false
     setChecking(true)
     validateCartDates(cart, fromDate, toDate).then((result) => {
       if (!cancelled) { setErrors(result.errors); setChecking(false) }
     })
     return () => { cancelled = true }
-  }, [cart, fromDate, toDate])
+  }, [staffMember, cart, fromDate, toDate])
 
   const tightestCap = tightestLendingCap(cart)
 
   async function handleSubmit() {
-    if (!staffMember || cart.length === 0 || !fromDate || (!toDate && tightestCap)) return
+    // No linked staff account (guest browsing, or a signed-out visitor who
+    // built a cart before ever signing in) — send them to sign in first
+    // rather than silently doing nothing, regardless of whether the dates
+    // below are even filled in yet. `next` brings them straight back here
+    // (cart items survive the trip — see PortalCartContext) instead of
+    // dropping them on Browse; the login page still requires a manual
+    // Submit Request click, it never auto-submits on their behalf.
+    if (!staffMember) {
+      router.push('/login?next=/lend/cart')
+      return
+    }
+    if (cart.length === 0 || !fromDate || (!toDate && tightestCap)) return
     setSubmitting(true)
     try {
       await submitLoanRequest(
@@ -74,7 +91,11 @@ export default function LendCartPage() {
   const canSubmit = fromDate && (toDate || !tightestCap) && errors.length === 0 && !checking
 
   return (
-    <div className="max-w-[700px]">
+    // Centered within the now-wider Browse/Cart layout (see (portal)/lend/layout.tsx)
+    // rather than sitting flush-left in the extra space, and as wide as the
+    // whole page used to be before that layout widened, not just the 700px
+    // this content itself used to claim.
+    <div className="mx-auto max-w-[1000px]">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground">Your Cart</h1>
         <p className="mt-1 text-sm text-muted-foreground">Choose your pickup dates, then submit your request.</p>
@@ -162,7 +183,10 @@ export default function LendCartPage() {
             </Alert>
           ))}
 
-          <Button disabled={!canSubmit || submitting} onClick={handleSubmit} className="w-fit">
+          {/* A guest can always click this — it just sends them to sign in — so
+              the date/validation gating below only applies once there's a
+              real account to actually submit against. */}
+          <Button disabled={staffMember ? (!canSubmit || submitting) : false} onClick={handleSubmit} className="w-fit">
             {submitting ? 'Submitting…' : 'Submit Request'}
           </Button>
         </CardContent>

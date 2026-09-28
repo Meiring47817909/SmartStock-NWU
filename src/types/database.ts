@@ -83,6 +83,12 @@ export interface StaffMember {
   // login — null until "Send Login Email" has provisioned an account.
   // Written only by the /api/staff/* routes; see src/lib/server/staffAdmin.ts.
   uid: string | null
+  // True only for the one `staff` record a BICS admin creates for herself
+  // via (protected)/profile — it lets her show up as a normal borrower in
+  // Stock Out (which reads exclusively from this collection) without
+  // cluttering the Staff management page's list of actual staff/borrowers.
+  // Never set on an ordinary staff member's record.
+  is_admin_account?: boolean
   created_at: string
   updated_at: string
 }
@@ -261,15 +267,49 @@ export interface ReturnWaiver {
   resolved_by_name: string | null
 }
 
+// Feature-flag toggles for the outbound notification emails this app can
+// send (see NOTIFICATION_EMAIL_DEFINITIONS in
+// lib/firebase/notificationSettings.ts for what each one actually covers,
+// and (protected)/settings/notifications for the page that edits these).
+// One singleton document, not one per admin -- there is one operational
+// inbox (Selouna's) and one lending-portal audience to notify, not several.
+// Note this only gates whether an email WOULD be sent once the sender
+// exists; none of the actual sending is wired up yet.
+export type NotificationSettingKey =
+  | 'stock_out_confirmation'
+  | 'loan_request_approved'
+  | 'loan_request_countered'
+  | 'loan_request_declined'
+  | 'approved_pickup_cancelled'
+  | 'loan_request_expired'
+  | 'loan_request_counter_accepted'
+  | 'loan_request_counter_declined'
+  | 'loan_request_withdrawn'
+  | 'new_loan_request'
+  | 'incoming_pickup_confirmed'
+  | 'overdue_return_alert'
+  | 'low_stock_alert'
+  | 'insufficient_pickup_alert'
+
+export type NotificationSettings = Record<NotificationSettingKey, boolean> & {
+  // Where the five "Selouna" emails above are actually delivered -- set on
+  // the Notification Settings page. null/empty until an admin sets one, in
+  // which case nothing addressed to Selouna has anywhere to go yet.
+  admin_notification_email: string | null
+  updated_at: string | null
+  updated_by_uid: string | null
+  updated_by_name: string | null
+}
+
 // 'grant_access' / 'resend_access' cover the Staff page's Send/Resend
 // Login Email button — provisioning a portal login and re-issuing the
 // password-reset link. They are separate from 'update' because granting
 // someone access to the system is not the same kind of event as editing
 // their department, and an auditor needs to find them on their own.
 export type AuditAction =
-  | 'create' | 'update' | 'activate' | 'deactivate' | 'resolve'
+  | 'create' | 'update' | 'delete' | 'activate' | 'deactivate' | 'resolve'
   | 'grant_access' | 'resend_access'
-export type AuditEntityType = 'product' | 'category' | 'staff' | 'transaction' | 'loan_request'
+export type AuditEntityType = 'product' | 'category' | 'staff' | 'transaction' | 'loan_request' | 'settings'
 
 export interface AuditLogEntry {
   id: string             // Firestore document ID

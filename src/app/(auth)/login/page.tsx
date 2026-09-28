@@ -2,7 +2,8 @@
 
 import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { signInWithEmailAndPassword, signOut } from 'firebase/auth'
+import Image from 'next/image'
+import { signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from 'firebase/auth'
 import { auth, db } from '@/lib/firebase/config'
 import { doc, getDocFromServer, collection, query, where, getDocsFromServer } from 'firebase/firestore'
 import { Card, CardContent } from '@/components/ui/card'
@@ -11,6 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Separator } from '@/components/ui/separator'
+import { toast } from 'sonner'
 
 function LoginPageInner() {
   const router = useRouter()
@@ -23,6 +25,15 @@ function LoginPageInner() {
       : '',
   )
   const [loading, setLoading] = useState(false)
+  const [sendingReset, setSendingReset] = useState(false)
+
+  // Where a signed-in portal borrower (not an admin — see routeSignedInUser)
+  // lands, when they were bounced here from somewhere specific, e.g. Cart's
+  // Submit Request button sends '/login?next=/lend/cart'. Restricted to
+  // '/lend' paths so this can't be turned into an open redirect via a
+  // crafted login link.
+  const nextParam = searchParams.get('next')
+  const next = nextParam && nextParam.startsWith('/lend') ? nextParam : null
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -32,7 +43,21 @@ function LoginPageInner() {
       const cred = await signInWithEmailAndPassword(auth, email, password)
       await routeSignedInUser(cred.user.uid)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid email or password')
+      // Firebase's own error.message ("Firebase: Error (auth/wrong-password).")
+      // is raw SDK text, not something to show a staff member — map the
+      // codes we actually see here to plain sentences instead.
+      const code = (err as { code?: string })?.code
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/user-not-found') {
+        setError('Incorrect email or password.')
+      } else if (code === 'auth/invalid-email') {
+        setError('Enter a valid email address.')
+      } else if (code === 'auth/user-disabled') {
+        setError('This account has been disabled. Please contact Selouna Visser at Selouna.Visser@nwu.ac.za for more information.')
+      } else if (code === 'auth/too-many-requests') {
+        setError('Too many attempts — please wait a moment and try again.')
+      } else {
+        setError('Something went wrong signing you in. Please try again.')
+      }
       setLoading(false)
     }
   }
@@ -51,15 +76,20 @@ function LoginPageInner() {
     // staff-record lookup below rather than being pushed at /dashboard and
     // immediately bounced back out by the (protected) layout's admin gate —
     // that round trip shows the user a visible flash of the BICS shell they
-    // aren't allowed into.
-    const profileSnap = await getDocFromServer(doc(db, 'profiles', uid))
+    // aren't allowed into. The two lookups don't depend on each other, so
+    // they're fired together — sequential forced-server reads here made the
+    // "Signing in…" button sit for the sum of both round trips instead of
+    // the slower of the two.
+    const [profileSnap, staffSnap] = await Promise.all([
+      getDocFromServer(doc(db, 'profiles', uid)),
+      getDocsFromServer(query(collection(db, 'staff'), where('uid', '==', uid))),
+    ])
     if (profileSnap.exists() && profileSnap.data()?.role === 'admin') {
       router.push('/dashboard')
       router.refresh()
       return
     }
 
-    const staffSnap = await getDocsFromServer(query(collection(db, 'staff'), where('uid', '==', uid)))
     if (!staffSnap.empty) {
       // Deactivated (Staff page → Deactivate) — the portal layout itself
       // also blocks this (see lend/layout.tsx's PortalShell), which is what
@@ -73,7 +103,7 @@ function LoginPageInner() {
         setLoading(false)
         return
       }
-      router.push('/lend')
+      router.push(next ?? '/lend')
       return
     }
 
@@ -89,20 +119,49 @@ function LoginPageInner() {
     setLoading(false)
   }
 
+  async function handleForgotPassword() {
+    if (!email) {
+      setError('Enter your email address above, then click "Reset it".')
+      return
+    }
+    setError('')
+    setSendingReset(true)
+    try {
+      await sendPasswordResetEmail(auth, email)
+      toast.success(`Password reset email sent to ${email}.`)
+    } catch (err) {
+      const code = (err as { code?: string })?.code
+      if (code === 'auth/invalid-email') {
+        setError('Enter a valid email address.')
+      } else if (code === 'auth/too-many-requests') {
+        setError('Too many attempts — please wait a moment and try again.')
+      } else {
+        toast.error('Failed to send reset email. Please try again.')
+      }
+    }
+    setSendingReset(false)
+  }
+
   function handleCasLogin() {
     const service = window.location.origin + '/cas-callback'
     window.location.href = `https://casprd.nwu.ac.za/cas/login?service=${encodeURIComponent(service)}`
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
+    <div className="flex min-h-screen items-center justify-center" style={{ background: 'radial-gradient(circle, #E5DCF0 0%, #D1C0E2 60%, #BBA4D1 100%)' }}>
       <Card className="w-full max-w-[400px] border-t-4 border-t-(--nwu-purple) shadow-[0_4px_24px_rgba(0,0,0,0.06)]">
         <CardContent className="p-10 pt-6">
           {/* Header */}
           <div className="mb-8 text-center">
-            <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-xl bg-gradient-to-br from-(--nwu-purple) to-(--nwu-turquoise)">
-              <span className="size-2.5 rounded-full bg-white" />
-            </div>
+            <Image
+              src="/smartstock-nwu-logo.svg"
+              alt="SmartStock-NWU"
+              width={920}
+              height={410}
+              priority
+              unoptimized
+              className="mx-auto mb-4 h-auto w-[200px]"
+            />
             <h1 className="text-xl font-bold text-foreground">NWU IT Store</h1>
             <p className="mt-1 text-sm text-muted-foreground">Potchefstroom Campus</p>
           </div>
@@ -142,6 +201,18 @@ function LoginPageInner() {
             <Button type="submit" disabled={loading} className="mt-1 w-full justify-center">
               {loading ? 'Signing in…' : 'Sign in'}
             </Button>
+
+            <p className="text-center text-sm text-muted-foreground">
+              Forgot password?{' '}
+              <button
+                type="button"
+                onClick={handleForgotPassword}
+                disabled={sendingReset}
+                className="font-medium text-primary underline-offset-2 hover:underline disabled:opacity-60"
+              >
+                {sendingReset ? 'Sending…' : 'Reset it'}
+              </button>
+            </p>
           </form>
 
           <div className="my-5 flex items-center gap-3">
@@ -161,7 +232,7 @@ function LoginPageInner() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-background" />}>
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center" style={{ background: 'radial-gradient(circle, #E5DCF0 0%, #D1C0E2 60%, #BBA4D1 100%)' }} />}>
       <LoginPageInner />
     </Suspense>
   )

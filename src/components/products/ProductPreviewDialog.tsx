@@ -1,14 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { ImageOff } from 'lucide-react'
+import { ImageOff, MapPin, Calendar, Clock } from 'lucide-react'
 import { storageDownloadUrl } from '@/lib/firebase/storage'
 import { formatLendWindow, formatDateOnly } from '@/lib/utils'
 import { lendingIntervalLabel } from '@/lib/firebase/loanRequests'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Carousel, CarouselContent, CarouselItem } from '@/components/ui/carousel'
 import type { Product } from '@/types/database'
 
 const AVAILABLE_BADGE_CLASS = (available: boolean) =>
@@ -66,17 +65,38 @@ export default function ProductPreviewDialog({
 
   return (
     <Dialog open={!!product} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[700px]">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[1080px]">
         {product && (
           <>
             <div className="grid gap-6 sm:grid-cols-2">
               <div>
                 {product.images && product.images.length > 0 ? (
-                  <>
-                    {/* Main photo — a plain <img>, not the Carousel itself. Which
-                        photo shows is driven by activeImage, set either by the
-                        auto-cycle timer or by clicking a thumbnail below. */}
-                    <div className="flex aspect-square items-center justify-center overflow-hidden rounded-lg bg-muted">
+                  <div className="flex gap-2">
+                    {/* Thumbnail strip — only shown for 2+ photos, to the
+                        left of the main photo. Clicking a thumbnail jumps
+                        the main photo to it. */}
+                    {product.images.length > 1 && (
+                      <div className="flex shrink-0 flex-col justify-evenly">
+                        {product.images.map((path, i) => (
+                          <button
+                            key={path}
+                            type="button"
+                            onClick={() => setActiveImage(i)}
+                            className={`block size-20 shrink-0 overflow-hidden rounded-md ring-2 transition-colors ${
+                              i === activeImage ? 'ring-primary' : 'ring-transparent hover:ring-border'
+                            }`}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={storageDownloadUrl(path)} alt="" className="size-full object-cover" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Main photo — a plain <img>. Which photo shows is
+                        driven by activeImage, set either by the auto-cycle
+                        timer or by clicking a thumbnail to its left. */}
+                    <div className="flex aspect-square min-w-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-muted">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={storageDownloadUrl(product.images[activeImage] ?? product.images[0])}
@@ -84,30 +104,7 @@ export default function ProductPreviewDialog({
                         className="size-full object-cover"
                       />
                     </div>
-
-                    {/* Thumbnail strip — only shown for 2-3 photos. Clicking a
-                        thumbnail jumps the main photo to it. */}
-                    {product.images.length > 1 && (
-                      <Carousel className="mt-2 w-full">
-                        <CarouselContent className="-ml-2 justify-evenly py-1">
-                          {product.images.map((path, i) => (
-                            <CarouselItem key={path} className="basis-auto pl-2">
-                              <button
-                                type="button"
-                                onClick={() => setActiveImage(i)}
-                                className={`block size-20 shrink-0 overflow-hidden rounded-md ring-2 transition-colors ${
-                                  i === activeImage ? 'ring-primary' : 'ring-transparent hover:ring-border'
-                                }`}
-                              >
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={storageDownloadUrl(path)} alt="" className="size-full object-cover" />
-                              </button>
-                            </CarouselItem>
-                          ))}
-                        </CarouselContent>
-                      </Carousel>
-                    )}
-                  </>
+                  </div>
                 ) : (
                   <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-lg bg-muted text-muted-foreground">
                     <ImageOff className="size-8" />
@@ -117,7 +114,7 @@ export default function ProductPreviewDialog({
               </div>
 
               <div className="flex flex-col gap-3">
-                <DialogTitle className="font-heading text-2xl font-bold">{product.name}</DialogTitle>
+                <DialogTitle className="font-heading pr-8 text-2xl font-bold">{product.name}</DialogTitle>
 
                 {/* `product.available` is the admin's own on/off toggle for
                     whether this item is offered for lending at all — it does
@@ -152,37 +149,49 @@ export default function ProductPreviewDialog({
 
                 {product.location && (
                   <div>
-                    <div className="mb-1 text-sm font-semibold">Location:</div>
-                    <p className="text-sm">{product.location}</p>
+                    <div className="mb-1 text-sm font-semibold">Location</div>
+                    <div className="flex items-center gap-1.5 text-sm">
+                      <MapPin className="size-4 shrink-0 text-muted-foreground" />
+                      <span>{product.location}</span>
+                    </div>
                   </div>
                 )}
 
-                {(product.lend_from || product.lend_to) && (
-                  <div>
-                    <div className="mb-1 text-sm font-semibold">Lendable:</div>
-                    <p className="text-sm">
-                      {formatLendWindow(product.lend_from, product.lend_to)}
-                    </p>
-                  </div>
-                )}
+                <div className="grid grid-cols-[3fr_2fr] gap-4">
+                  {(product.lend_from || product.lend_to) && (
+                    <div>
+                      <div className="mb-1 text-sm font-semibold">Availability</div>
+                      <div className="flex items-center gap-1.5 text-sm">
+                        <Calendar className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="whitespace-nowrap">
+                          Lendable from {formatLendWindow(product.lend_from, product.lend_to)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
 
-                <div>
-                  <div className="mb-1 text-sm font-semibold">Lending interval:</div>
-                  <p className="text-sm">
-                    {product.lending_interval === 'indefinite'
-                      ? 'No return date required'
-                      : `Up to ${lendingIntervalLabel(product.lending_interval).toLowerCase()} per loan`}
-                  </p>
+                  <div className={product.lend_from || product.lend_to ? undefined : 'col-span-2'}>
+                    <div className="mb-1 text-sm font-semibold">Lending Interval</div>
+                    <div className="flex items-center gap-1.5 text-sm">
+                      <Clock className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="whitespace-nowrap">
+                        {product.lending_interval === 'indefinite'
+                          ? 'No return date required'
+                          : `Up to ${lendingIntervalLabel(product.lending_interval).toLowerCase()} per loan`}
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
                 {product.description && (
                   <div>
-                    <div className="mb-1 text-sm font-semibold">Description:</div>
-                    <p className="text-sm">{product.description}</p>
+                    <div className="mb-1 text-sm font-semibold">Long description</div>
+                    <p className="text-sm whitespace-pre-wrap">{product.description}</p>
                   </div>
                 )}
               </div>
             </div>
+
             <DialogFooter>
               {cart && (product.available ?? true) && product.quantity_on_hand > 0 ? (
                 <div className="flex w-full items-center gap-1.5 sm:w-auto sm:justify-end">

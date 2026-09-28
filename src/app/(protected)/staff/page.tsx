@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
 import { toast } from 'sonner'
-import { Search, Plus, Pencil, CreditCard, Mail, ChevronRight, ChevronDown } from 'lucide-react'
+import { Search, Plus, Pencil, CreditCard, Mail, ChevronDown } from 'lucide-react'
 import { db } from '@/lib/firebase/config'
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, orderBy } from 'firebase/firestore'
 import { logAudit } from '@/lib/firebase/audit'
@@ -12,8 +12,11 @@ import { loadWaivers, createReturnWaiver } from '@/lib/firebase/waivers'
 import { formatDateOnly, todayDateStr } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
 import { useRole } from '@/context/RoleContext'
-import { Card } from '@/components/ui/card'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Card, CardContent } from '@/components/ui/card'
+import {
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,6 +27,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
+import { useTable, type SortingState } from '@tanstack/react-table'
+import { SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead } from '@/components/data-table-helpers'
 import type { StaffMember, ReturnWaiver } from '@/types/database'
 
 // One item a staff member currently holds — an OUT line with a remaining
@@ -58,6 +63,92 @@ function lentItemStatus(item: LentItem): { label: string; className: string } {
   return { label: 'Not Due Yet', className: 'bg-emerald-100 text-emerald-800' }
 }
 
+// The three values the Status column already badges (see the TableCell
+// below) — Active/Deactivated is_active's own two states, with Lending
+// carved out of "active" for anyone currently holding stock. A staff
+// member is never in more than one of these at once, same as the Reports
+// page's own STOCK_STATUS_VALUES treats IN/LOW/OUT STOCK as one mutually
+// exclusive bucket per row rather than overlapping flags.
+const STAFF_STATUS_VALUES = ['Active', 'Lending', 'Deactivated'] as const
+const STAFF_STATUS_DOT: Record<string, string> = {
+  Active: 'bg-emerald-500',
+  Lending: 'bg-(--nwu-purple)',
+  Deactivated: 'bg-red-500',
+}
+
+// Sorting the Status column needs *some* order for its three values — same
+// convention as the Products page's PRODUCT_STATUS_RANK and the Dashboard's
+// PICKUP_STATUS_RANK.
+const STAFF_STATUS_RANK: Record<string, number> = {
+  Active: 0,
+  Lending: 1,
+  Deactivated: 2,
+}
+
+function staffStatusValue(s: { is_active: boolean }, lendingIds: Set<string>, id: string): string {
+  if (!s.is_active) return 'Deactivated'
+  return lendingIds.has(id) ? 'Lending' : 'Active'
+}
+
+// Same DropdownMenuCheckboxItem + SelectAllMenuItems pattern as every other
+// multi-select filter in the app (Reports' Category/Stock Status, the
+// Products page's own Status/Available).
+function SelectAllMenuItems({ onSelectAll, onUnselectAll }: { onSelectAll: () => void; onUnselectAll: () => void }) {
+  return (
+    <>
+      <DropdownMenuItem closeOnClick={false} onClick={onSelectAll}>Select all</DropdownMenuItem>
+      <DropdownMenuItem closeOnClick={false} onClick={onUnselectAll}>Unselect all</DropdownMenuItem>
+      <DropdownMenuSeparator />
+    </>
+  )
+}
+
+function staffStatusFilterLabel(selected: Set<string>): string {
+  if (selected.size === 0) return 'No statuses'
+  if (selected.size === STAFF_STATUS_VALUES.length) return 'All statuses'
+  if (selected.size === 1) return [...selected][0]
+  return 'Custom'
+}
+
+function StaffStatusFilter({
+  selected, onChange,
+}: {
+  selected: Set<string>
+  onChange: (next: Set<string>) => void
+}) {
+  function toggle(value: string, checked: boolean) {
+    const next = new Set(selected)
+    if (checked) next.add(value)
+    else next.delete(value)
+    onChange(next)
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant="outline" className="w-40 justify-between font-normal" />}>
+        <span className="truncate">{staffStatusFilterLabel(selected)}</span>
+        <ChevronDown className="size-3.5 text-muted-foreground" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-44">
+        <SelectAllMenuItems
+          onSelectAll={() => onChange(new Set(STAFF_STATUS_VALUES))}
+          onUnselectAll={() => onChange(new Set())}
+        />
+        {STAFF_STATUS_VALUES.map(value => (
+          <DropdownMenuCheckboxItem
+            key={value}
+            checked={selected.has(value)}
+            onCheckedChange={checked => toggle(value, checked)}
+          >
+            <span className={`size-2 rounded-full ${STAFF_STATUS_DOT[value]}`} />
+            {value}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 type FormData = {
   name: string; surname: string; email: string
   department: string; card_uid: string
@@ -70,11 +161,13 @@ export default function StaffPage() {
   const { isAdmin } = useRole()
   const [staff, setStaff] = useState<StaffMember[]>([])
   const [search, setSearch] = useState('')
-  // Active/Deactivated are shown as two separate lists rather than mixed
-  // together with a greyed-out row for the inactive ones — a deactivated
-  // staff member is a normal row (see the Status badge below for what
-  // distinguishes them), just filed under its own tab.
-  const [statusTab, setStatusTab] = useState<'active' | 'deactivated'>('active')
+  // Active/Deactivated/Lending — the same three values the Status column
+  // badges — as a multi-select rather than the Active/Deactivated-only tab
+  // pair this used to be: Lending used to only be visible as a badge
+  // within the Active tab, with no way to isolate just the people
+  // currently holding stock (or to hide them while still seeing everyone
+  // else who's Active).
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set(STAFF_STATUS_VALUES))
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState<StaffMember | null>(null)
@@ -99,6 +192,7 @@ export default function StaffPage() {
   const [resolving, setResolving] = useState<{ staffId: string; staffName: string; item: LentItem } | null>(null)
   const [resolveReason, setResolveReason] = useState('')
   const [resolveBusy, setResolveBusy] = useState(false)
+  const [sorting, setSorting] = useState<SortingState>([])
 
   async function load() {
     setLoading(true)
@@ -106,6 +200,10 @@ export default function StaffPage() {
     const snap = await getDocs(query(staffRef, orderBy('full_name')))
 
     let data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[]
+    // Selouna's own self-service record (created via My Profile, so she can
+    // be picked as a Stock Out borrower) isn't a staff member to manage
+    // here -- exclude it rather than showing it as a confusing extra row.
+    data = data.filter(st => !st.is_admin_account)
 
     const s = search.toLowerCase()
     if (s) {
@@ -423,7 +521,38 @@ export default function StaffPage() {
 
   const activeCount = staff.filter(s => s.is_active).length
   const deactivatedCount = staff.length - activeCount
-  const visibleStaff = staff.filter(s => statusTab === 'active' ? s.is_active : !s.is_active)
+  const visibleStaff = staff.filter(s =>
+    statusFilter.has(staffStatusValue(s, lendingStaffIds, s.id.toString())),
+  )
+
+  // Same shared columnHelper/SortableHead as Products, Reports, the Audit
+  // Log and the Dashboard's widgets — sorting only, no pagination here
+  // (this table already shows every filtered/searched row, same as
+  // Products). Defined inside the component, not at module scope like
+  // those pages' column lists, because the Status column's sort needs
+  // lendingStaffIds, which is only known once loadLendingStatus() has run.
+  const STAFF_COLUMNS = sortableColumnHelper.columns([
+    sortableColumnHelper.accessor('full_name', { id: 'full_name', header: 'Name', sortFn: 'alphanumeric' }),
+    sortableColumnHelper.accessor((s: any) => s.department ?? '', { id: 'department', header: 'Department', sortFn: 'alphanumeric' }),
+    sortableColumnHelper.accessor((s: any) => s.card_uid ?? '', { id: 'card_uid', header: 'Card UID', sortFn: 'alphanumeric' }),
+    sortableColumnHelper.accessor((s: any) => (s.uid ? 'Granted' : 'Not Granted'), { id: 'portal_access', header: 'Portal Access', sortFn: 'alphanumeric' }),
+    sortableColumnHelper.accessor((s: any) => staffStatusValue(s, lendingStaffIds, s.id.toString()), {
+      id: 'status',
+      header: 'Status',
+      sortFn: (a: any, b: any) =>
+        STAFF_STATUS_RANK[staffStatusValue(a.original, lendingStaffIds, a.original.id.toString())] -
+        STAFF_STATUS_RANK[staffStatusValue(b.original, lendingStaffIds, b.original.id.toString())],
+    }),
+  ])
+
+  const table = useTable({
+    features: SORTABLE_TABLE_FEATURES,
+    columns: STAFF_COLUMNS,
+    data: visibleStaff,
+    state: { sorting },
+    onSortingChange: setSorting,
+  })
+  const sortedStaff = table.getSortedRowModel().rows.map(r => r.original as StaffMember)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -435,26 +564,20 @@ export default function StaffPage() {
         <Button onClick={openAdd}><Plus className="size-4" /> Add Staff</Button>
       </div>
 
-      {/* Search + Active/Deactivated toggle */}
-      <div className="mb-4 flex items-center gap-4">
-        <div className="relative max-w-80 flex-1">
+      {/* Status multi-select filter + Search */}
+      <Card className="mb-4">
+        <CardContent className="flex flex-wrap items-end gap-4">
+        <div className="grid gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">Status</span>
+          <StaffStatusFilter selected={statusFilter} onChange={setStatusFilter} />
+        </div>
+        <div className="relative min-w-40 flex-1">
           <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input className="pl-8" placeholder="Search name, department…"
             value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <Tabs value={statusTab} onValueChange={v => setStatusTab(v as typeof statusTab)}>
-          <TabsList>
-            <TabsTrigger value="active">
-              Active
-              <Badge className="bg-emerald-100 text-emerald-800">{activeCount}</Badge>
-            </TabsTrigger>
-            <TabsTrigger value="deactivated">
-              Deactivated
-              <Badge className="bg-red-100 text-red-800">{deactivatedCount}</Badge>
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </div>
+        </CardContent>
+      </Card>
 
       {/* Table */}
       <Card className="min-h-0 flex-1 py-0">
@@ -463,18 +586,24 @@ export default function StaffPage() {
           <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
               <TableHead className="w-8"></TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Department</TableHead>
-              <TableHead>Card UID</TableHead>
-              <TableHead>Portal Access</TableHead>
-              <TableHead>Status</TableHead>
+              <SortableHead column={table.getColumn('full_name')!}>Name</SortableHead>
+              <SortableHead column={table.getColumn('department')!}>Department</SortableHead>
+              <SortableHead column={table.getColumn('card_uid')!}>Card UID</SortableHead>
+              <SortableHead column={table.getColumn('portal_access')!}>Portal Access</SortableHead>
+              <SortableHead column={table.getColumn('status')!}>Status</SortableHead>
               <TableHead></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
-            {!loading && visibleStaff.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">No {statusTab} staff found</TableCell></TableRow>}
-            {visibleStaff.map(s => {
+            {!loading && visibleStaff.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                  {statusFilter.size === 0 ? 'No statuses selected' : 'No staff match the selected filters'}
+                </TableCell>
+              </TableRow>
+            )}
+            {sortedStaff.map(s => {
             const lent = lentByStaff[s.id.toString()] ?? []
             const isExpanded = isStaffExpanded(s.id.toString())
             return (
@@ -487,22 +616,40 @@ export default function StaffPage() {
                       aria-expanded={isExpanded}
                       aria-label={isExpanded ? `Hide items held by ${s.full_name}` : `Show items held by ${s.full_name}`}
                       onClick={() => toggleStaff(s.id.toString())}
+                      className="text-xs text-muted-foreground"
                     >
-                      {isExpanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                      {isExpanded ? '▲' : '▼'}
                     </Button>
                   ) : (
                     <span className="sr-only">No items held</span>
                   )}
                 </TableCell>
-                <TableCell>
-                  <div className="font-medium">{s.full_name}</div>
-                  {s.email && <div className="text-xs text-muted-foreground">{s.email}</div>}
+                <TableCell className="max-w-xs whitespace-normal">
+                  <div className="break-words font-medium">{s.full_name}</div>
+                  {/* break-all, not break-words -- an email has no spaces
+                      either, and break-words' min-content exclusion (see the
+                      barcode/card-UID comments) means it can't be trusted to
+                      force a break at all. */}
+                  {s.email && <div className="text-xs break-all text-muted-foreground">{s.email}</div>}
                 </TableCell>
-                <TableCell className="text-muted-foreground">{s.department ?? '—'}</TableCell>
-                <TableCell>
+                <TableCell className="max-w-xs whitespace-normal break-words text-muted-foreground">{s.department ?? '—'}</TableCell>
+                <TableCell className="max-w-xs whitespace-normal">
+                  {/* Badge is a fixed-height (h-5), non-wrapping,
+                      overflow-hidden pill by default (see
+                      components/ui/badge.tsx) -- overridden here (h-auto,
+                      overflow-visible, items-start) so a long UID can wrap
+                      onto a second line and the pill grows taller instead of
+                      clipping it. break-all, not break-words, on the UID
+                      itself -- same reason as the barcode cell on the
+                      Products page: overflow-wrap:break-word is excluded
+                      from min-content sizing by spec, so inside this
+                      inline-flex pill it would never actually shrink/wrap;
+                      word-break:break-all does participate and reliably
+                      forces the break. */}
                   {s.card_uid
-                    ? <Badge className="bg-emerald-100 font-mono text-emerald-800">
-                        <CreditCard className="size-3" /> {s.card_uid}
+                    ? <Badge className="h-auto max-w-full items-start overflow-visible whitespace-normal bg-emerald-100 font-mono text-emerald-800">
+                        <CreditCard className="mt-0.5 size-3 shrink-0" />
+                        <span className="min-w-0 break-all">{s.card_uid}</span>
                       </Badge>
                     : <Badge className="bg-muted text-muted-foreground">Not Linked</Badge>}
                 </TableCell>
@@ -512,11 +659,14 @@ export default function StaffPage() {
                     : <Badge className="bg-muted text-muted-foreground">Not Granted</Badge>}
                 </TableCell>
                 <TableCell>
-                  {!s.is_active
-                    ? <Badge className="bg-red-100 text-red-800">Deactivated</Badge>
-                    : lendingStaffIds.has(s.id.toString())
-                      ? <Badge className="bg-accent text-accent-foreground">Lending</Badge>
-                      : <Badge className="bg-emerald-100 text-emerald-800">Active</Badge>}
+                  {(() => {
+                    const status = staffStatusValue(s, lendingStaffIds, s.id.toString())
+                    return status === 'Deactivated'
+                      ? <Badge className="bg-red-100 text-red-800">Deactivated</Badge>
+                      : status === 'Lending'
+                        ? <Badge className="bg-accent text-accent-foreground">Lending</Badge>
+                        : <Badge className="bg-emerald-100 text-emerald-800">Active</Badge>
+                  })()}
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-1">
@@ -566,7 +716,7 @@ export default function StaffPage() {
                             const st = lentItemStatus(item)
                             return (
                               <TableRow key={item.key} className="hover:bg-transparent">
-                                <TableCell className="font-medium">{item.product_name}</TableCell>
+                                <TableCell className="max-w-xs font-medium whitespace-normal break-words">{item.product_name}</TableCell>
                                 <TableCell className="font-semibold">{item.qty}</TableCell>
                                 <TableCell className="text-muted-foreground">
                                   {item.waived ? '—' : formatDateOnly(item.expected_date)}

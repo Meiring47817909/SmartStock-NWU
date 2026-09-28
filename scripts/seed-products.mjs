@@ -155,6 +155,10 @@ async function upsertProduct(spec, categoryIdByName) {
 
   const payload = {
     category_id: categoryIdByName[spec.category] ?? null,
+    // Denormalized, same as the app's own handleSave (products/page.tsx) —
+    // the Products table reads p.category_name directly rather than
+    // joining against category_id at render time.
+    category_name: spec.category ?? null,
     name: spec.name,
     description: spec.description,
     barcodes: [spec.barcode],

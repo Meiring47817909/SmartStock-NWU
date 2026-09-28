@@ -455,9 +455,9 @@ export default function StockOutPage() {
               <div className="flex size-10 items-center justify-center rounded-full bg-emerald-100">
                 <CheckCircle className="size-5 text-emerald-800" />
               </div>
-              <div>
-                <div className="font-semibold">{staff.full_name}</div>
-                <div className="text-xs text-muted-foreground">{staff.department ?? 'No department'}</div>
+              <div className="min-w-0">
+                <div className="break-words font-semibold">{staff.full_name}</div>
+                <div className="text-xs break-words text-muted-foreground">{staff.department ?? 'No department'}</div>
               </div>
               {manualOverride && (
                 <Badge className="ml-auto bg-amber-100 text-amber-800">Manual selection</Badge>
@@ -522,8 +522,8 @@ export default function StockOutPage() {
                   <TableBody>
                     {cart.map(item => (
                       <TableRow key={item.product.id}>
-                        <TableCell className="font-medium">{item.product.name}</TableCell>
-                        <TableCell className="font-mono text-xs text-muted-foreground">{primaryBarcode(item.product)}</TableCell>
+                        <TableCell className="max-w-xs font-medium whitespace-normal break-words">{item.product.name}</TableCell>
+                        <TableCell className="max-w-xs font-mono text-xs whitespace-normal break-all text-muted-foreground">{primaryBarcode(item.product)}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1.5">
                             <Button variant="ghost" size="icon-sm"
@@ -575,7 +575,7 @@ export default function StockOutPage() {
               <div className="text-xs text-muted-foreground">
                 Issuing to {manualOverride && <span className="text-amber-600">(manual selection — will be flagged)</span>}
               </div>
-              <div className="font-semibold">{staff.full_name} <span className="font-normal text-muted-foreground">({staff.department})</span></div>
+              <div className="break-words font-semibold">{staff.full_name} <span className="font-normal text-muted-foreground">({staff.department})</span></div>
             </div>
             <div className="mb-4 max-h-96 overflow-y-auto">
             <Table>
@@ -591,7 +591,7 @@ export default function StockOutPage() {
                   const insufficient = item.product.quantity_on_hand < item.quantity
                   return (
                     <TableRow key={item.product.id} className={insufficient ? 'text-red-600' : ''}>
-                      <TableCell>{item.product.name}</TableCell>
+                      <TableCell className="max-w-xs whitespace-normal break-words">{item.product.name}</TableCell>
                       <TableCell className="font-semibold">{item.quantity}</TableCell>
                       <TableCell className={cn('font-semibold', insufficient ? 'text-red-600' : 'text-emerald-600')}>
                         {item.product.quantity_on_hand}
@@ -720,11 +720,11 @@ export default function StockOutPage() {
             {staffList.map(s => (
               <button key={s.id} onClick={() => selectStaffManually(s)}
                 className="block w-full border-b px-6 py-3 text-left hover:bg-muted">
-                <div className="font-medium text-foreground">
+                <div className="font-medium text-foreground break-words">
                   {s.full_name}
-                  {s.email && <span className="font-normal text-muted-foreground"> - {s.email}</span>}
+                  {s.email && <span className="font-normal text-muted-foreground break-all"> - {s.email}</span>}
                 </div>
-                <div className="text-xs text-muted-foreground">{s.department ?? 'No department'}</div>
+                <div className="text-xs break-words text-muted-foreground">{s.department ?? 'No department'}</div>
               </button>
             ))}
           </div>

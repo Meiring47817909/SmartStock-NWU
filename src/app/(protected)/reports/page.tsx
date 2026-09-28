@@ -18,7 +18,7 @@ import {
 } from '@/components/data-table-helpers'
 import { ChevronDown, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -126,7 +126,8 @@ function DateRangeFilter({
   toLabel?: string
 }) {
   return (
-    <div className="mb-4 flex flex-wrap items-end gap-3">
+    <Card className="mb-4">
+      <CardContent className="flex flex-wrap items-end gap-3">
       <div className="grid gap-1.5">
         <label htmlFor={`${idPrefix}-from-date`} className="text-xs font-medium text-muted-foreground">
           {fromLabel}
@@ -145,7 +146,8 @@ function DateRangeFilter({
         <Button variant="ghost" onClick={() => { onFromChange(''); onToChange('') }}>Clear dates</Button>
       )}
       {children}
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -293,9 +295,20 @@ export default function ReportsPage() {
       </div>
 
       <Tabs value={tab} onValueChange={v => setTab(v as ReportTab)} className="min-h-0 flex-1">
-        <TabsList variant="line" className="mb-6 w-full justify-start overflow-x-auto overflow-y-hidden border-b">
+        {/* Same language-toggle pattern as the CAPS Assessment Generator's
+            test setup page (SetupMode.tsx's English/Afrikaans switch): a
+            bordered light-grey track holding tightly-packed buttons, the
+            active one a soft tinted pill (there: blue; here: NWU purple)
+            rather than a stark white card. */}
+        <TabsList className="mb-6 flex w-full !h-14 gap-0 overflow-hidden rounded-lg border border-(--nwu-purple)/30 bg-border p-1.5">
           {TABS.map(t => (
-            <TabsTrigger key={t.id} value={t.id} className="whitespace-nowrap">{t.label}</TabsTrigger>
+            <TabsTrigger
+              key={t.id}
+              value={t.id}
+              className="!h-11 flex-1 cursor-pointer self-center rounded-md px-6 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+            >
+              {t.label}
+            </TabsTrigger>
           ))}
         </TabsList>
 
@@ -438,9 +451,16 @@ function StockLevelsReport() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <CategoryFilter selected={catFilter} onChange={setCatFilter} cats={cats} />
-        <StockStatusFilter selected={statusFilter} onChange={setStatusFilter} />
+      <Card className="mb-4">
+        <CardContent className="flex flex-wrap items-end gap-3">
+        <div className="grid gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">Categories</span>
+          <CategoryFilter selected={catFilter} onChange={setCatFilter} cats={cats} />
+        </div>
+        <div className="grid gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">Status</span>
+          <StockStatusFilter selected={statusFilter} onChange={setStatusFilter} />
+        </div>
         <span className="text-sm text-muted-foreground">{sorted.length} products · {totalUnits} total units</span>
         <SearchBox value={search} onChange={setSearch} placeholder="Search name, category…" className="flex-1" />
         <ExportCsvButton
@@ -454,7 +474,8 @@ function StockLevelsReport() {
             { header: 'Status', value: (p: any) => p.status },
           ]}
         />
-      </div>
+        </CardContent>
+      </Card>
       <Card className="min-h-0 flex-1 py-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
@@ -479,8 +500,8 @@ function StockLevelsReport() {
             )}
             {pageRows.map((p: any) => (
               <TableRow key={p.id}>
-                <TableCell className="font-medium">{p.name}</TableCell>
-                <TableCell className="text-muted-foreground">{p.category_name ?? '—'}</TableCell>
+                <TableCell className="max-w-xs font-medium whitespace-normal break-words">{p.name}</TableCell>
+                <TableCell className="max-w-xs whitespace-normal break-words text-muted-foreground">{p.category_name ?? '—'}</TableCell>
                 <TableCell className="font-semibold">{p.qty}</TableCell>
                 <TableCell className="text-muted-foreground">{p.threshold}</TableCell>
                 <TableCell><Badge className={STATUS_BADGE_CLASS[p.status]}>{p.status}</Badge></TableCell>
@@ -551,7 +572,8 @@ function LowStockReport() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <Card className="mb-4">
+        <CardContent className="flex flex-wrap items-center gap-3">
         {!loading && (
           <div className={`text-sm font-semibold ${data.length > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
             {data.length === 0 ? '✓ All stock levels are healthy' : `${data.length} item${data.length !== 1 ? 's' : ''} at or below reorder threshold`}
@@ -569,7 +591,8 @@ function LowStockReport() {
             { header: 'Shortage', value: (p: any) => p.quantity_on_hand - p.reorder_threshold },
           ]}
         />
-      </div>
+        </CardContent>
+      </Card>
       <Card className="min-h-0 flex-1 py-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
@@ -594,8 +617,8 @@ function LowStockReport() {
               const threshold = p.reorder_threshold
               return (
                 <TableRow key={p.id}>
-                  <TableCell className="font-medium">{p.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{p.category_name ?? '—'}</TableCell>
+                  <TableCell className="max-w-xs font-medium whitespace-normal break-words">{p.name}</TableCell>
+                  <TableCell className="max-w-xs whitespace-normal break-words text-muted-foreground">{p.category_name ?? '—'}</TableCell>
                   <TableCell className={`font-semibold ${qty === 0 ? 'text-red-600' : 'text-amber-600'}`}>{qty}</TableCell>
                   <TableCell>{threshold}</TableCell>
                   <TableCell className="font-semibold text-red-600">-{threshold - qty}</TableCell>
@@ -814,11 +837,11 @@ function IssuedPerStaffReport() {
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-card">
           <TableRow>
+            <TableHead className="w-8"></TableHead>
             <SortableHead column={table.getColumn('full_name')!}>Staff Member</SortableHead>
             <SortableHead column={table.getColumn('department')!}>Department</SortableHead>
             <SortableHead column={table.getColumn('txn_count')!}>Total OUT Transactions</SortableHead>
             <SortableHead column={table.getColumn('totalQty')!}>Total Items Issued</SortableHead>
-            <TableHead></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -833,11 +856,11 @@ function IssuedPerStaffReport() {
             return (
               <Fragment key={s.id}>
                 <TableRow className="cursor-pointer" onClick={() => toggleRow(s.id)}>
-                  <TableCell className="font-medium">{s.full_name}</TableCell>
-                  <TableCell className="text-muted-foreground">{s.department ?? '—'}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{rowExpanded(s.id) ? '▲' : '▼'}</TableCell>
+                  <TableCell className="max-w-xs font-medium whitespace-normal break-words">{s.full_name}</TableCell>
+                  <TableCell className="max-w-xs whitespace-normal break-words text-muted-foreground">{s.department ?? '—'}</TableCell>
                   <TableCell className="font-semibold">{txns.length}</TableCell>
                   <TableCell className="font-semibold">{s.totalQty}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{rowExpanded(s.id) ? '▲' : '▼'}</TableCell>
                 </TableRow>
                 {rowExpanded(s.id) && (
                   txns.flatMap((t: any) => {
@@ -858,13 +881,12 @@ function IssuedPerStaffReport() {
                     const rows = tLines.length > 0 ? tLines : [null]
                     return rows.map((l: any, idx: number) => (
                       <TableRow key={`${t.id}_${idx}`} className="bg-muted/50">
-                        <TableCell className="pl-8 font-mono text-xs text-muted-foreground">
-                          {t.reference_no}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
+                        <TableCell className="pl-8 text-xs text-muted-foreground"></TableCell>
+                        <TableCell className="max-w-xs text-xs whitespace-normal break-words text-muted-foreground">
+                          <div className="font-mono text-xs break-all">{t.reference_no}</div>
                           Issued at {formatDate(t.created_at)}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
+                        <TableCell className="max-w-xs text-xs whitespace-normal break-words text-muted-foreground">
                           {l ? (l.product_name ?? '?') : 'No items recorded'}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
@@ -1199,7 +1221,10 @@ function ReturnsReport() {
         onFromChange={setFromDate}
         onToChange={setToDate}
       >
-        <StatusFilter selected={statusFilter} onChange={setStatusFilter} />
+        <div className="grid gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">Status</span>
+          <StatusFilter selected={statusFilter} onChange={setStatusFilter} />
+        </div>
         {/* Only worth showing once a range is set — with no dates the rows are
             all in view anyway — and only when there is at least one such row to
             decide about. */}
@@ -1242,6 +1267,7 @@ function ReturnsReport() {
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-card">
           <TableRow>
+            <TableHead className="w-8"></TableHead>
             <SortableHead column={table.getColumn('reference_no')!}>Reference</SortableHead>
             <SortableHead column={table.getColumn('staff_name')!}>Staff</SortableHead>
             <TableHead>Items Returned</TableHead>
@@ -1249,7 +1275,6 @@ function ReturnsReport() {
             <SortableHead column={table.getColumn('status')!}>Status</SortableHead>
             <SortableHead column={table.getColumn('expected_date')!}>Expected</SortableHead>
             <SortableHead column={table.getColumn('created_at')!}>Date Returned</SortableHead>
-            <TableHead></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -1272,8 +1297,11 @@ function ReturnsReport() {
                   className={t.partial ? 'cursor-pointer' : ''}
                   onClick={() => t.partial && toggleRow(t.id)}
                 >
-                  <TableCell className="font-mono text-xs">{t.reference_no}</TableCell>
-                  <TableCell className="font-medium">{t.staff_name ?? '—'}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {t.partial && (isExpanded ? '▲' : '▼')}
+                  </TableCell>
+                  <TableCell className="max-w-xs font-mono text-xs whitespace-normal break-all">{t.reference_no}</TableCell>
+                  <TableCell className="max-w-xs font-medium whitespace-normal break-words">{t.staff_name ?? '—'}</TableCell>
                   {/* TableCell defaults to whitespace-nowrap, which is fine for
                       every other column here but not this one: a return with
                       several product lines comma-joins into a single unbroken
@@ -1287,15 +1315,12 @@ function ReturnsReport() {
                   <TableCell className="max-w-xs text-sm break-words whitespace-normal">
                     {tLines.map((l: any) => `${l.product_name ?? '?'} ×${l.quantity}`).join(', ')}
                   </TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">
+                  <TableCell className="max-w-xs font-mono text-xs whitespace-normal break-all text-muted-foreground">
                     {t.linked_txn_ref ?? '—'}
                   </TableCell>
                   <TableCell>{status && <Badge className={`${status.className} uppercase`}>{status.label}</Badge>}</TableCell>
                   <TableCell className="text-muted-foreground">{formatDateOnly(t.expected_date)}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{formatDate(t.created_at)}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {t.partial && (isExpanded ? '▲' : '▼')}
-                  </TableCell>
                 </TableRow>
                 {isExpanded && t.partial && (
                   <TableRow className="bg-muted/50">

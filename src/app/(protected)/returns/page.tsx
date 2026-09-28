@@ -436,10 +436,10 @@ export default function ReturnsPage() {
                       const status = lineStatus(l)
                       return (
                         <TableRow key={l.line_id}>
-                          <TableCell>
-                            <div className="font-medium">{l.product_name}</div>
+                          <TableCell className="max-w-xs whitespace-normal">
+                            <div className="break-words font-medium">{l.product_name}</div>
                           </TableCell>
-                          <TableCell className="font-mono text-xs text-muted-foreground">{l.txn_ref}</TableCell>
+                          <TableCell className="max-w-xs font-mono text-xs whitespace-normal break-all text-muted-foreground">{l.txn_ref}</TableCell>
                           <TableCell className="text-muted-foreground">{l.issued_qty}</TableCell>
                           <TableCell className="font-semibold">{l.returnable}</TableCell>
                           <TableCell className="text-muted-foreground">{formatDateOnly(l.expected_date)}</TableCell>
@@ -506,11 +506,11 @@ export default function ReturnsPage() {
             {staffList.map(s => (
               <button key={s.id} onClick={() => { setShowStaffSearch(false); loadOpenItems(s, true) }}
                 className="block w-full border-b px-6 py-3 text-left hover:bg-muted">
-                <div className="font-medium text-foreground">
+                <div className="font-medium text-foreground break-words">
                   {s.full_name}
-                  {s.email && <span className="font-normal text-muted-foreground"> - {s.email}</span>}
+                  {s.email && <span className="font-normal text-muted-foreground break-all"> - {s.email}</span>}
                 </div>
-                <div className="text-xs text-muted-foreground">{s.department ?? 'No department'}</div>
+                <div className="text-xs break-words text-muted-foreground">{s.department ?? 'No department'}</div>
               </button>
             ))}
           </div>

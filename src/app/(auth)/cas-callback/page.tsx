@@ -54,7 +54,7 @@ function CasCallbackInner() {
 
 export default function CasCallbackPage() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
+    <div className="flex min-h-screen items-center justify-center" style={{ background: 'radial-gradient(circle, #E5DCF0 0%, #D1C0E2 60%, #BBA4D1 100%)' }}>
       <Suspense fallback={<p className="text-sm text-muted-foreground">Validating NWU-CAS login…</p>}>
         <CasCallbackInner />
       </Suspense>

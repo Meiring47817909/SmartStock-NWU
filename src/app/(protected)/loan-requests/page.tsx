@@ -342,7 +342,7 @@ export default function LoanRequestsPage() {
                 <TableBody>
                   {draft.lines.map((l) => (
                     <TableRow key={l.id}>
-                      <TableCell className="font-medium">{l.product_name}</TableCell>
+                      <TableCell className="max-w-xs font-medium whitespace-normal break-words">{l.product_name}</TableCell>
                       <TableCell className="text-muted-foreground">{l.requested_quantity}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5">
@@ -436,7 +436,7 @@ export default function LoanRequestsPage() {
                 <TableBody>
                   {lines.map((l) => (
                     <TableRow key={l.id}>
-                      <TableCell className="font-medium">{l.product_name}</TableCell>
+                      <TableCell className="max-w-xs font-medium whitespace-normal break-words">{l.product_name}</TableCell>
                       <TableCell className="text-muted-foreground">{l.requested_quantity}</TableCell>
                       <TableCell>
                         {l.offered_quantity > 0 ? (
@@ -481,10 +481,11 @@ export default function LoanRequestsPage() {
       return (
         <Fragment key={r.id}>
           <TableRow className="cursor-pointer" onClick={() => toggleExpand(r)}>
-            <TableCell className="font-medium">
+            <TableCell className="text-xs text-muted-foreground">{isExpanded(r.id) ? '▲' : '▼'}</TableCell>
+            <TableCell className="max-w-xs font-medium whitespace-normal break-words">
               {r.staff_name}
               {r.reference_no && (
-                <div className="font-mono text-xs font-normal text-muted-foreground">
+                <div className="font-mono text-xs font-normal break-all text-muted-foreground">
                   {r.reference_no}
                 </div>
               )}
@@ -494,7 +495,6 @@ export default function LoanRequestsPage() {
               <Badge className={`${STATUS_BADGE_CLASS[r.status]} uppercase`}>{r.status.replace('_', ' ')}</Badge>
             </TableCell>
             <TableCell className="text-muted-foreground">{expiry ? formatDateOnly(expiry) : '—'}</TableCell>
-            <TableCell className="text-xs text-muted-foreground">{isExpanded(r.id) ? '▲' : '▼'}</TableCell>
           </TableRow>
           {isExpanded(r.id) && <EditableRow r={r} />}
         </Fragment>
@@ -510,12 +510,25 @@ export default function LoanRequestsPage() {
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="min-h-0 flex-1">
-        <TabsList variant="line" className="mb-6 w-full justify-start overflow-x-auto overflow-y-hidden border-b">
-          <TabsTrigger value="pending">
+        {/* Same segmented-control tab bar as Reports/Dashboard/My
+            Requests: a bordered light-grey track, each tab flex-1 across
+            the full width, the active one a white pill with NWU-purple
+            text. Forced !h-14/!h-11 heights (rather than h-auto) because
+            TabsTrigger's own base class hardcodes h-[calc(100%-1px)],
+            which otherwise wins and stretches every tab to the track's
+            full height with no breathing room top/bottom. */}
+        <TabsList className="mb-6 flex w-full !h-14 gap-0 overflow-hidden rounded-lg border border-(--nwu-purple)/30 bg-border p-1.5">
+          <TabsTrigger
+            value="pending"
+            className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+          >
             Needs Review
             {pending.length > 0 && <Badge className="bg-amber-100 text-amber-800">{pending.length}</Badge>}
           </TabsTrigger>
-          <TabsTrigger value="countered">
+          <TabsTrigger
+            value="countered"
+            className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+          >
             Sent Counters
             {countered.length > 0 && <Badge className="bg-sky-100 text-sky-800">{countered.length}</Badge>}
           </TabsTrigger>
@@ -527,11 +540,11 @@ export default function LoanRequestsPage() {
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
+                  <TableHead className="w-8"></TableHead>
                   <TableHead>Staff</TableHead>
                   <TableHead>Items</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Expires</TableHead>
-                  <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>{requestRows(pending)}</TableBody>
@@ -546,11 +559,11 @@ export default function LoanRequestsPage() {
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
+                  <TableHead className="w-8"></TableHead>
                   <TableHead>Staff</TableHead>
                   <TableHead>Items</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Expires</TableHead>
-                  <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>{requestRows(countered)}</TableBody>

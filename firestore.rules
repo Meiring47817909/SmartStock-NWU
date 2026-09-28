@@ -39,7 +39,10 @@ service cloud.firestore {
     }
 
     match /products/{productId} {
-      allow read: if isSignedIn(); // BICS operators AND portal borrowers (Browse page)
+      // Public read, no auth required — the lending portal's Browse page
+      // (lend/page.tsx) is open to guests who haven't signed in yet, not
+      // just BICS operators and portal borrowers. Every write stays gated.
+      allow read: if true;
       allow create, delete: if hasBicsRole(['admin']);
       // The previous narrow staff-role clause (quantity_on_hand + updated_at
       // only, for Stock Out's decrement) is gone: Stock Out is admin-only
@@ -134,6 +137,17 @@ service cloud.firestore {
       allow create: if hasBicsRole(['admin']) || isOwnRequestOwner(request.resource.data.request_id);
       allow update: if hasBicsRole(['admin']); // offered_quantity edits — Selouna only
       allow delete: if false;
+    }
+
+    // ---- App configuration ----
+
+    // Admin-only app settings -- currently just the notification-email
+    // on/off toggles (see NotificationSettings / settings/notifications in
+    // (protected)/settings/notifications). Same admin-only read+write
+    // posture as categories: nobody but an admin needs to read or change
+    // these, and there's no portal-facing use for them.
+    match /settings/{settingId} {
+      allow read, write: if hasBicsRole(['admin']);
     }
 
     match /{document=**} {

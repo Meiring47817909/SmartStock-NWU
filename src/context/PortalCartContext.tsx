@@ -1,7 +1,9 @@
 'use client'
 
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import type { CartItem, Product } from '@/types/database'
+
+const STORAGE_KEY = 'portal-cart'
 
 interface PortalCartContextValue {
   cart: CartItem[]
@@ -19,12 +21,39 @@ const PortalCartContext = createContext<PortalCartContextValue>({
   clearCart: () => {},
 })
 
-// Plain in-memory state, not persisted to localStorage — the cart only
-// needs to survive navigation between Browse/Cart within a portal session,
-// per LENDING_PORTAL_SPEC.md §5.2 (Firestore's own persistent cache handles
-// offline/reload elsewhere in this app; this cart deliberately doesn't).
+// Persisted to sessionStorage (tab lifetime only, not localStorage) so a
+// guest's selections survive the forced login detour: add to cart → Submit
+// Request → bounced to /login → sign in → sent back to the cart with the
+// same items still in it, not an empty one. Hydrated after mount rather
+// than in the initial useState to avoid an SSR/client markup mismatch.
 export function PortalCartProvider({ children }: { children: React.ReactNode }) {
   const [cart, setCart] = useState<CartItem[]>([])
+  const [isHydrated, setIsHydrated] = useState(false)
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY)
+      // One-time read of an external system (sessionStorage) on mount, not
+      // state React could derive during render — sessionStorage isn't
+      // available during SSR, so this can't be a lazy useState initializer
+      // without desyncing the server-rendered markup from the client's
+      // first real render.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (raw) setCart(JSON.parse(raw))
+    } catch {
+      // corrupt or inaccessible storage — start with an empty cart
+    }
+    setIsHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    if (!isHydrated) return
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(cart))
+    } catch {
+      // storage unavailable/full — cart still works for this page's lifetime
+    }
+  }, [cart, isHydrated])
 
   function addToCart(product: Product, quantity: number) {
     setCart((prev) => {

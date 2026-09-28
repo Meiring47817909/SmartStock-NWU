@@ -21,6 +21,7 @@ interface RoleContextValue {
   canViewReports: boolean        // admin only
   canViewAuditLog: boolean       // admin only
   canManageLoanRequests: boolean // admin only — Selouna's loan-requests queue
+  canManageSettings: boolean     // admin only — /settings/notifications
 }
 
 // Default is the fully-locked-down shape — a consumer rendered outside a
@@ -34,6 +35,7 @@ const RoleContext = createContext<RoleContextValue>({
   canViewReports: false,
   canViewAuditLog: false,
   canManageLoanRequests: false,
+  canManageSettings: false,
 })
 
 export function RoleProvider({ role, children }: { role: Role; children: React.ReactNode }) {
@@ -47,6 +49,7 @@ export function RoleProvider({ role, children }: { role: Role; children: React.R
     canViewReports: isAdmin,
     canViewAuditLog: isAdmin,
     canManageLoanRequests: isAdmin,
+    canManageSettings: isAdmin,
   }
   return <RoleContext.Provider value={value}>{children}</RoleContext.Provider>
 }

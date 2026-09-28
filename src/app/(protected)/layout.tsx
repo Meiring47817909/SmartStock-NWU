@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import Sidebar from '@/components/layout/Sidebar'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { RoleProvider } from '@/context/RoleContext'
 import { useAuth } from '@/context/AuthContext'
+import { consumeLoggingOut } from '@/lib/authTransition'
 import type { Profile, Role } from '@/types/database'
 
 // Every route under (protected) is BICS, and BICS is admin-only — the
@@ -16,12 +17,40 @@ import type { Profile, Role } from '@/types/database'
 export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const { user, profile, loading } = useAuth()
   const router = useRouter()
+  const pathname = usePathname()
 
   const role = (profile?.role ?? 'staff') as Role
+
+  // Route-specific NWU-purple-tinted canvas gradients (per the design
+  // refresh) -- everything not listed here keeps the plain --nwu-bg
+  // background main already had.
+  const PAGE_BACKGROUNDS: Record<string, string> = {
+    '/dashboard': 'linear-gradient(180deg, #E2DBEC 0%, #D4C8E2 100%)',
+    '/loan-requests': 'linear-gradient(180deg, #E4DCF0 0%, #D5CCE4 100%)',
+    '/staff': 'linear-gradient(180deg, #E4DCF0 0%, #D5CCE4 100%)',
+    '/products': 'linear-gradient(135deg, #E6DFEE 0%, #DCD3E7 50%, #D2C7DF 100%)',
+    // Same inventory-operations family as Products -- these four pages are
+    // all transaction/list screens over the same stock data.
+    '/categories': 'linear-gradient(135deg, #E6DFEE 0%, #DCD3E7 50%, #D2C7DF 100%)',
+    '/returns': 'linear-gradient(135deg, #E6DFEE 0%, #DCD3E7 50%, #D2C7DF 100%)',
+    '/stock-in': 'linear-gradient(135deg, #E6DFEE 0%, #DCD3E7 50%, #D2C7DF 100%)',
+    '/stock-out': 'linear-gradient(135deg, #E6DFEE 0%, #DCD3E7 50%, #D2C7DF 100%)',
+    // Same family as Dashboard -- another overview/monitoring screen.
+    '/audit-log': 'linear-gradient(180deg, #E2DBEC 0%, #D4C8E2 100%)',
+    // Same family as Loan Requests/Staff -- analytics and settings screens.
+    '/reports': 'linear-gradient(180deg, #E4DCF0 0%, #D5CCE4 100%)',
+    '/profile': 'linear-gradient(180deg, #E4DCF0 0%, #D5CCE4 100%)',
+    '/settings/notifications': 'linear-gradient(180deg, #E4DCF0 0%, #D5CCE4 100%)',
+  }
+  const pageBackground = PAGE_BACKGROUNDS[pathname]
 
   useEffect(() => {
     if (!loading) {
       if (!user) {
+        // An intentional sign-out (Sidebar's handleLogout) already knows
+        // where it wants to land — don't fight it by also redirecting to
+        // /login for the same user:null transition. See authTransition.ts.
+        if (consumeLoggingOut()) return
         router.push('/login')
         return
       }
@@ -47,10 +76,20 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
 
   return (
     <RoleProvider role={role}>
-      <SidebarProvider style={{ minHeight: '100vh', height: '100vh', overflow: 'hidden' } as React.CSSProperties}>
+      <SidebarProvider
+        style={{
+          minHeight: '100vh',
+          height: '100vh',
+          overflow: 'hidden',
+          // Wider than the shadcn default (3rem) — see Sidebar.tsx's
+          // SIDEBAR_ICON_BUTTON_CLASS/SIDEBAR_ICON_BADGE_CLASS, which size
+          // the collapsed nav icons and their badges to fit this rail.
+          '--sidebar-width-icon': '6.5rem',
+        } as React.CSSProperties}
+      >
         <Sidebar profile={profile as Profile | null} />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '1.5rem 2rem' }}>
+          <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '1.5rem 2rem', background: pageBackground }}>
             {children}
           </main>
         </div>

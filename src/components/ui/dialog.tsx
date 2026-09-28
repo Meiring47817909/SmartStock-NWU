@@ -60,10 +60,17 @@ function DialogContent({
           (plain fade instead of a scale/zoom entrance animation) means any
           such library works normally inside a dialog. */}
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        {/* min-w-0: this popup is a flex ITEM of the centering wrapper above,
+            and a flex item's automatic minimum size defaults to its
+            content's own min/max-content -- which, per the CSS sizing spec,
+            wins over max-width when the two conflict. Without min-w-0, deeply
+            nested unbounded content (a long barcode with no spaces, say)
+            silently overrides sm:max-w-[...] on every dialog and grows the
+            popup past its intended width instead of scrolling internally. */}
         <DialogPrimitive.Popup
           data-slot="dialog-content"
           className={cn(
-            "relative grid w-full max-w-[calc(100%-2rem)] gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+            "relative grid w-full min-w-0 max-w-[calc(100%-2rem)] gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
             className
           )}
           {...props}

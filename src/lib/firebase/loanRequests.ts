@@ -14,7 +14,11 @@ const MAX_LOAN_DAYS = 30
 // special-casing the comparison itself. OPEN_ENDED_TO also matches Stock
 // Out's own sentinel for an open-ended (no Lend To) walk-in issue.
 export const OPEN_ENDED_TO = '9999-12-31'
-const ALL_TIME_FROM = '0001-01-01'
+// Exported for the Products page's delete guard (getProductDeleteBlockers
+// in products.ts) — it needs the same "any time, ever" sentinel to ask
+// getReservationHolders for every active reservation on a product,
+// regardless of date window, before allowing a delete.
+export const ALL_TIME_FROM = '0001-01-01'
 
 // A product saved before the Lending Interval field existed has no
 // lending_interval at all — treated as this, which preserves the flat

@@ -25,6 +25,10 @@
 //   - Reports: IN/OUT/RETURN/ADJUST transactions across several staff and
 //     products, a full return, a partial return, and a portal pickup
 //     that's actually linked to its loan request (linked_request_id).
+//   - Product images: every seeded product gets 1-3 generated placeholder
+//     images uploaded to the Storage emulator (counts cycle 1/2/3 across
+//     products), so Browse and the Products page image gallery both have
+//     something to show instead of the "no photo" fallback everywhere.
 //   - Audit Log: at least one entry for every entity_type/action
 //     combination any real code path in this app currently produces --
 //     which is now also every value each of those two enums has, since
@@ -73,20 +77,26 @@
 
 process.env.FIRESTORE_EMULATOR_HOST ||= '127.0.0.1:8081'
 process.env.FIREBASE_AUTH_EMULATOR_HOST ||= '127.0.0.1:9099'
+process.env.FIREBASE_STORAGE_EMULATOR_HOST ||= '127.0.0.1:9199'
 
 import { initializeApp } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
 import { getFirestore } from 'firebase-admin/firestore'
+import { getStorage } from 'firebase-admin/storage'
 
 const PROJECT_ID = 'demo-smartstock-nwu'
 const LOCATION = 'NWU - Potchefstroom, Building G4, Room 28'
 const DEPARTMENT = 'Computer Science and Information Systems'
 const ADMIN_NAME = 'Selouna'
 const ADMIN_UID = 'seed-admin'
+// Must match NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET in .env.local -- see
+// scripts/seed-products.mjs's own copy of this constant for why.
+const BUCKET_NAME = 'smartstock-nwu.firebasestorage.app'
 
-const app = initializeApp({ projectId: PROJECT_ID })
+const app = initializeApp({ projectId: PROJECT_ID, storageBucket: BUCKET_NAME })
 const auth = getAuth(app)
 const db = getFirestore(app)
+const bucket = getStorage(app).bucket()
 
 // ---------------------------------------------------------------------------
 // Shared helpers -- same conventions (todayStr/addDays/genRef, upsert-by-
@@ -121,6 +131,56 @@ const TODAY = todayStr()
 // A day offset expressed as a full ISO timestamp, for created_at/updated_at
 // fields -- 09:00 local-ish so ordering between same-day entries is stable.
 const isoAt = (dayOffset) => new Date(`${addDays(TODAY, dayOffset)}T09:00:00`).toISOString()
+
+// ---------------------------------------------------------------------------
+// Product images -- every seeded product gets 1-3 generated placeholder
+// images uploaded to the Storage emulator (same technique as
+// scripts/seed-products.mjs), so the lending portal's Browse page and the
+// Products page's image gallery both have something to render instead of
+// every card showing its "no photo" fallback. Counts cycle 1/2/3 across
+// products in call order (via imageSeq below) rather than being fixed
+// per product, purely to get a visible mix of 1-image/2-image/3-image
+// products without hand-assigning a count to all ~20 call sites.
+// ---------------------------------------------------------------------------
+const IMAGE_PALETTE = [
+  { color: '#2563eb', glyph: '💻' },
+  { color: '#7c3aed', glyph: '📦' },
+  { color: '#059669', glyph: '🔌' },
+  { color: '#d97706', glyph: '🖥️' },
+  { color: '#db2777', glyph: '📷' },
+  { color: '#0891b2', glyph: '⚙️' },
+]
+let imageSeq = 0
+
+function placeholderSvg(name, angleLabel, bgColor, glyph) {
+  const escapedName = name.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640">
+  <rect width="640" height="640" fill="${bgColor}"/>
+  <text x="320" y="280" font-size="200" text-anchor="middle" font-family="system-ui, sans-serif">${glyph}</text>
+  <text x="320" y="400" font-size="36" font-weight="700" fill="white" text-anchor="middle" font-family="system-ui, sans-serif">${escapedName}</text>
+  <text x="320" y="450" font-size="26" fill="rgba(255,255,255,0.85)" text-anchor="middle" font-family="system-ui, sans-serif">${angleLabel}</text>
+</svg>`
+}
+
+// Uploads 1-3 placeholder images for a product (cycling counts across
+// calls) and returns their Storage paths, ready to save on the product doc.
+async function seedProductImages(productId, productName) {
+  const imageCount = (imageSeq % 3) + 1
+  imageSeq += 1
+  const angleLabels = ['Front', 'Side', 'In case']
+  const paths = []
+  for (let i = 0; i < imageCount; i++) {
+    const swatch = IMAGE_PALETTE[(imageSeq + i) % IMAGE_PALETTE.length]
+    const path = `products/${productId}/placeholder-${i}.svg`
+    const svg = placeholderSvg(productName, angleLabels[i], swatch.color, swatch.glyph)
+    await bucket.file(path).save(Buffer.from(svg, 'utf8'), {
+      contentType: 'image/svg+xml',
+      metadata: { cacheControl: 'public, max-age=3600' },
+    })
+    paths.push(path)
+  }
+  return paths
+}
 
 async function upsertCategory(name, description) {
   const existingSnap = await db.collection('categories').where('name', '==', name).get()
@@ -169,6 +229,7 @@ async function upsertProduct(spec) {
   const now = new Date().toISOString()
   const payload = {
     category_id: spec.category_id ?? null,
+    category_name: spec.category_name ?? null,
     name: spec.name,
     description: spec.description ?? 'Seed data -- scripts/seed-comprehensive-demo.mjs',
     barcodes: [spec.barcode],
@@ -188,12 +249,19 @@ async function upsertProduct(spec) {
     // Don't stomp quantity_on_hand on a re-run -- whatever's already there
     // is authoritative, same reasoning as seed-outstanding.mjs.
     await ref.set(payload, { merge: true })
+    // Re-generate images on every run too, same as a fresh create below --
+    // cheap (small SVGs) and keeps a re-run's image count in sync with
+    // wherever this product now falls in the seq counter's cycle.
+    const images = await seedProductImages(ref.id, spec.name)
+    await ref.set({ images }, { merge: true })
     const snap = await ref.get()
     return { id: ref.id, name: spec.name, quantity_on_hand: snap.data()?.quantity_on_hand ?? spec.quantity_on_hand }
   }
   const ref = await db.collection('products').add({
     ...payload, quantity_on_hand: spec.quantity_on_hand, created_at: now, images: [],
   })
+  const images = await seedProductImages(ref.id, spec.name)
+  await ref.set({ images }, { merge: true })
   return { id: ref.id, name: spec.name, quantity_on_hand: spec.quantity_on_hand }
 }
 
@@ -524,13 +592,13 @@ async function main() {
   //    "Availability" toggle. Reused across the scenarios below.
   // =====================================================================
   const P = {}
-  P.healthy = await upsertProduct({ name: 'Demo Product -- Healthy Stock', barcode: 'DEMO-HEALTHY', quantity_on_hand: 25, reorder_threshold: 5, lending_interval: 'week_1', category_id: categoryId['Peripherals'] })
-  P.lowStock = await upsertProduct({ name: 'Demo Product -- Low Stock', barcode: 'DEMO-LOWSTOCK', quantity_on_hand: 4, reorder_threshold: 5, lending_interval: 'week_2', category_id: categoryId['Cables & Adapters'] })
-  P.outOfStock = await upsertProduct({ name: 'Demo Product -- Out of Stock', barcode: 'DEMO-OUTOFSTOCK', quantity_on_hand: 0, reorder_threshold: 3, lending_interval: 'week_3', category_id: categoryId['Storage'] })
-  P.indefinite = await upsertProduct({ name: 'Demo Product -- Indefinite Lending', barcode: 'DEMO-INDEFINITE', quantity_on_hand: 12, reorder_threshold: 2, lending_interval: 'indefinite', category_id: categoryId['Laptops & Computers'] })
-  P.monthInterval = await upsertProduct({ name: 'Demo Product -- 1 Month Interval', barcode: 'DEMO-MONTH', quantity_on_hand: 15, reorder_threshold: 3, lending_interval: 'month_1', category_id: categoryId['Networking'] })
-  P.legacyNoInterval = await upsertProduct({ name: 'Demo Product -- Legacy (No Interval Set)', barcode: 'DEMO-LEGACY', quantity_on_hand: 10, reorder_threshold: 2, category_id: categoryId['Power'] }) // lending_interval omitted on purpose
-  P.unavailable = await upsertProduct({ name: 'Demo Product -- Unavailable (Toggled Off)', barcode: 'DEMO-UNAVAILABLE', quantity_on_hand: 8, reorder_threshold: 2, available: false, lending_interval: 'week_1', category_id: categoryId['Consumables'] })
+  P.healthy = await upsertProduct({ name: 'Demo Product -- Healthy Stock', barcode: 'DEMO-HEALTHY', quantity_on_hand: 25, reorder_threshold: 5, lending_interval: 'week_1', category_id: categoryId['Peripherals'], category_name: 'Peripherals' })
+  P.lowStock = await upsertProduct({ name: 'Demo Product -- Low Stock', barcode: 'DEMO-LOWSTOCK', quantity_on_hand: 4, reorder_threshold: 5, lending_interval: 'week_2', category_id: categoryId['Cables & Adapters'], category_name: 'Cables & Adapters' })
+  P.outOfStock = await upsertProduct({ name: 'Demo Product -- Out of Stock', barcode: 'DEMO-OUTOFSTOCK', quantity_on_hand: 0, reorder_threshold: 3, lending_interval: 'week_3', category_id: categoryId['Storage'], category_name: 'Storage' })
+  P.indefinite = await upsertProduct({ name: 'Demo Product -- Indefinite Lending', barcode: 'DEMO-INDEFINITE', quantity_on_hand: 12, reorder_threshold: 2, lending_interval: 'indefinite', category_id: categoryId['Laptops & Computers'], category_name: 'Laptops & Computers' })
+  P.monthInterval = await upsertProduct({ name: 'Demo Product -- 1 Month Interval', barcode: 'DEMO-MONTH', quantity_on_hand: 15, reorder_threshold: 3, lending_interval: 'month_1', category_id: categoryId['Networking'], category_name: 'Networking' })
+  P.legacyNoInterval = await upsertProduct({ name: 'Demo Product -- Legacy (No Interval Set)', barcode: 'DEMO-LEGACY', quantity_on_hand: 10, reorder_threshold: 2, category_id: categoryId['Power'], category_name: 'Power' }) // lending_interval omitted on purpose
+  P.unavailable = await upsertProduct({ name: 'Demo Product -- Unavailable (Toggled Off)', barcode: 'DEMO-UNAVAILABLE', quantity_on_hand: 8, reorder_threshold: 2, available: false, lending_interval: 'week_1', category_id: categoryId['Consumables'], category_name: 'Consumables' })
   P.insufficientCause = await upsertProduct({ name: 'Demo Product -- Insufficient Pickup (Overdue Cause)', barcode: 'DEMO-INSUFF-CAUSE', quantity_on_hand: 3, reorder_threshold: 2, lending_interval: 'week_2' })
   P.insufficientNoCause = await upsertProduct({ name: 'Demo Product -- Insufficient Pickup (No Clear Cause)', barcode: 'DEMO-INSUFF-NOCAUSE', quantity_on_hand: 1, reorder_threshold: 3, lending_interval: 'week_2' })
   P.onSchedule = await upsertProduct({ name: 'Demo Product -- On Schedule Pickup', barcode: 'DEMO-ONSCHEDULE', quantity_on_hand: 10, reorder_threshold: 2, lending_interval: 'week_2' })
@@ -770,6 +838,19 @@ async function main() {
       request: req, dayOffset: -1, before: { status: 'accepted' },
       after: { status: 'fulfilled', fulfilled_txn_id: fulfillTxn.id, fulfilled_txn_ref: fulfillTxn.reference_no },
     })
+    // A couple of extra, unrelated stock-outs against the same staff member --
+    // no loan request behind either one -- so the Issued per Staff report has
+    // more than a single transaction to expand and group for Demo Fulfilled
+    // Pickup: a multi-item pickup and a later single-item one.
+    await recordTxn({
+      type: 'OUT', staff: S.FulfilledPickup,
+      items: [{ product: P.healthy, quantity: 1 }, { product: P.monthInterval, quantity: 2 }],
+      lendFrom: addDays(TODAY, -20), lendTo: addDays(TODAY, -13), dayOffset: -20,
+    })
+    await recordTxn({
+      type: 'OUT', staff: S.FulfilledPickup, items: [{ product: P.indefinite, quantity: 1 }],
+      lendFrom: addDays(TODAY, -6), lendTo: null, dayOffset: -6,
+    })
   }
 
   // ---- declined while still pending (Selouna, simple) ----------------------
@@ -865,6 +946,307 @@ async function main() {
   }
 
   // =====================================================================
+  // 7. MY REQUESTS (portal) -- a full spread of every tab/status combo on
+  //    ONE staff member (S.PortalLinked / demo.portallinked@example.com),
+  //    so signing into the portal as them shows every possible "My
+  //    Requests" outcome in one place, unlike section 6 above which
+  //    deliberately spreads one status per staff member for the ADMIN's
+  //    Loan Requests queue. History alone runs to 12 rows -- past the
+  //    10-row page size -- so its pagination footer has a real second
+  //    page to click through.
+  // =====================================================================
+
+  // ---- Needs your response (countered) x3 --------------------------------
+  {
+    const counterMsg = "Can only spare 1 of the first -- the second's almost out of stock so I'd rather not commit it."
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'countered',
+      fromDate: addDays(TODAY, 4), toDate: addDays(TODAY, 11),
+      originalFromDate: addDays(TODAY, 2), originalToDate: addDays(TODAY, 9),
+      message: 'Would it be possible to get 3 of these plus 2 of the low-stock item?',
+      adminMessage: counterMsg,
+      lines: [{ product: P.healthy, requested: 3, offered: 1 }, { product: P.lowStock, requested: 2, offered: 0 }],
+      createdDayOffset: -6, updatedDayOffset: -4,
+    })
+    await writeLoanUpdate({
+      request: req, dayOffset: -4,
+      before: { status: 'pending', from_date: addDays(TODAY, 2), to_date: addDays(TODAY, 9) },
+      after: { status: 'countered', from_date: addDays(TODAY, 4), to_date: addDays(TODAY, 11), admin_message: counterMsg },
+    })
+  }
+  {
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'countered',
+      fromDate: addDays(TODAY, 1), toDate: null,
+      lines: [{ product: P.indefinite, requested: 3, offered: 2 }],
+      createdDayOffset: -3, updatedDayOffset: -2,
+    })
+    await writeLoanUpdate({
+      request: req, dayOffset: -2,
+      before: { status: 'pending', from_date: addDays(TODAY, 1), to_date: null },
+      after: { status: 'countered', from_date: addDays(TODAY, 1), to_date: null },
+    })
+  }
+  {
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'countered',
+      fromDate: addDays(TODAY, 8), toDate: addDays(TODAY, 15),
+      lines: [{ product: P.monthInterval, requested: 2, offered: 1 }, { product: P.onSchedule, requested: 1, offered: 1 }],
+      createdDayOffset: -5, updatedDayOffset: -3,
+    })
+    await writeLoanUpdate({
+      request: req, dayOffset: -3,
+      before: { status: 'pending' },
+      after: { status: 'countered' },
+    })
+  }
+
+  // ---- Awaiting Selouna (pending) x3 --------------------------------------
+  await createLoanRequest({
+    staff: S.PortalLinked, status: 'pending',
+    fromDate: addDays(TODAY, 3), toDate: addDays(TODAY, 10),
+    lines: [{ product: P.healthy, requested: 2 }],
+    createdDayOffset: -1,
+  })
+  await createLoanRequest({
+    staff: S.PortalLinked, status: 'pending',
+    fromDate: addDays(TODAY, 20), toDate: addDays(TODAY, 27),
+    message: 'Need this for a workshop on the 25th, thanks!',
+    lines: [{ product: P.onSchedule, requested: 1 }],
+    createdDayOffset: -2,
+  })
+  await createLoanRequest({
+    staff: S.PortalLinked, status: 'pending',
+    fromDate: addDays(TODAY, 5), toDate: addDays(TODAY, 12),
+    lines: [{ product: P.monthInterval, requested: 1 }, { product: P.indefinite, requested: 1 }],
+    createdDayOffset: -1,
+  })
+
+  // ---- Upcoming (accepted) x3 ----------------------------------------------
+  {
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'accepted',
+      fromDate: addDays(TODAY, 2), toDate: addDays(TODAY, 9),
+      lines: [{ product: P.onSchedule, requested: 2, offered: 2 }],
+      createdDayOffset: -3, updatedDayOffset: -2,
+    })
+    await writeLoanUpdate({ request: req, dayOffset: -2, before: { status: 'pending' }, after: { status: 'accepted' } })
+  }
+  {
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'accepted',
+      fromDate: addDays(TODAY, 6), toDate: addDays(TODAY, 13),
+      message: 'Two of these for a site visit, if possible.',
+      lines: [{ product: P.healthy, requested: 2, offered: 2 }, { product: P.monthInterval, requested: 1, offered: 1 }],
+      createdDayOffset: -4, updatedDayOffset: -3,
+    })
+    await writeLoanUpdate({ request: req, dayOffset: -3, before: { status: 'pending' }, after: { status: 'accepted' } })
+  }
+  {
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'accepted',
+      fromDate: TODAY, toDate: addDays(TODAY, 7),
+      lines: [{ product: P.indefinite, requested: 1, offered: 1 }],
+      createdDayOffset: -2, updatedDayOffset: -1,
+    })
+    await writeLoanUpdate({ request: req, dayOffset: -1, before: { status: 'pending' }, after: { status: 'accepted' } })
+  }
+
+  // ---- History: every terminal status, x12 total (past the 10-row page
+  //      size) -----------------------------------------------------------
+
+  // fulfilled x2 (one plain accepted->fulfilled, one full negotiation chain)
+  {
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'fulfilled',
+      fromDate: addDays(TODAY, -8), toDate: addDays(TODAY, -1),
+      lines: [{ product: P.fulfilled, requested: 2, offered: 2 }],
+      createdDayOffset: -15, updatedDayOffset: -8,
+    })
+    await writeLoanUpdate({ request: req, dayOffset: -10, before: { status: 'pending' }, after: { status: 'accepted' } })
+    const fulfillTxn = await recordTxn({
+      type: 'OUT', staff: S.PortalLinked, items: [{ product: P.fulfilled, quantity: 2 }],
+      lendFrom: addDays(TODAY, -8), lendTo: addDays(TODAY, -1),
+      linkedRequestId: req.id, linkedRequestRef: req.reference_no, dayOffset: -8,
+    })
+    await db.collection('loan_requests').doc(req.id).update({ status: 'fulfilled', fulfilled_txn_id: fulfillTxn.id, updated_at: isoAt(-8) })
+    await writeLoanUpdate({
+      request: req, dayOffset: -8, before: { status: 'accepted' },
+      after: { status: 'fulfilled', fulfilled_txn_id: fulfillTxn.id, fulfilled_txn_ref: fulfillTxn.reference_no },
+    })
+  }
+  {
+    const origFrom = addDays(TODAY, -20)
+    const origTo = addDays(TODAY, -13)
+    const newFrom = addDays(TODAY, -18)
+    const newTo = addDays(TODAY, -11)
+    const counterMsg = 'Reduced to 1 unit -- only one left in stock right now.'
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'accepted',
+      fromDate: newFrom, toDate: newTo, originalFromDate: origFrom, originalToDate: origTo,
+      adminMessage: counterMsg,
+      lines: [{ product: P.onSchedule, requested: 2, offered: 1 }],
+      createdDayOffset: -25, updatedDayOffset: -19,
+    })
+    await writeLoanUpdate({
+      request: req, dayOffset: -21,
+      before: { status: 'pending', from_date: origFrom, to_date: origTo },
+      after: { status: 'countered', from_date: newFrom, to_date: newTo, admin_message: counterMsg },
+    })
+    await writeLoanUpdate({ request: req, dayOffset: -19, actorId: S.PortalLinked.id, actorName: S.PortalLinked.full_name, before: { status: 'countered' }, after: { status: 'accepted' } })
+    const fulfillTxn2 = await recordTxn({
+      type: 'OUT', staff: S.PortalLinked, items: [{ product: P.onSchedule, quantity: 1 }],
+      lendFrom: newFrom, lendTo: newTo,
+      linkedRequestId: req.id, linkedRequestRef: req.reference_no, dayOffset: -18,
+    })
+    await db.collection('loan_requests').doc(req.id).update({ status: 'fulfilled', fulfilled_txn_id: fulfillTxn2.id, updated_at: isoAt(-18) })
+    await writeLoanUpdate({
+      request: req, dayOffset: -18, before: { status: 'accepted' },
+      after: { status: 'fulfilled', fulfilled_txn_id: fulfillTxn2.id, fulfilled_txn_ref: fulfillTxn2.reference_no },
+    })
+  }
+
+  // declined while still pending (Selouna) x2
+  {
+    const declineMsg = "Sorry, we don't have spare units of this one right now."
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'declined',
+      fromDate: addDays(TODAY, -5), toDate: addDays(TODAY, 2),
+      adminMessage: declineMsg,
+      lines: [{ product: P.outOfStock, requested: 1, offered: 1 }],
+      createdDayOffset: -12, updatedDayOffset: -11,
+    })
+    await writeLoanUpdate({ request: req, dayOffset: -11, before: { status: 'pending' }, after: { status: 'declined', admin_message: declineMsg } })
+  }
+  {
+    const declineMsg2 = "This model's been retired -- happy to help find an alternative."
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'declined',
+      fromDate: addDays(TODAY, -14), toDate: addDays(TODAY, -7),
+      adminMessage: declineMsg2,
+      lines: [{ product: P.legacyNoInterval, requested: 1, offered: 1 }],
+      createdDayOffset: -20, updatedDayOffset: -19,
+    })
+    await writeLoanUpdate({ request: req, dayOffset: -19, before: { status: 'pending' }, after: { status: 'declined', admin_message: declineMsg2 } })
+  }
+
+  // declined FROM an already-sent counter (rich decline-of-a-counter snapshot)
+  {
+    const staffMessage = 'Could I get 3 of these plus 2 of the low-stock item?'
+    const counterMessage = 'I can only spare 1 of the first and none of the second right now.'
+    const declineMessage = "Since these won't cover what you need, I'll close this one out -- feel free to resubmit if plans change."
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'declined',
+      fromDate: addDays(TODAY, -10), toDate: addDays(TODAY, -3),
+      message: staffMessage, adminMessage: declineMessage,
+      lines: [{ product: P.healthy, requested: 3, offered: 1 }, { product: P.lowStock, requested: 2, offered: 0 }],
+      createdDayOffset: -18, updatedDayOffset: -11,
+    })
+    await writeLoanUpdate({
+      request: req, dayOffset: -16,
+      before: { status: 'pending', from_date: addDays(TODAY, -10), to_date: addDays(TODAY, -3) },
+      after: { status: 'countered', from_date: addDays(TODAY, -10), to_date: addDays(TODAY, -3), admin_message: counterMessage },
+    })
+    await writeLoanUpdate({
+      request: req, dayOffset: -11,
+      before: { status: 'countered' },
+      after: {
+        status: 'declined', admin_message: declineMessage,
+        staff_message: staffMessage, counter_message: counterMessage,
+        countered_lines: [
+          { product_name: P.healthy.name, requested_quantity: 3, offered_quantity: 1 },
+          { product_name: P.lowStock.name, requested_quantity: 2, offered_quantity: 0 },
+        ],
+      },
+    })
+  }
+
+  // declined BY the staff member themselves (portal declineCounter)
+  {
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'declined',
+      fromDate: addDays(TODAY, -6), toDate: null,
+      lines: [{ product: P.indefinite, requested: 2, offered: 1 }],
+      createdDayOffset: -16, updatedDayOffset: -13,
+    })
+    await writeLoanUpdate({
+      request: req, dayOffset: -15,
+      before: { status: 'pending', from_date: addDays(TODAY, -6), to_date: null },
+      after: { status: 'countered', from_date: addDays(TODAY, -6), to_date: null },
+    })
+    await writeLoanUpdate({ request: req, dayOffset: -13, actorId: S.PortalLinked.id, actorName: S.PortalLinked.full_name, before: { status: 'countered' }, after: { status: 'declined' } })
+  }
+
+  // expired (blew past the 30-day SLA) x2
+  {
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'expired',
+      fromDate: addDays(TODAY, -25), toDate: addDays(TODAY, -18),
+      lines: [{ product: P.healthy, requested: 1, offered: 1 }],
+      createdDayOffset: -55, updatedDayOffset: -25,
+    })
+    await writeLoanUpdate({ request: req, dayOffset: -25, actorId: null, actorName: null, before: { status: 'pending' }, after: { status: 'expired' } })
+  }
+  {
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'expired',
+      fromDate: addDays(TODAY, -35), toDate: addDays(TODAY, -28),
+      lines: [{ product: P.monthInterval, requested: 1, offered: 1 }],
+      createdDayOffset: -65, updatedDayOffset: -35,
+    })
+    await writeLoanUpdate({ request: req, dayOffset: -35, actorId: null, actorName: null, before: { status: 'pending' }, after: { status: 'expired' } })
+  }
+
+  // no_show (already recorded) x2
+  {
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'no_show',
+      fromDate: addDays(TODAY, -22), toDate: addDays(TODAY, -15),
+      lines: [{ product: P.noShowFeeder, requested: 1, offered: 1 }],
+      createdDayOffset: -28, updatedDayOffset: -15,
+    })
+    await writeLoanUpdate({ request: req, dayOffset: -26, before: { status: 'pending' }, after: { status: 'accepted' } })
+    await writeLoanUpdate({ request: req, dayOffset: -15, actorId: null, actorName: null, before: { status: 'accepted' }, after: { status: 'no_show' } })
+  }
+  {
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'no_show',
+      fromDate: addDays(TODAY, -17), toDate: addDays(TODAY, -10),
+      lines: [{ product: P.onSchedule, requested: 1, offered: 1 }],
+      createdDayOffset: -22, updatedDayOffset: -10,
+    })
+    await writeLoanUpdate({ request: req, dayOffset: -20, before: { status: 'pending' }, after: { status: 'accepted' } })
+    await writeLoanUpdate({ request: req, dayOffset: -10, actorId: null, actorName: null, before: { status: 'accepted' }, after: { status: 'no_show' } })
+  }
+
+  // withdrawn by the staff member (no reason)
+  {
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'withdrawn',
+      fromDate: addDays(TODAY, -9), toDate: addDays(TODAY, -2),
+      lines: [{ product: P.healthy, requested: 1, offered: 1 }],
+      createdDayOffset: -13, updatedDayOffset: -12,
+    })
+    await writeLoanUpdate({ request: req, dayOffset: -12, actorId: S.PortalLinked.id, actorName: S.PortalLinked.full_name, before: { status: 'pending' }, after: { status: 'withdrawn' } })
+  }
+
+  // withdrawn by Selouna cancelling an accepted pickup (with reason)
+  {
+    const req = await createLoanRequest({
+      staff: S.PortalLinked, status: 'withdrawn',
+      fromDate: addDays(TODAY, -4), toDate: addDays(TODAY, 3),
+      lines: [{ product: P.healthy, requested: 1, offered: 1 }],
+      createdDayOffset: -9, updatedDayOffset: -1,
+    })
+    await writeLoanUpdate({ request: req, dayOffset: -8, before: { status: 'pending' }, after: { status: 'accepted' } })
+    await writeLoanUpdate({
+      request: req, dayOffset: -1,
+      before: { status: 'accepted' },
+      after: { status: 'withdrawn', cancel_reason: 'IT Store closing early that week -- pickup no longer possible in the window.' },
+    })
+  }
+
+  // =====================================================================
   console.log('Seeded comprehensive demo data:\n')
   console.log('LOGINS:')
   console.log('  BICS admin:      admin@nwu.test / password123               -> http://localhost:3000/login')
@@ -885,9 +1267,18 @@ async function main() {
   console.log('  Needs Review / Sent Counters, and check History for accepted/fulfilled/')
   console.log('  declined/expired/no_show/withdrawn.')
   console.log('')
+  console.log('MY REQUESTS (portal): sign in as demo.portallinked@example.com above, then')
+  console.log('  http://localhost:3000/lend/requests -- every tab (Needs your response,')
+  console.log('  Awaiting Selouna, Upcoming, History) has several rows, and History alone')
+  console.log('  has 12 -- past the 10-row page size, so its pagination footer has a real')
+  console.log('  second page to click through.')
+  console.log('')
   console.log('REPORTS: Stock Levels & Low Stock reflect the products above; Issued Per')
   console.log('  Staff and Transaction History include IN/OUT/RETURN/ADJUST activity across')
   console.log('  every "Demo --" staff member; Returns has a full and a partial return.')
+  console.log('')
+  console.log('PRODUCT IMAGES: every product above got 1-3 generated placeholder photos')
+  console.log('  uploaded to the Storage emulator -- check Browse or the Products page.')
   console.log('')
   console.log("AUDIT LOG: filter by entity to see product/category/staff/transaction/")
   console.log('  loan_request coverage -- including the new decline-of-a-counter rich')

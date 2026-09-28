@@ -11,7 +11,7 @@ import {
   SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead, ExportCsvButton,
   type PageSize, paginate, TablePagination,
 } from '@/components/data-table-helpers'
-import { Card } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -25,6 +25,7 @@ import type { AuditLogEntry, AuditAction, AuditEntityType, TransactionLine, Loan
 const ACTION_BADGE_CLASS: Record<AuditAction, string> = {
   create: 'bg-emerald-100 text-emerald-800',
   update: 'bg-sky-100 text-sky-800',
+  delete: 'bg-red-100 text-red-800',
   activate: 'bg-emerald-100 text-emerald-800',
   deactivate: 'bg-accent text-accent-foreground',
   resolve: 'bg-violet-100 text-violet-800',
@@ -50,6 +51,7 @@ const ENTITY_LABEL: Record<AuditEntityType, string> = {
   staff: 'Staff',
   transaction: 'Transaction',
   loan_request: 'Loan Request',
+  settings: 'Settings',
 }
 
 // Same reasoning as TXN_BADGE_CLASS above — a loan_request audit entry
@@ -134,7 +136,14 @@ const ACTIVITY: Record<string, {
   'status:no_show': { label: 'Not Picked Up', className: LOAN_REQUEST_BADGE_CLASS.no_show, entities: ['loan_request'] },
 
   'action:create': { label: 'Create', className: ACTION_BADGE_CLASS.create, entities: RECORD_ENTITIES },
-  'action:update': { label: 'Update', className: ACTION_BADGE_CLASS.update, entities: RECORD_ENTITIES },
+  // 'settings' only ever logs 'update' (there's no create/delete for a
+  // singleton settings doc), so it's added here rather than to
+  // RECORD_ENTITIES itself -- that would also offer Create/Delete as
+  // filter options for an entity that never produces either.
+  'action:update': { label: 'Update', className: ACTION_BADGE_CLASS.update, entities: [...RECORD_ENTITIES, 'settings'] },
+  // Only products and categories can be deleted from the app today — staff
+  // are deactivated instead (see 'action:deactivate' below), never removed.
+  'action:delete': { label: 'Delete', className: ACTION_BADGE_CLASS.delete, entities: ['product', 'category'] },
   // Only staff records can be activated or deactivated.
   'action:activate': { label: 'Activate', className: ACTION_BADGE_CLASS.activate, entities: ['staff'] },
   'action:deactivate': { label: 'Deactivate', className: ACTION_BADGE_CLASS.deactivate, entities: ['staff'] },
@@ -159,7 +168,7 @@ function activityLabel(key: string): string {
 const ACTIVITY_GROUPS: { label: string; keys: string[] }[] = [
   { label: 'Stock movements', keys: ['txn:IN', 'txn:OUT', 'txn:RETURN', 'txn:ADJUST', 'action:resolve'] },
   { label: 'Loan requests', keys: ['status:pending', 'status:countered', 'status:accepted', 'status:fulfilled', 'status:declined', 'status:expired', 'status:withdrawn', 'status:no_show'] },
-  { label: 'Record changes', keys: ['action:create', 'action:update', 'action:activate', 'action:deactivate'] },
+  { label: 'Record changes', keys: ['action:create', 'action:update', 'action:delete', 'action:activate', 'action:deactivate'] },
   { label: 'Portal access', keys: ['action:grant_access', 'action:resend_access'] },
 ]
 
@@ -173,6 +182,7 @@ const FIELD_LABELS: Record<string, string> = {
   category_name: 'Category',
   barcodes: 'Barcodes',
   quantity_on_hand: 'Qty on hand',
+  reason: 'Reason for change',
   reorder_threshold: 'Reorder threshold',
   available: 'Available',
   location: 'Location',
@@ -245,7 +255,7 @@ function friendlyValue(key: string, value: unknown): string {
 const AUDIT_FIELD_ORDER: Record<string, string[]> = {
   product: [
     'name', 'category_name', 'category_id', 'description', 'barcodes',
-    'quantity_on_hand', 'reorder_threshold', 'available', 'location',
+    'quantity_on_hand', 'reason', 'reorder_threshold', 'available', 'location',
     'lend_from', 'lend_to', 'lending_interval', 'images', 'created_at', 'updated_at',
   ],
   category: ['name', 'description', 'created_at'],
@@ -1036,45 +1046,53 @@ export default function AuditLogPage() {
         </p>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-end gap-3">
-        <Select
-          items={{ [ALL_ENTITIES]: 'All entities', product: 'Product', category: 'Category', staff: 'Staff', transaction: 'Transaction', loan_request: 'Loan Request' }}
-          value={entityFilter || ALL_ENTITIES}
-          onValueChange={v => changeEntity(v && v !== ALL_ENTITIES ? v : '')}
-        >
-          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_ENTITIES}>All entities</SelectItem>
-            <SelectItem value="product">Product</SelectItem>
-            <SelectItem value="category">Category</SelectItem>
-            <SelectItem value="staff">Staff</SelectItem>
-            <SelectItem value="transaction">Transaction</SelectItem>
-            <SelectItem value="loan_request">Loan Request</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          items={{
-            [ALL_ACTIONS]: 'All activity',
-            ...Object.fromEntries(
-              visibleActivityGroups.flatMap(g => g.keys.map(k => [k, activityLabel(k)]))
-            ),
-          }}
-          value={actionFilter || ALL_ACTIONS}
-          onValueChange={v => setActionFilter(v && v !== ALL_ACTIONS ? v : '')}
-        >
-          <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_ACTIONS}>All activity</SelectItem>
-            {visibleActivityGroups.map(group => (
-              <SelectGroup key={group.label}>
-                <SelectLabel>{group.label}</SelectLabel>
-                {group.keys.map(k => (
-                  <SelectItem key={k} value={k}>{activityLabel(k)}</SelectItem>
-                ))}
-              </SelectGroup>
-            ))}
-          </SelectContent>
-        </Select>
+      <Card className="mb-4">
+        <CardContent className="flex flex-wrap items-end gap-3">
+        <div className="grid gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">Entities</span>
+          <Select
+            items={{ [ALL_ENTITIES]: 'All entities', product: 'Product', category: 'Category', staff: 'Staff', transaction: 'Transaction', loan_request: 'Loan Request', settings: 'Settings' }}
+            value={entityFilter || ALL_ENTITIES}
+            onValueChange={v => changeEntity(v && v !== ALL_ENTITIES ? v : '')}
+          >
+            <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_ENTITIES}>All entities</SelectItem>
+              <SelectItem value="product">Product</SelectItem>
+              <SelectItem value="category">Category</SelectItem>
+              <SelectItem value="staff">Staff</SelectItem>
+              <SelectItem value="transaction">Transaction</SelectItem>
+              <SelectItem value="loan_request">Loan Request</SelectItem>
+              <SelectItem value="settings">Settings</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">Activities</span>
+          <Select
+            items={{
+              [ALL_ACTIONS]: 'All activity',
+              ...Object.fromEntries(
+                visibleActivityGroups.flatMap(g => g.keys.map(k => [k, activityLabel(k)]))
+              ),
+            }}
+            value={actionFilter || ALL_ACTIONS}
+            onValueChange={v => setActionFilter(v && v !== ALL_ACTIONS ? v : '')}
+          >
+            <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_ACTIONS}>All activity</SelectItem>
+              {visibleActivityGroups.map(group => (
+                <SelectGroup key={group.label}>
+                  <SelectLabel>{group.label}</SelectLabel>
+                  {group.keys.map(k => (
+                    <SelectItem key={k} value={k}>{activityLabel(k)}</SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         {/* A date input ignores `placeholder`, so these two were the only
             unlabelled controls on the row — the browser's own dd/mm/yyyy
             hint was all there was to say which end of the range each one
@@ -1118,19 +1136,20 @@ export default function AuditLogPage() {
             { header: 'Details', value: (e: AuditLogEntry) => flattenAfterForCsv(reorderForDisplay(e.entity_type, e.action, e.after)) },
           ]}
         />
-      </div>
+        </CardContent>
+      </Card>
 
       <Card className="min-h-0 flex-1 py-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
+              <TableHead className="w-8"></TableHead>
               <SortableHead column={table.getColumn('created_at')!}>Date</SortableHead>
               <SortableHead column={table.getColumn('user_name')!}>User</SortableHead>
               <SortableHead column={table.getColumn('activity')!}>Activity</SortableHead>
               <SortableHead column={table.getColumn('entity_type')!}>Entity</SortableHead>
               <SortableHead column={table.getColumn('entity_id')!}>Entity ID</SortableHead>
-              <TableHead></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1139,12 +1158,12 @@ export default function AuditLogPage() {
             {pageRows.map(e => (
               <Fragment key={e.id}>
                 <TableRow className="cursor-pointer" onClick={() => toggleExpand(e)}>
+                  <TableCell className="text-sm text-muted-foreground">{isExpanded(e.id) ? '▲' : '▼'}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{formatDate(e.created_at)}</TableCell>
-                  <TableCell className="font-medium">{e.user_name ?? '—'}</TableCell>
+                  <TableCell className="max-w-xs font-medium whitespace-normal break-words">{e.user_name ?? '—'}</TableCell>
                   <TableCell>{activityBadge(e)}</TableCell>
                   <TableCell className="text-muted-foreground">{ENTITY_LABEL[e.entity_type] ?? e.entity_type}</TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">{e.entity_id}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{isExpanded(e.id) ? '▲' : '▼'}</TableCell>
                 </TableRow>
                 {isExpanded(e.id) && (
                   <TableRow className="bg-muted/50">

@@ -1,0 +1,26 @@
+<svg id="smartstock-icon" xmlns="http://www.w3.org/2000/svg" viewBox="150 300 260 370">
+  <!-- Icon-only crop of public/smartstock-nwu-logo.svg's left-hand mark
+       (same paths, same gradients) — used where the full wordmark lockup
+       doesn't fit, e.g. the admin sidebar's collapsed icon rail. Keep this
+       in sync with the icon <g> in smartstock-nwu-logo.svg if that ever
+       changes. -->
+  <defs>
+    <linearGradient id="s2-arrow" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="60%" stop-color="#06b6d4" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+    <linearGradient id="s2-box" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7c3aed" />
+      <stop offset="100%" stop-color="#4c1d95" />
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(-40, 0)">
+    <path fill="url(#s2-box)" d="M 320,320 L 430,384 L 320,448 L 210,384 Z" />
+    <path fill="#c084fc" opacity="0.6" d="M 320,320 L 430,384 L 402,384 L 320,336 Z" />
+    <path fill="#2e1065" d="M 210,404 L 310,462 L 310,610 L 210,552 Z" />
+    <path fill="#4c1d95" d="M 430,404 L 430,552 L 330,610 L 330,462 Z" />
+    <path fill="url(#s2-arrow)" d="M 320,430 L 378,506 L 348,506 L 348,650 L 292,650 L 292,506 L 262,506 Z" />
+  </g>
+</svg>

@@ -197,3 +197,63 @@ body {
 .cn-toast [data-description] {
   color: var(--nwu-grey-dark);
 }
+/* Sidebar nav scrollbar (Sidebar.tsx / (protected)/layout.tsx) — styled to
+   match the sidebar's purple/lavender theme instead of the OS default.
+   Scoped to `.no-scrollbar`, which is the class name the vendored
+   SidebarContent primitive (components/ui/sidebar.tsx, left untouched)
+   already puts on the sidebar's own scrollable nav list and nowhere else
+   in the app — so styling that one class only affects this one scrollbar.
+   The name is the primitive's; giving it a visible custom look here is
+   ours. WebKit-only below the fallback (Chrome/Edge, this app's target
+   browsers) since Firefox has no equivalent for scrollbar-button arrows;
+   Firefox still gets a themed thin scrollbar via the standard properties. */
+.no-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #d9c9ec transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.no-scrollbar::-webkit-scrollbar-track {
+  background: var(--sidebar-border);
+}
+
+.no-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #d9c9ec;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.no-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: #c7aee0;
+}
+
+/* Chrome hides these by default; turning them on and only shaping two of
+   the four (top "start:decrement", bottom "end:increment") gives the
+   up/down arrows in the reference design — the other two combinations
+   would otherwise appear as blank buttons alongside them. */
+.no-scrollbar::-webkit-scrollbar-button {
+  display: block;
+  height: 14px;
+  background-color: transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar-button:vertical:start:increment,
+.no-scrollbar::-webkit-scrollbar-button:vertical:end:decrement {
+  display: none;
+}
+
+.no-scrollbar::-webkit-scrollbar-button:vertical:start:decrement {
+  border-width: 0 5px 7px 5px;
+  border-style: solid;
+  border-color: transparent transparent #d9c9ec transparent;
+}
+
+.no-scrollbar::-webkit-scrollbar-button:vertical:end:increment {
+  border-width: 7px 5px 0 5px;
+  border-style: solid;
+  border-color: #d9c9ec transparent transparent transparent;
+}

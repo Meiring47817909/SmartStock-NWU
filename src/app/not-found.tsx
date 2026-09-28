@@ -18,6 +18,12 @@ import type { Profile, Role } from '@/types/database'
 export default function NotFound() {
   const { user, profile, loading } = useAuth()
 
+  // Only a BICS admin (profiles/{uid}.role === 'admin') gets sent back to
+  // the dashboard — everyone else (a guest, or a signed-in lending-portal
+  // borrower who mistyped a /lend/... URL) lands on the lending portal,
+  // since that's this site's normal home now, not a login wall.
+  const isAdmin = !!user && profile?.role === 'admin'
+
   const message = (
     <div className="flex h-full min-h-screen flex-col items-center justify-center gap-3 p-8 text-center">
       <FileQuestion className="size-10 text-muted-foreground" />
@@ -25,8 +31,8 @@ export default function NotFound() {
       <p className="max-w-[380px] text-sm text-muted-foreground">
         The page you&apos;re looking for doesn&apos;t exist, or may have been removed.
       </p>
-      <Button render={<Link href={user ? '/dashboard' : '/login'} />} className="mt-2">
-        {user ? 'Back to Dashboard' : 'Go to Login'}
+      <Button render={<Link href={isAdmin ? '/dashboard' : '/lend'} />} className="mt-2">
+        {isAdmin ? 'Back to Dashboard' : 'Back to Lending Portal'}
       </Button>
     </div>
   )
@@ -35,7 +41,7 @@ export default function NotFound() {
     return <div className="flex h-screen items-center justify-center">Loading...</div>
   }
 
-  if (!user) {
+  if (!isAdmin) {
     return message
   }
 

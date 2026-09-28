@@ -5,6 +5,38 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+// Deterministic 1-2 letter initials + background color for an email-based
+// Avatar (the lending portal's nav, which has no uploaded profile pictures
+// to fall back to) — same email always renders the same initials/color, no
+// state or lookup needed.
+export function avatarInitials(email: string): string {
+  const local = email.split('@')[0] ?? ''
+  const parts = local.split(/[._-]+/).filter(Boolean)
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  return local.slice(0, 2).toUpperCase() || '?'
+}
+
+// Same idea as avatarInitials, but for a plain "First Last" display name
+// (the BICS admin sidebar's Profile menu -- profiles/{uid} has no email
+// field, only full_name -- see the Profile type's own doc comment) rather
+// than an email local-part.
+export function nameInitials(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  return (parts[0] ?? '').slice(0, 2).toUpperCase() || '?'
+}
+
+const AVATAR_PALETTE = [
+  'bg-red-500', 'bg-orange-500', 'bg-amber-500', 'bg-emerald-500', 'bg-teal-500',
+  'bg-sky-500', 'bg-indigo-500', 'bg-purple-500', 'bg-pink-500',
+]
+
+export function avatarColorClass(email: string): string {
+  let hash = 0
+  for (let i = 0; i < email.length; i++) hash = email.charCodeAt(i) + ((hash << 5) - hash)
+  return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length]
+}
+
 /**
  * Generate a unique Code 128-compatible barcode for unlabelled products.
  * Format: BC-{timestamp6}{random4} — 13 chars, all uppercase alphanumeric.

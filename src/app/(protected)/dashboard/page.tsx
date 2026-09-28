@@ -5,10 +5,13 @@ import { useExpandedRows } from '@/hooks/useExpandedRows'
 import { formatDateOnly, formatLendWindow, stockStatusLabel, todayDateStr } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { collection, query, where, orderBy, getDocs, getCountFromServer } from 'firebase/firestore'
+import { useTable, type SortingState } from '@tanstack/react-table'
+import { SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead } from '@/components/data-table-helpers'
 import { toast } from 'sonner'
 import { expireIfNeeded, isNoShowCandidate, withdrawRequest, getReservedQuantity, effectiveToDate } from '@/lib/firebase/loanRequests'
 import { notifyAlertsChanged } from '@/lib/alertsBus'
 import { loadWaivedByTxn, waivedQty, createReturnWaiver } from '@/lib/firebase/waivers'
+import { loadNotificationSettings } from '@/lib/firebase/notificationSettings'
 import { useAuth } from '@/context/AuthContext'
 import { useRole } from '@/context/RoleContext'
 import { Button } from '@/components/ui/button'
@@ -41,6 +44,62 @@ function outstandingStatus(expectedDate: string | null): { label: string; classN
   return { label: 'Not Due Yet', className: 'bg-emerald-100 text-emerald-800' }
 }
 
+// Same urgency order as outstandingStatus() above returns its labels in —
+// most pressing first — so sorting the Status column reads as "worst first"
+// either direction, not an arbitrary A-Z order over the label text.
+const OUTSTANDING_STATUS_RANK: Record<string, number> = {
+  Overdue: 0, 'Due Today': 1, 'Not Due Yet': 2, 'No Return Date': 3,
+}
+
+const OUTSTANDING_RETURNS_COLUMNS = sortableColumnHelper.columns([
+  sortableColumnHelper.accessor('product_name', { id: 'product_name', header: 'Product', sortFn: 'alphanumeric' }),
+  sortableColumnHelper.accessor('staff_name', { id: 'staff_name', header: 'Staff', sortFn: 'alphanumeric' }),
+  sortableColumnHelper.accessor('qty', { id: 'qty', header: 'Qty', sortFn: (a: any, b: any) => a.original.qty - b.original.qty }),
+  sortableColumnHelper.accessor((o: any) => o.expected_date ?? '', { id: 'expected_date', header: 'Expected', sortFn: 'text' }),
+  sortableColumnHelper.accessor((o: any) => outstandingStatus(o.expected_date).label, {
+    id: 'status',
+    header: 'Status',
+    sortFn: (a: any, b: any) =>
+      OUTSTANDING_STATUS_RANK[outstandingStatus(a.original.expected_date).label]
+      - OUTSTANDING_STATUS_RANK[outstandingStatus(b.original.expected_date).label],
+  }),
+])
+
+// Same idea for Incoming Pickups' Status column — Not Picked Up is the most
+// urgent state, On Schedule the least.
+const PICKUP_STATUS_RANK: Record<string, number> = { 'Not Picked Up': 0, Insufficient: 1, 'On Schedule': 2 }
+
+function pickupStatusLabel(p: { noShow: boolean; insufficient: boolean }): string {
+  return p.noShow ? 'Not Picked Up' : p.insufficient ? 'Insufficient' : 'On Schedule'
+}
+
+const INCOMING_PICKUPS_COLUMNS = sortableColumnHelper.columns([
+  sortableColumnHelper.accessor('staff_name', { id: 'staff_name', header: 'Staff', sortFn: 'alphanumeric' }),
+  sortableColumnHelper.accessor('item_count', { id: 'item_count', header: 'Items', sortFn: (a: any, b: any) => a.original.item_count - b.original.item_count }),
+  sortableColumnHelper.accessor('from_date', { id: 'from_date', header: 'Pickup Window', sortFn: 'text' }),
+  sortableColumnHelper.accessor((p: any) => pickupStatusLabel(p), {
+    id: 'status',
+    header: 'Status',
+    sortFn: (a: any, b: any) => PICKUP_STATUS_RANK[pickupStatusLabel(a.original)] - PICKUP_STATUS_RANK[pickupStatusLabel(b.original)],
+  }),
+])
+
+// And Low Stock Alerts' Status column — Out of stock outranks Low stock, so
+// sorting surfaces the most depleted items first.
+const LOW_STOCK_STATUS_RANK: Record<string, number> = { 'Out of stock': 0, 'Low stock': 1, 'In stock': 2 }
+
+const LOW_STOCK_COLUMNS = sortableColumnHelper.columns([
+  sortableColumnHelper.accessor('name', { id: 'name', header: 'Product', sortFn: 'alphanumeric' }),
+  sortableColumnHelper.accessor('quantity_on_hand', { id: 'quantity_on_hand', header: 'Qty', sortFn: (a: any, b: any) => a.original.quantity_on_hand - b.original.quantity_on_hand }),
+  sortableColumnHelper.accessor((p: any) => stockStatusLabel(p.quantity_on_hand, p.reorder_threshold), {
+    id: 'status',
+    header: 'Status',
+    sortFn: (a: any, b: any) =>
+      LOW_STOCK_STATUS_RANK[stockStatusLabel(a.original.quantity_on_hand, a.original.reorder_threshold)]
+      - LOW_STOCK_STATUS_RANK[stockStatusLabel(b.original.quantity_on_hand, b.original.reorder_threshold)],
+  }),
+])
+
 type DashboardTab = 'outstanding-returns' | 'incoming-pickups' | 'low-stock'
 
 export default function DashboardPage() {
@@ -58,6 +117,10 @@ export default function DashboardPage() {
   // dialog is open — same pattern as `resolving` above.
   const [cancelling, setCancelling] = useState<{ id: string; staff_name: string; item_count: number; from_date: string; to_date: string | null } | null>(null)
   const [cancelReason, setCancelReason] = useState('')
+  // Drives the cancel-pickup dialog's copy below -- starts true (the
+  // setting's own default) so the dialog doesn't flash the "off" wording
+  // for the instant before this loads.
+  const [pickupCancelledEmailOn, setPickupCancelledEmailOn] = useState(true)
   const [cancelBusy, setCancelBusy] = useState(false)
   // Per-request product/qty breakdown for Incoming Pickups' own expandable
   // rows — fetched eagerly alongside lineCountByRequest below rather than
@@ -78,6 +141,9 @@ export default function DashboardPage() {
   const [resolveReason, setResolveReason] = useState('')
   const [resolveBusy, setResolveBusy] = useState(false)
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>('outstanding-returns')
+  const [outstandingSorting, setOutstandingSorting] = useState<SortingState>([])
+  const [pickupsSorting, setPickupsSorting] = useState<SortingState>([])
+  const [lowStockSorting, setLowStockSorting] = useState<SortingState>([])
   const { user, profile } = useAuth()
   const { isAdmin } = useRole()
 
@@ -302,11 +368,18 @@ export default function DashboardPage() {
     getDashboardData()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    // External read (Firestore), not state derivable from props -- same
+    // pattern as the Notification Settings page itself.
+    loadNotificationSettings()
+      .then((s) => setPickupCancelledEmailOn(s.approved_pickup_cancelled))
+      .catch(() => {}) // dialog just keeps its default (on) wording
+  }, [])
+
   const statCards = [
-    { label: 'Active Products', value: stats.total_products, className: 'text-primary' },
+    { label: 'Products', value: stats.total_products, className: 'text-primary' },
     { label: 'Total Stock Units', value: stats.total_stock, className: 'text-(--nwu-turquoise)' },
     { label: 'Low Stock Items', value: stats.low_stock, className: 'text-amber-500' },
-    { label: "Today's Transactions", value: stats.today_transactions, className: 'text-emerald-500' },
     { label: 'Registered Staff', value: stats.total_staff, className: 'text-muted-foreground' },
   ]
 
@@ -347,6 +420,37 @@ export default function DashboardPage() {
     }
   }
 
+  // One useTable instance per widget — same shared columnHelper/
+  // SortableHead as Reports and the Audit Log, just three small tables
+  // instead of one paginated one, so there's no CSV export or pagination
+  // footer here (see data-table-helpers.tsx) — sorting only.
+  const outstandingTable = useTable({
+    features: SORTABLE_TABLE_FEATURES,
+    columns: OUTSTANDING_RETURNS_COLUMNS,
+    data: outstanding,
+    state: { sorting: outstandingSorting },
+    onSortingChange: setOutstandingSorting,
+  })
+  const sortedOutstanding = outstandingTable.getSortedRowModel().rows.map(r => r.original as any)
+
+  const pickupsTable = useTable({
+    features: SORTABLE_TABLE_FEATURES,
+    columns: INCOMING_PICKUPS_COLUMNS,
+    data: incomingPickups,
+    state: { sorting: pickupsSorting },
+    onSortingChange: setPickupsSorting,
+  })
+  const sortedPickups = pickupsTable.getSortedRowModel().rows.map(r => r.original as any)
+
+  const lowStockTable = useTable({
+    features: SORTABLE_TABLE_FEATURES,
+    columns: LOW_STOCK_COLUMNS,
+    data: lowItems,
+    state: { sorting: lowStockSorting },
+    onSortingChange: setLowStockSorting,
+  })
+  const sortedLowItems = lowStockTable.getSortedRowModel().rows.map(r => r.original as any)
+
   if (loading) return <div className="p-8 text-muted-foreground">Loading dashboard...</div>
 
   return (
@@ -373,20 +477,36 @@ export default function DashboardPage() {
           badge-vs-row-count guarantee from the scrollable-table fix above
           still holds even though only one table is on screen at once. */}
       <Tabs value={dashboardTab} onValueChange={v => { setDashboardTab(v as DashboardTab); getDashboardData({ silent: true }) }} className="min-h-0 flex-1">
-        <TabsList variant="line" className="mb-4 w-full justify-start overflow-x-auto overflow-y-hidden border-b">
-          <TabsTrigger value="outstanding-returns" className="whitespace-nowrap">
+        {/* Same segmented-control tab bar as Reports/My Requests: a
+            bordered light-grey track, each tab flex-1 across the full
+            width, the active one a white pill with NWU-purple text. Forced
+            !h-14/!h-11 heights (rather than h-auto) because TabsTrigger's
+            own base class hardcodes h-[calc(100%-1px)], which otherwise
+            wins and stretches every tab to the track's full height with no
+            breathing room top/bottom. */}
+        <TabsList className="mb-4 flex w-full !h-14 gap-0 overflow-hidden rounded-lg border border-(--nwu-purple)/30 bg-border p-1.5">
+          <TabsTrigger
+            value="outstanding-returns"
+            className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+          >
             Outstanding Returns
             {outstanding.length > 0 && (
               <Badge className="bg-accent text-accent-foreground">{outstanding.length}</Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="incoming-pickups" className="whitespace-nowrap">
+          <TabsTrigger
+            value="incoming-pickups"
+            className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+          >
             Incoming Pickups
             {incomingPickups.length > 0 && (
               <Badge className="bg-accent text-accent-foreground">{incomingPickups.length}</Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="low-stock" className="whitespace-nowrap">
+          <TabsTrigger
+            value="low-stock"
+            className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+          >
             Low Stock Alerts
             {stats.low_stock > 0 && (
               <Badge className="bg-amber-100 text-amber-800">{stats.low_stock}</Badge>
@@ -400,24 +520,24 @@ export default function DashboardPage() {
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
-                  <TableHead>Product</TableHead>
-                  <TableHead>Staff</TableHead>
-                  <TableHead>Qty</TableHead>
-                  <TableHead>Expected</TableHead>
-                  <TableHead>Status</TableHead>
+                  <SortableHead column={outstandingTable.getColumn('product_name')!}>Product</SortableHead>
+                  <SortableHead column={outstandingTable.getColumn('staff_name')!}>Staff</SortableHead>
+                  <SortableHead column={outstandingTable.getColumn('qty')!}>Qty</SortableHead>
+                  <SortableHead column={outstandingTable.getColumn('expected_date')!}>Expected</SortableHead>
+                  <SortableHead column={outstandingTable.getColumn('status')!}>Status</SortableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {outstanding.length === 0 && (
+                {sortedOutstanding.length === 0 && (
                   <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">Nothing outstanding ✓</TableCell></TableRow>
                 )}
-                {outstanding.map((o) => {
+                {sortedOutstanding.map((o) => {
                   const status = outstandingStatus(o.expected_date)
                   return (
                     <TableRow key={o.id}>
-                      <TableCell className="font-medium">{o.product_name}</TableCell>
-                      <TableCell className="text-muted-foreground">{o.staff_name}</TableCell>
+                      <TableCell className="max-w-xs font-medium whitespace-normal break-words">{o.product_name}</TableCell>
+                      <TableCell className="max-w-xs whitespace-normal break-words text-muted-foreground">{o.staff_name}</TableCell>
                       <TableCell className="font-semibold">{o.qty}</TableCell>
                       <TableCell className="text-muted-foreground">{formatDateOnly(o.expected_date)}</TableCell>
                       <TableCell><Badge className={`${status.className} uppercase`}>{status.label}</Badge></TableCell>
@@ -443,27 +563,29 @@ export default function DashboardPage() {
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
-                  <TableHead>Staff</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Pickup Window</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead className="w-8"></TableHead>
+                  <SortableHead column={pickupsTable.getColumn('staff_name')!}>Staff</SortableHead>
+                  <SortableHead column={pickupsTable.getColumn('item_count')!}>Items</SortableHead>
+                  <SortableHead column={pickupsTable.getColumn('from_date')!}>Pickup Window</SortableHead>
+                  <SortableHead column={pickupsTable.getColumn('status')!}>Status</SortableHead>
                   <TableHead></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {incomingPickups.length === 0 && (
-                  <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Nothing incoming ✓</TableCell></TableRow>
+                {sortedPickups.length === 0 && (
+                  <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">Nothing incoming ✓</TableCell></TableRow>
                 )}
-                {incomingPickups.map((p) => (
+                {sortedPickups.map((p) => (
                   <Fragment key={p.id}>
                     <TableRow
                       className="cursor-pointer"
                       onClick={() => togglePickup(p.id)}
                     >
-                      <TableCell className="font-medium">
+                      <TableCell className="text-xs text-muted-foreground">{isPickupExpanded(p.id) ? '▲' : '▼'}</TableCell>
+                      <TableCell className="max-w-xs font-medium whitespace-normal break-words">
                         {p.staff_name}
                         {p.reference_no && (
-                          <div className="font-mono text-xs font-normal text-muted-foreground">
+                          <div className="font-mono text-xs font-normal break-all text-muted-foreground">
                             {p.reference_no}
                           </div>
                         )}
@@ -478,23 +600,20 @@ export default function DashboardPage() {
                             : <Badge className="bg-emerald-100 text-emerald-800 uppercase">On Schedule</Badge>}
                       </TableCell>
                       <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-3" onClick={(e) => e.stopPropagation()}>
-                          {isAdmin && (
-                            <Button
-                              variant="ghost" size="sm"
-                              onClick={() => { setCancelling(p); setCancelReason('') }}
-                              className="text-destructive hover:text-destructive"
-                            >
-                              Cancel
-                            </Button>
-                          )}
-                          <span className="text-xs text-muted-foreground">{isPickupExpanded(p.id) ? '▲' : '▼'}</span>
-                        </div>
+                        {isAdmin && (
+                          <Button
+                            variant="ghost" size="sm"
+                            onClick={(e) => { e.stopPropagation(); setCancelling(p); setCancelReason('') }}
+                            className="text-destructive hover:text-destructive"
+                          >
+                            Cancel
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                     {isPickupExpanded(p.id) && (
                       <TableRow className="bg-muted/50">
-                        <TableCell colSpan={5} className="p-4">
+                        <TableCell colSpan={6} className="p-4 whitespace-normal">
                           {(pickupLines[p.id] ?? []).length === 0 ? (
                             <p className="text-sm text-muted-foreground">No items recorded.</p>
                           ) : (
@@ -503,7 +622,7 @@ export default function DashboardPage() {
                                 <li key={l.id}>
                                   {l.product_name} <span className="text-muted-foreground">× {l.offered_quantity}</span>
                                   {l.shortBy > 0 && (
-                                    <div className="mt-1.5 ml-1 max-w-md rounded-md border border-orange-200 bg-orange-50 p-2 text-xs text-orange-900">
+                                    <div className="mt-1.5 ml-1 max-w-md rounded-md border border-orange-200 bg-orange-50 p-2 text-xs break-words text-orange-900">
                                       <p className="font-medium">
                                         Short by {l.shortBy} — only {l.available} of {l.offered_quantity} on hand right now.
                                       </p>
@@ -545,18 +664,18 @@ export default function DashboardPage() {
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-card">
                 <TableRow>
-                  <TableHead>Product</TableHead>
-                  <TableHead>Qty</TableHead>
-                  <TableHead>Status</TableHead>
+                  <SortableHead column={lowStockTable.getColumn('name')!}>Product</SortableHead>
+                  <SortableHead column={lowStockTable.getColumn('quantity_on_hand')!}>Qty</SortableHead>
+                  <SortableHead column={lowStockTable.getColumn('status')!}>Status</SortableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {lowItems.length === 0 && (
+                {sortedLowItems.length === 0 && (
                   <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">All stock levels healthy ✓</TableCell></TableRow>
                 )}
-                {lowItems.map((p) => (
+                {sortedLowItems.map((p) => (
                   <TableRow key={p.id}>
-                    <TableCell className="font-medium">{p.name}</TableCell>
+                    <TableCell className="max-w-xs font-medium whitespace-normal break-words">{p.name}</TableCell>
                     <TableCell className={`font-bold ${p.quantity_on_hand === 0 ? 'text-red-600' : 'text-amber-600'}`}>
                       {p.quantity_on_hand}
                     </TableCell>
@@ -685,7 +804,18 @@ export default function DashboardPage() {
           </DialogHeader>
           <div className="flex flex-col gap-2 text-sm text-muted-foreground">
             <p>This withdraws the request — the reservation is released and those units become available for someone else to request or issue.</p>
-            <p>The staff member isn&apos;t notified automatically from here — let them know separately if they&apos;re expecting to collect it.</p>
+            {pickupCancelledEmailOn ? (
+              <p>
+                The staff member will be emailed automatically to let them know, using the reason above if you add
+                one — this follows the &quot;Approved pickup cancelled&quot; setting under Notifications.
+              </p>
+            ) : (
+              <p>
+                The staff member isn&apos;t notified automatically from here — let them know separately if
+                they&apos;re expecting to collect it. (The &quot;Approved pickup cancelled&quot; email under
+                Notifications is currently turned off.)
+              </p>
+            )}
             <p className="text-foreground">This can&apos;t be undone from the app.</p>
           </div>
           <div className="grid gap-1.5">

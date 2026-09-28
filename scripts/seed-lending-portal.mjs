@@ -98,7 +98,10 @@ async function main() {
   const existing = await db.collection('products').where('barcodes', 'array-contains', 'TESTPROJ001').get()
   const productId = existing.empty ? undefined : existing.docs[0].id
   const productPayload = {
-    category_id: peripheralsCategoryId, name: 'Test Projector', description: 'Seed product for lending portal testing',
+    // Denormalized, same as the app's own handleSave (products/page.tsx) —
+    // the Products table reads p.category_name directly rather than
+    // joining against category_id at render time.
+    category_id: peripheralsCategoryId, category_name: 'Peripherals', name: 'Test Projector', description: 'Seed product for lending portal testing',
     barcodes: ['TESTPROJ001'], quantity_on_hand: 3, reorder_threshold: 1, available: true,
     location: 'NWU - Potchefstroom, Building G4, Room 28', lend_from: today, lend_to: addDays(today, 30),
     updated_at: new Date().toISOString(),
