@@ -687,8 +687,8 @@ export default function StaffPage() {
                       variant="outline"
                       size="sm"
                       className={s.is_active
-                        ? 'h-auto rounded-lg border-[#D5C6E0] bg-[#F0EBF5] px-3 py-1.5 text-sm font-semibold text-red-600 hover:bg-[#E4D9EE] hover:text-red-700'
-                        : 'h-auto rounded-lg border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800'}
+                        ? 'h-7 rounded-lg border-[#D5C6E0] bg-[#F0EBF5] px-3 text-sm font-semibold text-red-600 hover:bg-[#E4D9EE] hover:text-red-700'
+                        : 'h-7 rounded-lg border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800'}
                       onClick={() => toggleActive(s)}
                     >
                       {s.is_active ? 'Deactivate' : 'Activate'}
