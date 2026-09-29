@@ -773,14 +773,14 @@ export default function StaffPage() {
                 <Label htmlFor="s-surname">Surname *</Label>
                 <Input id="s-surname" required value={form.surname} onChange={f('surname')} />
               </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="s-email">Email *</Label>
-                <Input id="s-email" type="email" required value={form.email} onChange={f('email')} />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor="s-department">Department *</Label>
-                <Input id="s-department" required value={form.department} onChange={f('department')} placeholder="e.g. Engineering" />
-              </div>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="s-email">Email *</Label>
+              <Input id="s-email" type="email" required value={form.email} onChange={f('email')} />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="s-department">Department *</Label>
+              <Input id="s-department" required value={form.department} onChange={f('department')} placeholder="e.g. Engineering" />
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="s-card">
