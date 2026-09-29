@@ -120,7 +120,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
 
   // Deactivated on the Staff page (Deactivate button) — locked out of the
   // portal the same way they're already locked out of Stock Out's staff
-  // picker. Every sign-in path (password login, NWU-CAS) ends up here
+  // picker. Every sign-in path ends up here
   // before reaching Browse/Cart/My Requests, so this is the one place that
   // needs to enforce it to cover both. login/page.tsx also checks this up
   // front for the password path, purely so that one gets an immediate,

@@ -27,7 +27,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "embla-carousel-react": "^8.6.0",
-    "fast-xml-parser": "^5.10.1",
     "firebase": "^12.17.1",
     "firebase-admin": "^14.2.0",
     "lucide-react": "^1.30.0",

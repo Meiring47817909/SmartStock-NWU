@@ -20,10 +20,11 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { avatarInitials, avatarColorClass } from '@/lib/utils'
 
 // Only an account that actually has an email/password credential can
-// change one here — an NWU-CAS-only sign-in has no password to update
-// (see (auth)/cas-callback/page.tsx: it signs in with a custom token, no
-// password provider attached), so that case gets a "set one up" email
-// instead of a form asking for a current password that doesn't exist.
+// change one here — an account signed in via a custom token (historically,
+// NWU-CAS logins, now removed from this app but still possible for any
+// account that was created that way before) has no password to update, so
+// that case gets a "set one up" email instead of a form asking for a
+// current password that doesn't exist.
 function hasPasswordProvider(user: { providerData: { providerId: string }[] } | null): boolean {
   return !!user?.providerData.some((p) => p.providerId === 'password')
 }
@@ -168,7 +169,7 @@ function ChangePasswordCard({ email }: { email: string }) {
   )
 }
 
-// The NWU-CAS-only case — no password provider to change, so this offers
+// The no-password-provider case — no password to change, so this offers
 // the same "set your password" email the admin's Send Login Email button
 // sends, just triggered by the staff member themselves instead of Selouna.
 function SetUpPasswordCard({ email }: { email: string }) {

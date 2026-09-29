@@ -11,7 +11,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
 
 function LoginPageInner() {
@@ -93,7 +92,7 @@ function LoginPageInner() {
     if (!staffSnap.empty) {
       // Deactivated (Staff page → Deactivate) — the portal layout itself
       // also blocks this (see lend/layout.tsx's PortalShell), which is what
-      // actually enforces it for every sign-in path including NWU-CAS. This
+      // actually enforces it for every sign-in path. This
       // check is purely so the password-login path gets an immediate,
       // specific error right here instead of a "Loading…" flash before
       // landing on that dead-end screen.
@@ -140,11 +139,6 @@ function LoginPageInner() {
       }
     }
     setSendingReset(false)
-  }
-
-  function handleCasLogin() {
-    const service = window.location.origin + '/cas-callback'
-    window.location.href = `https://casprd.nwu.ac.za/cas/login?service=${encodeURIComponent(service)}`
   }
 
   return (
@@ -232,16 +226,6 @@ function LoginPageInner() {
               </button>
             </p>
           </form>
-
-          <div className="my-5 flex items-center gap-3">
-            <Separator className="flex-1" />
-            <span className="text-sm text-muted-foreground">or</span>
-            <Separator className="flex-1" />
-          </div>
-
-          <Button type="button" variant="outline" onClick={handleCasLogin} className="w-full justify-center">
-            Use NWU-CAS
-          </Button>
         </CardContent>
       </Card>
     </div>
