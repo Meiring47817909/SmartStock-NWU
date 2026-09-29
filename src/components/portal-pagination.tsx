@@ -41,27 +41,33 @@ export function PortalPagination({
   const to = pageSize === 'all' ? totalRows : Math.min(totalRows, (pageIndex + 1) * pageSize)
 
   return (
-    <div className="flex flex-wrap items-center justify-center gap-3 border-t pt-4 text-sm text-muted-foreground">
-      <span>{totalRows === 0 ? '0 of 0' : `${from}–${to} of ${totalRows}`}</span>
-      <Pagination className="mx-0 w-auto">
-        <PaginationContent>
-          <PaginationItem>
-            <PaginationPrevious
-              disabled={pageIndex === 0}
-              onClick={() => onPageIndexChange(Math.max(0, pageIndex - 1))}
-            />
-          </PaginationItem>
-          <PaginationItem>
-            <span className="px-1 text-sm whitespace-nowrap">Page {pageIndex + 1} of {pageCount}</span>
-          </PaginationItem>
-          <PaginationItem>
-            <PaginationNext
-              disabled={pageIndex >= pageCount - 1}
-              onClick={() => onPageIndexChange(Math.min(pageCount - 1, pageIndex + 1))}
-            />
-          </PaginationItem>
-        </PaginationContent>
-      </Pagination>
+    // Floating white pill, centered under the list rather than a plain
+    // border-t separator row -- same rounded-full/bordered/shadow-sm
+    // treatment as the rest of the portal's cards, just pill-shaped to
+    // match this control's compact, single-row content.
+    <div className="mt-4 flex justify-center">
+      <div className="flex flex-wrap items-center justify-center gap-3 rounded-full border border-[#E2D8E9] bg-white px-6 py-2.5 text-sm text-muted-foreground shadow-sm">
+        <span>{totalRows === 0 ? '0 of 0' : `${from}–${to} of ${totalRows}`}</span>
+        <Pagination className="mx-0 w-auto">
+          <PaginationContent>
+            <PaginationItem>
+              <PaginationPrevious
+                disabled={pageIndex === 0}
+                onClick={() => onPageIndexChange(Math.max(0, pageIndex - 1))}
+              />
+            </PaginationItem>
+            <PaginationItem>
+              <span className="px-1 text-sm whitespace-nowrap">Page {pageIndex + 1} of {pageCount}</span>
+            </PaginationItem>
+            <PaginationItem>
+              <PaginationNext
+                disabled={pageIndex >= pageCount - 1}
+                onClick={() => onPageIndexChange(Math.min(pageCount - 1, pageIndex + 1))}
+              />
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
+      </div>
     </div>
   )
 }

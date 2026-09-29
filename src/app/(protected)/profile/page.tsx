@@ -117,14 +117,14 @@ function MyDetailsCard({
 
   if (loadingDoc) {
     return (
-      <Card>
+      <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
         <CardContent className="py-8 text-center text-sm text-muted-foreground">Loading…</CardContent>
       </Card>
     )
   }
 
   return (
-    <Card>
+    <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
       <CardHeader>
         <CardTitle>My details</CardTitle>
       </CardHeader>
@@ -240,7 +240,7 @@ function ChangeEmailCard({ currentEmail, onEmailChanged }: { currentEmail: strin
   }
 
   return (
-    <Card>
+    <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
       <CardHeader>
         <CardTitle>Change email</CardTitle>
       </CardHeader>
@@ -362,7 +362,7 @@ function ChangePasswordCard({ email }: { email: string }) {
   }
 
   return (
-    <Card>
+    <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
       <CardHeader>
         <CardTitle>Change password</CardTitle>
       </CardHeader>
@@ -448,14 +448,14 @@ export default function AdminProfilePage() {
 
   return (
     <div className="mx-auto flex max-w-[1000px] flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">My Profile</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Your BICS account, and your own borrower details for Stock Out.</p>
+      <div className="space-y-1">
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">My Profile</h1>
+        <p className="text-sm text-[#5B4F67]">Your BICS account, and your own borrower details for Stock Out.</p>
       </div>
 
       <div className="flex flex-col gap-6 md:flex-row md:items-start">
         <div className="flex flex-col gap-6 md:w-[480px]">
-          <Card>
+          <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
             <CardContent className="flex items-center gap-4">
               <Avatar className="size-14">
                 <AvatarFallback className={`text-lg font-semibold text-white ${avatarColorClass(profile.full_name)}`}>

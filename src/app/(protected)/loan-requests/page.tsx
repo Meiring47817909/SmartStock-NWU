@@ -10,7 +10,7 @@ import {
   approveAsIs, sendCounter, declineRequest, expireIfNeeded,
   computeExpiryDate, getReservedQuantity, effectiveToDate,
 } from '@/lib/firebase/loanRequests'
-import { formatDateOnly, formatLendWindow, todayDateStr } from '@/lib/utils'
+import { formatDateOnly, formatLendWindow, sentenceCase, todayDateStr } from '@/lib/utils'
 import { notifyAlertsChanged } from '@/lib/alertsBus'
 import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
@@ -27,14 +27,14 @@ import {
 import type { LoanRequest, LoanRequestLine, LoanRequestStatus } from '@/types/database'
 
 const STATUS_BADGE_CLASS: Record<LoanRequestStatus, string> = {
-  pending: 'bg-amber-100 text-amber-800',
-  countered: 'bg-sky-100 text-sky-800',
-  accepted: 'bg-emerald-100 text-emerald-800',
-  fulfilled: 'bg-accent text-accent-foreground',
-  declined: 'bg-red-100 text-red-800',
-  expired: 'bg-muted text-muted-foreground',
-  withdrawn: 'bg-muted text-muted-foreground',
-  no_show: 'bg-red-100 text-red-800',
+  pending: 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold',
+  countered: 'bg-sky-100 text-sky-800 border-sky-200/60 px-2.5 font-semibold',
+  accepted: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold',
+  fulfilled: 'bg-accent text-accent-foreground border-transparent px-2.5 font-semibold',
+  declined: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold',
+  expired: 'bg-muted text-muted-foreground border-transparent px-2.5 font-semibold',
+  withdrawn: 'bg-muted text-muted-foreground border-transparent px-2.5 font-semibold',
+  no_show: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold',
 }
 
 interface DraftLine {
@@ -293,25 +293,25 @@ export default function LoanRequestsPage() {
     const draft = drafts[r.id]
     const dirty = isDirty(r)
     return (
-      <TableRow className="bg-muted/50">
+      <TableRow className="border-y border-[#E2D8E9]/80 bg-[#FBF9FD] shadow-inner hover:bg-[#FBF9FD]">
         {/* Holds free text (a staff message, a counter note), and TableCell
                     is whitespace-nowrap by default — see the same fix in
                     audit-log/page.tsx. Without this the message sets the cell's
                     min-content width and drags the table past the screen. */}
-        <TableCell colSpan={5} className="p-4 break-words whitespace-normal">
+        <TableCell colSpan={5} className="px-8 py-6 break-words whitespace-normal">
           {!draft ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : (
             <div className="flex flex-col gap-4">
               <div className="flex flex-wrap items-end gap-4">
                 <div className="grid gap-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">From</label>
-                  <Input type="date" className="w-40" value={draft.fromDate} min={todayDateStr()}
+                  <label className="text-sm font-semibold text-slate-600">From</label>
+                  <Input type="date" className="w-48 border-slate-300 bg-white font-mono text-slate-700 focus-visible:border-[#8046B5] focus-visible:ring-[#8046B5]/50" value={draft.fromDate} min={todayDateStr()}
                     onChange={(e) => updateDraftDate(r.id, 'fromDate', e.target.value)} />
                 </div>
                 <div className="grid gap-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">To</label>
-                  <Input type="date" className="w-40" value={draft.toDate} min={draft.fromDate}
+                  <label className="text-sm font-semibold text-slate-600">To</label>
+                  <Input type="date" className="w-48 border-slate-300 bg-white font-mono text-slate-700 focus-visible:border-[#8046B5] focus-visible:ring-[#8046B5]/50" value={draft.toDate} min={draft.fromDate}
                     onChange={(e) => updateDraftDate(r.id, 'toDate', e.target.value)} />
                 </div>
               </div>
@@ -322,38 +322,38 @@ export default function LoanRequestsPage() {
                   break-words so an unbroken token can't widen the table. */}
               {r.message && (
                 <div className="grid w-full gap-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">Message</span>
+                  <span className="text-sm font-semibold text-slate-600">Message</span>
                   <p className="w-full text-sm break-words whitespace-normal text-foreground">
                     {r.message}
                   </p>
                 </div>
               )}
 
-              <div className="max-h-64 overflow-y-auto">
+              <div className="max-h-64 overflow-y-auto rounded-lg border border-[#E5DBEC] bg-white shadow-xs">
               <Table>
-                <TableHeader className="sticky top-0 z-10 bg-card">
-                  <TableRow>
-                    <TableHead>Product</TableHead>
-                    <TableHead>Requested</TableHead>
-                    <TableHead>Offering</TableHead>
-                    <TableHead></TableHead>
+                <TableHeader className="sticky top-0 z-10 bg-[#F6F2F9]">
+                  <TableRow className="border-b border-[#E5DBEC] hover:bg-[#F6F2F9]">
+                    <TableHead className="h-auto py-2.5 text-base font-bold text-[#2D203A]">Product</TableHead>
+                    <TableHead className="h-auto py-2.5 text-center text-base font-bold text-[#2D203A]">Requested</TableHead>
+                    <TableHead className="h-auto py-2.5 text-center text-base font-bold text-[#2D203A]">Offering</TableHead>
+                    <TableHead className="h-auto py-2.5 text-right text-base font-bold text-[#2D203A]">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {draft.lines.map((l) => (
-                    <TableRow key={l.id}>
-                      <TableCell className="max-w-xs font-medium whitespace-normal break-words">{l.product_name}</TableCell>
-                      <TableCell className="text-muted-foreground">{l.requested_quantity}</TableCell>
+                    <TableRow key={l.id} className="border-slate-100 hover:bg-[#FDFCFE]">
+                      <TableCell className="max-w-xs font-semibold text-sm text-slate-800 whitespace-normal break-words">{l.product_name}</TableCell>
+                      <TableCell className="text-center text-sm font-medium text-slate-600">{l.requested_quantity}</TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1.5">
-                          <Button variant="ghost" size="icon-sm" onClick={() => updateOfferedQty(r.id, l.id, l.offered_quantity - 1)}>−</Button>
-                          <span className={`min-w-6 text-center font-bold ${l.offered_quantity > 0 ? 'text-primary' : 'text-muted-foreground'}`}>{l.offered_quantity}</span>
-                          <Button variant="ghost" size="icon-sm" onClick={() => updateOfferedQty(r.id, l.id, l.offered_quantity + 1)}>+</Button>
+                        <div className="flex items-center justify-center gap-3">
+                          <Button variant="ghost" size="icon-sm" className="text-slate-600 hover:bg-slate-100" onClick={() => updateOfferedQty(r.id, l.id, l.offered_quantity - 1)}>−</Button>
+                          <span className={`min-w-6 text-center font-bold ${l.offered_quantity > 0 ? 'text-primary' : 'text-slate-600'}`}>{l.offered_quantity}</span>
+                          <Button variant="ghost" size="icon-sm" className="text-slate-600 hover:bg-slate-100" onClick={() => updateOfferedQty(r.id, l.id, l.offered_quantity + 1)}>+</Button>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="text-right">
                         {l.offered_quantity > 0 && (
-                          <Button variant="ghost" size="sm" onClick={() => updateOfferedQty(r.id, l.id, 0)}>Remove</Button>
+                          <Button variant="outline" size="sm" className="h-auto rounded-lg border-[#D5C6E0] bg-[#F0EBF5] px-3 py-1.5 text-sm font-semibold text-red-600 hover:bg-[#E4D9EE] hover:text-red-700" onClick={() => updateOfferedQty(r.id, l.id, 0)}>Remove</Button>
                         )}
                       </TableCell>
                     </TableRow>
@@ -366,19 +366,25 @@ export default function LoanRequestsPage() {
                 <Alert variant="destructive"><AlertDescription>{rowErrors[r.id]}</AlertDescription></Alert>
               )}
 
-              <div className="flex items-center gap-2">
-                <Button disabled={busy === r.id || dirty} onClick={() => handleApprove(r)}>
-                  {busy === r.id ? '…' : 'Approve as-is'}
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={busy === r.id || !dirty || draft.lines.every((l) => l.offered_quantity <= 0)}
-                  onClick={() => startCounter(r)}
-                  title={draft.lines.every((l) => l.offered_quantity <= 0) ? 'Offer at least 1 unit of a product to send a counter.' : undefined}
-                >
-                  Send Counter
-                </Button>
-                <Button variant="ghost" disabled={busy === r.id} onClick={() => startDecline(r)} className="ml-auto text-destructive hover:text-destructive">
+              <div className="flex items-center justify-between pt-2">
+                <div className="flex items-center gap-3">
+                  <Button
+                    disabled={busy === r.id || dirty}
+                    onClick={() => handleApprove(r)}
+                    className="h-auto rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-[#582e78]"
+                  >
+                    {busy === r.id ? '…' : 'Approve as-is'}
+                  </Button>
+                  <Button
+                    disabled={busy === r.id || !dirty || draft.lines.every((l) => l.offered_quantity <= 0)}
+                    onClick={() => startCounter(r)}
+                    title={draft.lines.every((l) => l.offered_quantity <= 0) ? 'Offer at least 1 unit of a product to send a counter.' : undefined}
+                    className="h-auto rounded-lg bg-(--nwu-turquoise) px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-(--nwu-turquoise-dark)"
+                  >
+                    Send Counter
+                  </Button>
+                </div>
+                <Button variant="outline" disabled={busy === r.id} onClick={() => startDecline(r)} className="h-auto rounded-lg border-[#D5C6E0] bg-[#F0EBF5] px-3 py-1.5 text-sm font-semibold text-red-600 hover:bg-[#E4D9EE] hover:text-red-700">
                   Decline
                 </Button>
               </div>
@@ -400,22 +406,22 @@ export default function LoanRequestsPage() {
     const lines = linesByRequest[r.id] ?? []
     const datesChanged = r.from_date !== r.original_from_date || (r.to_date ?? null) !== (r.original_to_date ?? null)
     return (
-      <TableRow className="bg-muted/50">
+      <TableRow className="border-y border-[#E2D8E9]/80 bg-[#FBF9FD] shadow-inner hover:bg-[#FBF9FD]">
         {/* Holds free text (a staff message, a counter note), and TableCell
                     is whitespace-nowrap by default — see the same fix in
                     audit-log/page.tsx. Without this the message sets the cell's
                     min-content width and drags the table past the screen. */}
-        <TableCell colSpan={5} className="p-4 break-words whitespace-normal">
+        <TableCell colSpan={5} className="px-8 py-6 break-words whitespace-normal">
           <div className="flex flex-col gap-4">
             {r.message && (
               <div className="grid gap-1.5">
-                <span className="text-xs font-medium text-muted-foreground">Staff&apos;s message</span>
+                <span className="text-sm font-semibold text-slate-600">Staff&apos;s message</span>
                 <p className="w-full text-sm break-words whitespace-normal text-foreground">&ldquo;{r.message}&rdquo;</p>
               </div>
             )}
 
             <div className="grid gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Counter offered</span>
+              <span className="text-sm font-semibold text-slate-600">Counter offered</span>
               <p className="text-sm text-foreground">{formatLendWindow(r.from_date, r.to_date)}</p>
               {datesChanged && (
                 <p className="text-xs text-muted-foreground">
@@ -424,20 +430,20 @@ export default function LoanRequestsPage() {
               )}
             </div>
 
-            <div className="max-h-64 overflow-y-auto">
+            <div className="max-h-64 overflow-y-auto rounded-lg border border-[#E5DBEC] bg-white shadow-xs">
               <Table>
-                <TableHeader className="sticky top-0 z-10 bg-card">
-                  <TableRow>
-                    <TableHead>Product</TableHead>
-                    <TableHead>Requested</TableHead>
-                    <TableHead>Counter Offer</TableHead>
+                <TableHeader className="sticky top-0 z-10 bg-[#F6F2F9]">
+                  <TableRow className="border-b border-[#E5DBEC] hover:bg-[#F6F2F9]">
+                    <TableHead className="h-auto py-2.5 text-base font-bold text-[#2D203A]">Product</TableHead>
+                    <TableHead className="h-auto py-2.5 text-base font-bold text-[#2D203A]">Requested</TableHead>
+                    <TableHead className="h-auto py-2.5 text-base font-bold text-[#2D203A]">Counter Offer</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {lines.map((l) => (
-                    <TableRow key={l.id}>
-                      <TableCell className="max-w-xs font-medium whitespace-normal break-words">{l.product_name}</TableCell>
-                      <TableCell className="text-muted-foreground">{l.requested_quantity}</TableCell>
+                    <TableRow key={l.id} className="border-slate-100 hover:bg-[#FDFCFE]">
+                      <TableCell className="max-w-xs font-semibold text-sm text-slate-800 whitespace-normal break-words">{l.product_name}</TableCell>
+                      <TableCell className="text-sm font-medium text-slate-600">{l.requested_quantity}</TableCell>
                       <TableCell>
                         {l.offered_quantity > 0 ? (
                           <span className="font-bold text-primary">{l.offered_quantity}</span>
@@ -453,16 +459,16 @@ export default function LoanRequestsPage() {
 
             {r.admin_message && (
               <div className="grid gap-1.5">
-                <span className="text-xs font-medium text-muted-foreground">Your counter message</span>
+                <span className="text-sm font-semibold text-slate-600">Your counter message</span>
                 <p className="w-full text-sm break-words whitespace-normal text-foreground">&ldquo;{r.admin_message}&rdquo;</p>
               </div>
             )}
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between gap-2 pt-2">
               <p className="text-xs text-muted-foreground">
                 Waiting on {r.staff_name} to respond — you can decline this counter, or wait for them to accept or decline it themselves.
               </p>
-              <Button variant="ghost" disabled={busy === r.id} onClick={() => startDecline(r)} className="ml-auto text-destructive hover:text-destructive">
+              <Button variant="outline" disabled={busy === r.id} onClick={() => startDecline(r)} className="h-auto rounded-lg border-[#D5C6E0] bg-[#F0EBF5] px-3 py-1.5 text-sm font-semibold text-red-600 hover:bg-[#E4D9EE] hover:text-red-700">
                 Decline
               </Button>
             </div>
@@ -480,21 +486,21 @@ export default function LoanRequestsPage() {
       const expiry = computeExpiryDate(r)
       return (
         <Fragment key={r.id}>
-          <TableRow className="cursor-pointer" onClick={() => toggleExpand(r)}>
-            <TableCell className="text-xs text-muted-foreground">{isExpanded(r.id) ? '▲' : '▼'}</TableCell>
-            <TableCell className="max-w-xs font-medium whitespace-normal break-words">
+          <TableRow className="group cursor-pointer hover:bg-[#FAF7FC]" onClick={() => toggleExpand(r)}>
+            <TableCell className="py-4 pl-6 text-xs text-slate-600 transition-colors group-hover:text-primary">{isExpanded(r.id) ? '▲' : '▼'}</TableCell>
+            <TableCell className="max-w-xs py-4 text-sm font-semibold whitespace-normal break-words text-slate-900 transition-colors group-hover:text-primary">
               {r.staff_name}
               {r.reference_no && (
-                <div className="font-mono text-xs font-normal break-all text-muted-foreground">
+                <div className="font-mono text-xs font-normal break-all text-slate-600">
                   {r.reference_no}
                 </div>
               )}
             </TableCell>
-            <TableCell className="text-muted-foreground">{itemCount} item{itemCount === 1 ? '' : 's'}</TableCell>
-            <TableCell>
-              <Badge className={`${STATUS_BADGE_CLASS[r.status]} uppercase`}>{r.status.replace('_', ' ')}</Badge>
+            <TableCell className="py-4 text-sm text-slate-600">{itemCount} item{itemCount === 1 ? '' : 's'}</TableCell>
+            <TableCell className="py-4">
+              <Badge className={STATUS_BADGE_CLASS[r.status]}>{sentenceCase(r.status.replace('_', ' '))}</Badge>
             </TableCell>
-            <TableCell className="text-muted-foreground">{expiry ? formatDateOnly(expiry) : '—'}</TableCell>
+            <TableCell className="py-4 pr-6 text-sm font-medium text-slate-600">{expiry ? formatDateOnly(expiry) : '—'}</TableCell>
           </TableRow>
           {isExpanded(r.id) && <EditableRow r={r} />}
         </Fragment>
@@ -504,47 +510,55 @@ export default function LoanRequestsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Loan Requests</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Review, counter, and track portal lending requests from NWU staff.</p>
+      <div className="mb-6 space-y-1">
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Loan Requests</h1>
+        <p className="text-sm text-[#5B4F67]">Review, counter, and track portal lending requests from NWU staff.</p>
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="min-h-0 flex-1">
-        {/* Same segmented-control tab bar as Reports/Dashboard/My
-            Requests: a bordered light-grey track, each tab flex-1 across
-            the full width, the active one a white pill with NWU-purple
-            text. Forced !h-14/!h-11 heights (rather than h-auto) because
+        {/* Same segmented-control tab bar as Dashboard/Reports: a
+            bordered light-grey track, each tab flex-1 across the full
+            width, the active one a solid NWU-purple pill with white text.
+            Forced !h-14/!h-11 heights (rather than h-auto) because
             TabsTrigger's own base class hardcodes h-[calc(100%-1px)],
             which otherwise wins and stretches every tab to the track's
             full height with no breathing room top/bottom. */}
-        <TabsList className="mb-6 flex w-full !h-14 gap-0 overflow-hidden rounded-lg border border-(--nwu-purple)/30 bg-border p-1.5">
+        <TabsList className="mb-4 flex w-full !h-14 gap-1.5 overflow-hidden rounded-2xl border border-purple-200/50 bg-white/60 p-1.5 backdrop-blur-sm">
           <TabsTrigger
             value="pending"
-            className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+            className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
           >
             Needs Review
-            {pending.length > 0 && <Badge className="bg-amber-100 text-amber-800">{pending.length}</Badge>}
+            {pending.length > 0 && (
+              <Badge className="bg-(--nwu-turquoise) text-white">
+                {pending.length}
+              </Badge>
+            )}
           </TabsTrigger>
           <TabsTrigger
             value="countered"
-            className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+            className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
           >
             Sent Counters
-            {countered.length > 0 && <Badge className="bg-sky-100 text-sky-800">{countered.length}</Badge>}
+            {countered.length > 0 && (
+              <Badge className="bg-(--nwu-turquoise) text-white">
+                {countered.length}
+              </Badge>
+            )}
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="pending" className="min-h-0">
-          <Card className="h-full min-h-0 py-0">
+          <Card className="h-full min-h-0 rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
             <div className="min-h-0 flex-1 overflow-y-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow>
-                  <TableHead className="w-8"></TableHead>
-                  <TableHead>Staff</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Expires</TableHead>
+              <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+                <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+                  <TableHead className="h-auto w-8 py-3.5 pl-6"></TableHead>
+                  <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff</TableHead>
+                  <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Items</TableHead>
+                  <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Status</TableHead>
+                  <TableHead className="h-auto py-3.5 pr-6 text-base font-bold text-[#2D203A]">Expires</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>{requestRows(pending)}</TableBody>
@@ -554,16 +568,16 @@ export default function LoanRequestsPage() {
         </TabsContent>
 
         <TabsContent value="countered" className="min-h-0">
-          <Card className="h-full min-h-0 py-0">
+          <Card className="h-full min-h-0 rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
             <div className="min-h-0 flex-1 overflow-y-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow>
-                  <TableHead className="w-8"></TableHead>
-                  <TableHead>Staff</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Expires</TableHead>
+              <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+                <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+                  <TableHead className="h-auto w-8 py-3.5 pl-6"></TableHead>
+                  <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff</TableHead>
+                  <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Items</TableHead>
+                  <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Status</TableHead>
+                  <TableHead className="h-auto py-3.5 pr-6 text-base font-bold text-[#2D203A]">Expires</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>{requestRows(countered)}</TableBody>

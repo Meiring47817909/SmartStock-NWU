@@ -1,51 +1,21 @@
-<svg id="smartstock-svg-active-light" xmlns="http://www.w3.org/2000/svg" viewBox="140 290 920 410">
-  <!-- Same lockup as smartstock-nwu-logo.svg, with the wordmark recoloured
-       for the admin sidebar's dark purple-to-magenta gradient header
-       (Sidebar.tsx) — the master file's #6d28d9/#1e1b4b text reads at
-       under 2:1 contrast there (WCAG AA needs 4.5:1), so a plain resize
-       isn't enough; this near-white/light-lavender variant clears 8:1+
-       throughout. The icon mark keeps its original colours unchanged —
-       only the two <text> fills differ from the master file. Keep both
-       files' geometry in sync if the mark itself ever changes. -->
+<svg id="smartstock-svg-active-light" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 120">
+  <!-- Stacked-layers lockup for dark backgrounds (the admin sidebar's
+       purple gradient header, Sidebar.tsx). Same icon mark as
+       smartstock-nwu-icon.svg; smartstock-nwu-logo.svg is this same
+       lockup recoloured for light backgrounds (login page, lending portal
+       header). Keep the icon <defs>/<rect>/<g> and the wordmark <text>
+       baseline in sync across all three files if the mark or layout
+       changes. -->
   <defs>
-    <linearGradient id="s2-arrow" x1="0%" y1="100%" x2="0%" y2="0%">
-      <stop offset="0%" stop-color="#0284c7" />
-      <stop offset="60%" stop-color="#06b6d4" />
-      <stop offset="100%" stop-color="#a855f7" />
-    </linearGradient>
-    <linearGradient id="s2-box" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#7c3aed" />
-      <stop offset="100%" stop-color="#4c1d95" />
+    <linearGradient id="cubeBg" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#311149" />
+      <stop offset="55%" stop-color="#632c8c" />
+      <stop offset="100%" stop-color="#9955d4" />
     </linearGradient>
   </defs>
-
-  <!-- Left Side: Neotech Hex Crate -->
-  <g transform="translate(-40, 0)">
-    <path fill="url(#s2-box)" d="M 320,320 L 430,384 L 320,448 L 210,384 Z" />
-    <path fill="#c084fc" opacity="0.6" d="M 320,320 L 430,384 L 402,384 L 320,336 Z" />
-    <path fill="#2e1065" d="M 210,404 L 310,462 L 310,610 L 210,552 Z" />
-    <path fill="#4c1d95" d="M 430,404 L 430,552 L 330,610 L 330,462 Z" />
-    <path fill="url(#s2-arrow)" d="M 320,430 L 378,506 L 348,506 L 348,650 L 292,650 L 292,506 L 262,506 Z" />
+  <rect x="12" y="10" width="100" height="100" rx="20" fill="url(#cubeBg)" stroke="#c084fc" stroke-opacity="0.35" stroke-width="2" />
+  <g transform="translate(30,30) scale(2.5)" fill="none" stroke="#67e8f9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
   </g>
-
-  <!-- Minimal Column Divider -->
-  <line x1="435" y1="360" x2="435" y2="640" stroke="#d9c9ec" stroke-width="3" stroke-linecap="round"/>
-
-  <!-- Right Side: Neo-Grotesque Name Lockup with BICS -->
-  <g transform="translate(470, 410)">
-    <!-- Top Wordmark: SmartStock-NWU -->
-    <text x="0" y="65" font-family="'Plus Jakarta Sans', sans-serif" font-weight="900" font-size="52" fill="#f5f0fb" letter-spacing="-0.5">
-      Smart<tspan font-weight="900" fill="#f5f0fb">Stock</tspan><tspan font-weight="800" fill="#e9defb">-NWU</tspan>
-    </text>
-
-    <!-- Hairline Connector -->
-    <line x1="0" y1="96" x2="500" y2="96" stroke="#d9c9ec" stroke-width="3" stroke-linecap="round"/>
-
-    <!-- Bottom Lockup: BICS -->
-    <g transform="translate(0, 142)">
-      <text x="0" y="0" font-family="'Plus Jakarta Sans', sans-serif" font-weight="900" font-size="30" fill="#d9c9ec" letter-spacing="8">
-        BICS
-      </text>
-    </g>
-  </g>
+  <text x="132" y="70" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-weight="800" font-size="34" letter-spacing="-0.5" fill="#FFFFFF">SmartStock-NWU</text>
 </svg>

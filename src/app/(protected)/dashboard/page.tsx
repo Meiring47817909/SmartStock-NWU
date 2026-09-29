@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
-import { formatDateOnly, formatLendWindow, stockStatusLabel, todayDateStr } from '@/lib/utils'
+import { formatDateOnly, formatLendWindow, sentenceCase, stockStatusLabel, todayDateStr } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { collection, query, where, orderBy, getDocs, getCountFromServer } from 'firebase/firestore'
 import { useTable, type SortingState } from '@tanstack/react-table'
@@ -37,11 +37,11 @@ function outstandingStatus(expectedDate: string | null): { label: string; classN
   // An issue with no Lend To is a deliberate "no return date agreed", not
   // missing data, so it gets its own neutral label rather than an empty
   // cell — otherwise the row reads as broken.
-  if (!expectedDate) return { label: 'No Return Date', className: 'bg-slate-100 text-slate-700' }
+  if (!expectedDate) return { label: 'No Return Date', className: 'bg-slate-100 text-slate-800 border-slate-200/60 px-2.5 font-semibold' }
   const today = todayDateStr()
-  if (today > expectedDate) return { label: 'Overdue', className: 'bg-red-100 text-red-800' }
-  if (today === expectedDate) return { label: 'Due Today', className: 'bg-amber-100 text-amber-800' }
-  return { label: 'Not Due Yet', className: 'bg-emerald-100 text-emerald-800' }
+  if (today > expectedDate) return { label: 'Overdue', className: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold' }
+  if (today === expectedDate) return { label: 'Due Today', className: 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold' }
+  return { label: 'Not Due Yet', className: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold' }
 }
 
 // Same urgency order as outstandingStatus() above returns its labels in —
@@ -378,9 +378,9 @@ export default function DashboardPage() {
 
   const statCards = [
     { label: 'Products', value: stats.total_products, className: 'text-primary' },
-    { label: 'Total Stock Units', value: stats.total_stock, className: 'text-(--nwu-turquoise)' },
-    { label: 'Low Stock Items', value: stats.low_stock, className: 'text-amber-500' },
-    { label: 'Registered Staff', value: stats.total_staff, className: 'text-muted-foreground' },
+    { label: 'Total stock units', value: stats.total_stock, className: 'text-(--nwu-turquoise)' },
+    { label: 'Low stock items', value: stats.low_stock, className: 'text-amber-600' },
+    { label: 'Registered staff', value: stats.total_staff, className: 'text-slate-600' },
   ]
 
   // Incoming Pickups' own Cancel button (2026-09-20 — moved here from the
@@ -455,17 +455,17 @@ export default function DashboardPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">NWU IT Store · Potchefstroom</p>
+      <div className="mb-6 space-y-1">
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Dashboard</h1>
+        <p className="text-sm text-[#5B4F67]">NWU IT Store · Potchefstroom</p>
       </div>
 
-      <div className="mb-6 grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-4">
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {statCards.map(c => (
-          <Card key={c.label}>
+          <Card key={c.label} className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm transition-shadow hover:shadow-md">
             <CardContent>
               <div className={`text-3xl font-extrabold ${c.className}`}>{c.value}</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">{c.label}</div>
+              <div className="mt-1 text-sm font-semibold text-muted-foreground">{c.label}</div>
             </CardContent>
           </Card>
         ))}
@@ -484,48 +484,48 @@ export default function DashboardPage() {
             own base class hardcodes h-[calc(100%-1px)], which otherwise
             wins and stretches every tab to the track's full height with no
             breathing room top/bottom. */}
-        <TabsList className="mb-4 flex w-full !h-14 gap-0 overflow-hidden rounded-lg border border-(--nwu-purple)/30 bg-border p-1.5">
+        <TabsList className="mb-4 flex w-full !h-14 gap-1.5 overflow-hidden rounded-2xl border border-purple-200/50 bg-white/60 p-1.5 backdrop-blur-sm">
           <TabsTrigger
             value="outstanding-returns"
-            className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+            className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
           >
             Outstanding Returns
             {outstanding.length > 0 && (
-              <Badge className="bg-accent text-accent-foreground">{outstanding.length}</Badge>
+              <Badge className="bg-(--nwu-turquoise) text-white">{outstanding.length}</Badge>
             )}
           </TabsTrigger>
           <TabsTrigger
             value="incoming-pickups"
-            className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+            className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
           >
             Incoming Pickups
             {incomingPickups.length > 0 && (
-              <Badge className="bg-accent text-accent-foreground">{incomingPickups.length}</Badge>
+              <Badge className="bg-(--nwu-turquoise) text-white">{incomingPickups.length}</Badge>
             )}
           </TabsTrigger>
           <TabsTrigger
             value="low-stock"
-            className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+            className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
           >
             Low Stock Alerts
             {stats.low_stock > 0 && (
-              <Badge className="bg-amber-100 text-amber-800">{stats.low_stock}</Badge>
+              <Badge className="bg-(--nwu-turquoise) text-white">{stats.low_stock}</Badge>
             )}
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="outstanding-returns" className="min-h-0">
-          <Card className="h-full min-h-0 py-0">
+          <Card className="h-full min-h-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
             <div className="min-h-0 flex-1 overflow-y-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow>
-                  <SortableHead column={outstandingTable.getColumn('product_name')!}>Product</SortableHead>
-                  <SortableHead column={outstandingTable.getColumn('staff_name')!}>Staff</SortableHead>
-                  <SortableHead column={outstandingTable.getColumn('qty')!}>Qty</SortableHead>
-                  <SortableHead column={outstandingTable.getColumn('expected_date')!}>Expected</SortableHead>
-                  <SortableHead column={outstandingTable.getColumn('status')!}>Status</SortableHead>
-                  <TableHead></TableHead>
+              <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+                <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+                  <SortableHead column={outstandingTable.getColumn('product_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Product</SortableHead>
+                  <SortableHead column={outstandingTable.getColumn('staff_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff</SortableHead>
+                  <SortableHead column={outstandingTable.getColumn('qty')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Qty</SortableHead>
+                  <SortableHead column={outstandingTable.getColumn('expected_date')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Expected</SortableHead>
+                  <SortableHead column={outstandingTable.getColumn('status')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Status</SortableHead>
+                  <TableHead className="h-auto py-3.5 text-right text-base font-bold text-[#2D203A]">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -535,15 +535,15 @@ export default function DashboardPage() {
                 {sortedOutstanding.map((o) => {
                   const status = outstandingStatus(o.expected_date)
                   return (
-                    <TableRow key={o.id}>
+                    <TableRow key={o.id} className="hover:bg-[#FAF7FC]">
                       <TableCell className="max-w-xs font-medium whitespace-normal break-words">{o.product_name}</TableCell>
                       <TableCell className="max-w-xs whitespace-normal break-words text-muted-foreground">{o.staff_name}</TableCell>
                       <TableCell className="font-semibold">{o.qty}</TableCell>
                       <TableCell className="text-muted-foreground">{formatDateOnly(o.expected_date)}</TableCell>
-                      <TableCell><Badge className={`${status.className} uppercase`}>{status.label}</Badge></TableCell>
+                      <TableCell><Badge className={status.className}>{sentenceCase(status.label)}</Badge></TableCell>
                       <TableCell className="text-right">
                         {isAdmin && (
-                          <Button variant="ghost" size="sm" onClick={() => { setResolving(o); setResolveReason('') }}>
+                          <Button variant="outline" size="sm" className="border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900" onClick={() => { setResolving(o); setResolveReason('') }}>
                             Resolve
                           </Button>
                         )}
@@ -558,17 +558,17 @@ export default function DashboardPage() {
         </TabsContent>
 
         <TabsContent value="incoming-pickups" className="min-h-0">
-          <Card className="h-full min-h-0 py-0">
+          <Card className="h-full min-h-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
             <div className="min-h-0 flex-1 overflow-y-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow>
+              <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+                <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
                   <TableHead className="w-8"></TableHead>
-                  <SortableHead column={pickupsTable.getColumn('staff_name')!}>Staff</SortableHead>
-                  <SortableHead column={pickupsTable.getColumn('item_count')!}>Items</SortableHead>
-                  <SortableHead column={pickupsTable.getColumn('from_date')!}>Pickup Window</SortableHead>
-                  <SortableHead column={pickupsTable.getColumn('status')!}>Status</SortableHead>
-                  <TableHead></TableHead>
+                  <SortableHead column={pickupsTable.getColumn('staff_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff</SortableHead>
+                  <SortableHead column={pickupsTable.getColumn('item_count')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Items</SortableHead>
+                  <SortableHead column={pickupsTable.getColumn('from_date')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Pickup Window</SortableHead>
+                  <SortableHead column={pickupsTable.getColumn('status')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Status</SortableHead>
+                  <TableHead className="h-auto py-3.5 text-right text-base font-bold text-[#2D203A]">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -578,7 +578,7 @@ export default function DashboardPage() {
                 {sortedPickups.map((p) => (
                   <Fragment key={p.id}>
                     <TableRow
-                      className="cursor-pointer"
+                      className="cursor-pointer hover:bg-[#FAF7FC]"
                       onClick={() => togglePickup(p.id)}
                     >
                       <TableCell className="text-xs text-muted-foreground">{isPickupExpanded(p.id) ? '▲' : '▼'}</TableCell>
@@ -594,17 +594,17 @@ export default function DashboardPage() {
                       <TableCell className="text-muted-foreground">{formatLendWindow(p.from_date, p.to_date)}</TableCell>
                       <TableCell>
                         {p.noShow
-                          ? <Badge className="bg-red-100 text-red-800 uppercase">Not Picked Up</Badge>
+                          ? <Badge className="bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold">Not picked up</Badge>
                           : p.insufficient
-                            ? <Badge className="bg-orange-100 text-orange-800 uppercase">Insufficient</Badge>
-                            : <Badge className="bg-emerald-100 text-emerald-800 uppercase">On Schedule</Badge>}
+                            ? <Badge className="bg-orange-100 text-orange-800 border-orange-200/60 px-2.5 font-semibold">Insufficient</Badge>
+                            : <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold">On schedule</Badge>}
                       </TableCell>
                       <TableCell className="text-right">
                         {isAdmin && (
                           <Button
-                            variant="ghost" size="sm"
+                            variant="outline" size="sm"
                             onClick={(e) => { e.stopPropagation(); setCancelling(p); setCancelReason('') }}
-                            className="text-destructive hover:text-destructive"
+                            className="border-[#D5C6E0] bg-[#F0EBF5] text-red-600 hover:bg-[#E4D9EE] hover:text-red-700"
                           >
                             Cancel
                           </Button>
@@ -612,7 +612,7 @@ export default function DashboardPage() {
                       </TableCell>
                     </TableRow>
                     {isPickupExpanded(p.id) && (
-                      <TableRow className="bg-muted/50">
+                      <TableRow className="border-y border-[#E2D8E9]/80 bg-[#FBF9FD] shadow-inner hover:bg-[#FBF9FD]">
                         <TableCell colSpan={6} className="p-4 whitespace-normal">
                           {(pickupLines[p.id] ?? []).length === 0 ? (
                             <p className="text-sm text-muted-foreground">No items recorded.</p>
@@ -659,14 +659,14 @@ export default function DashboardPage() {
         </TabsContent>
 
         <TabsContent value="low-stock" className="min-h-0">
-          <Card className="h-full min-h-0 py-0">
+          <Card className="h-full min-h-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
             <div className="min-h-0 flex-1 overflow-y-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow>
-                  <SortableHead column={lowStockTable.getColumn('name')!}>Product</SortableHead>
-                  <SortableHead column={lowStockTable.getColumn('quantity_on_hand')!}>Qty</SortableHead>
-                  <SortableHead column={lowStockTable.getColumn('status')!}>Status</SortableHead>
+              <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+                <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+                  <SortableHead column={lowStockTable.getColumn('name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Product</SortableHead>
+                  <SortableHead column={lowStockTable.getColumn('quantity_on_hand')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Qty</SortableHead>
+                  <SortableHead column={lowStockTable.getColumn('status')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Status</SortableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -674,13 +674,13 @@ export default function DashboardPage() {
                   <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">All stock levels healthy ✓</TableCell></TableRow>
                 )}
                 {sortedLowItems.map((p) => (
-                  <TableRow key={p.id}>
+                  <TableRow key={p.id} className="hover:bg-[#FAF7FC]">
                     <TableCell className="max-w-xs font-medium whitespace-normal break-words">{p.name}</TableCell>
                     <TableCell className={`font-bold ${p.quantity_on_hand === 0 ? 'text-red-600' : 'text-amber-600'}`}>
                       {p.quantity_on_hand}
                     </TableCell>
                     <TableCell>
-                      <Badge className={p.quantity_on_hand === 0 ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'}>
+                      <Badge className={p.quantity_on_hand === 0 ? 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold' : 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold'}>
                         {stockStatusLabel(p.quantity_on_hand, p.reorder_threshold)}
                       </Badge>
                     </TableCell>

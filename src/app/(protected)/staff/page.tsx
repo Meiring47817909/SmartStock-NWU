@@ -9,7 +9,7 @@ import { collection, query, where, getDocs, addDoc, updateDoc, doc, orderBy } fr
 import { logAudit } from '@/lib/firebase/audit'
 import { normalizeEmail, findStaffEmailConflict, postStaffAdmin } from '@/lib/firebase/staff'
 import { loadWaivers, createReturnWaiver } from '@/lib/firebase/waivers'
-import { formatDateOnly, todayDateStr } from '@/lib/utils'
+import { formatDateOnly, sentenceCase, todayDateStr } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
 import { useRole } from '@/context/RoleContext'
 import { Card, CardContent } from '@/components/ui/card'
@@ -55,12 +55,12 @@ interface LentItem {
 // Same urgency labels as the Dashboard's Outstanding Returns table, plus the
 // terminal written-off state that only exists on this page.
 function lentItemStatus(item: LentItem): { label: string; className: string } {
-  if (item.waived) return { label: 'Resolved', className: 'bg-violet-100 text-violet-800' }
-  if (!item.expected_date) return { label: 'No Return Date', className: 'bg-slate-100 text-slate-700' }
+  if (item.waived) return { label: 'Resolved', className: 'bg-violet-100 text-violet-800 border-violet-200/60 px-2.5 font-semibold' }
+  if (!item.expected_date) return { label: 'No Return Date', className: 'bg-slate-100 text-slate-700 border-slate-200/60 px-2.5 font-semibold' }
   const today = todayDateStr()
-  if (today > item.expected_date) return { label: 'Overdue', className: 'bg-red-100 text-red-800' }
-  if (today === item.expected_date) return { label: 'Due Today', className: 'bg-amber-100 text-amber-800' }
-  return { label: 'Not Due Yet', className: 'bg-emerald-100 text-emerald-800' }
+  if (today > item.expected_date) return { label: 'Overdue', className: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold' }
+  if (today === item.expected_date) return { label: 'Due Today', className: 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold' }
+  return { label: 'Not Due Yet', className: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold' }
 }
 
 // The three values the Status column already badges (see the TableCell
@@ -556,42 +556,42 @@ export default function StaffPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-5 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Staff</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{activeCount} active · {deactivatedCount} deactivated</p>
+      <div className="mb-6 flex items-center justify-between">
+        <div className="space-y-1">
+          <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Staff</h1>
+          <p className="text-sm text-[#5B4F67]">{activeCount} active · {deactivatedCount} deactivated</p>
         </div>
-        <Button onClick={openAdd}><Plus className="size-4" /> Add Staff</Button>
+        <Button onClick={openAdd} className="h-auto rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-[#582e78]"><Plus className="size-4" /> Add Staff</Button>
       </div>
 
       {/* Status multi-select filter + Search */}
-      <Card className="mb-4">
+      <Card className="mb-4 rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
         <CardContent className="flex flex-wrap items-end gap-4">
         <div className="grid gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Status</span>
+          <span className="text-sm font-semibold text-slate-600">Status</span>
           <StaffStatusFilter selected={statusFilter} onChange={setStatusFilter} />
         </div>
         <div className="relative min-w-40 flex-1">
           <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input className="pl-8" placeholder="Search name, department…"
+          <Input className="border-slate-300 bg-white pl-8 text-slate-700 focus-visible:border-[#8046B5] focus-visible:ring-[#8046B5]/50" placeholder="Search name, department…"
             value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         </CardContent>
       </Card>
 
       {/* Table */}
-      <Card className="min-h-0 flex-1 py-0">
+      <Card className="min-h-0 flex-1 rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
-          <TableHeader className="sticky top-0 z-10 bg-card">
-            <TableRow>
-              <TableHead className="w-8"></TableHead>
-              <SortableHead column={table.getColumn('full_name')!}>Name</SortableHead>
-              <SortableHead column={table.getColumn('department')!}>Department</SortableHead>
-              <SortableHead column={table.getColumn('card_uid')!}>Card UID</SortableHead>
-              <SortableHead column={table.getColumn('portal_access')!}>Portal Access</SortableHead>
-              <SortableHead column={table.getColumn('status')!}>Status</SortableHead>
-              <TableHead></TableHead>
+          <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+            <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+              <TableHead className="h-auto w-8 py-3.5 pl-6"></TableHead>
+              <SortableHead column={table.getColumn('full_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Name</SortableHead>
+              <SortableHead column={table.getColumn('department')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Department</SortableHead>
+              <SortableHead column={table.getColumn('card_uid')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Card UID</SortableHead>
+              <SortableHead column={table.getColumn('portal_access')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Portal Access</SortableHead>
+              <SortableHead column={table.getColumn('status')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Status</SortableHead>
+              <TableHead className="h-auto py-3.5 pr-6"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -608,8 +608,8 @@ export default function StaffPage() {
             const isExpanded = isStaffExpanded(s.id.toString())
             return (
             <Fragment key={s.id}>
-              <TableRow>
-                <TableCell className="pr-0">
+              <TableRow className="hover:bg-[#FAF7FC]">
+                <TableCell className="py-4 pr-0 pl-6">
                   {lent.length > 0 ? (
                     <Button
                       variant="ghost" size="icon-sm"
@@ -624,16 +624,16 @@ export default function StaffPage() {
                     <span className="sr-only">No items held</span>
                   )}
                 </TableCell>
-                <TableCell className="max-w-xs whitespace-normal">
-                  <div className="break-words font-medium">{s.full_name}</div>
+                <TableCell className="max-w-xs py-4 whitespace-normal">
+                  <div className="break-words text-sm font-semibold text-slate-900">{s.full_name}</div>
                   {/* break-all, not break-words -- an email has no spaces
                       either, and break-words' min-content exclusion (see the
                       barcode/card-UID comments) means it can't be trusted to
                       force a break at all. */}
-                  {s.email && <div className="text-xs break-all text-muted-foreground">{s.email}</div>}
+                  {s.email && <div className="text-xs break-all text-slate-600">{s.email}</div>}
                 </TableCell>
-                <TableCell className="max-w-xs whitespace-normal break-words text-muted-foreground">{s.department ?? '—'}</TableCell>
-                <TableCell className="max-w-xs whitespace-normal">
+                <TableCell className="max-w-xs py-4 text-sm whitespace-normal break-words text-slate-600">{s.department ?? '—'}</TableCell>
+                <TableCell className="max-w-xs py-4 whitespace-normal">
                   {/* Badge is a fixed-height (h-5), non-wrapping,
                       overflow-hidden pill by default (see
                       components/ui/badge.tsx) -- overridden here (h-auto,
@@ -647,44 +647,48 @@ export default function StaffPage() {
                       word-break:break-all does participate and reliably
                       forces the break. */}
                   {s.card_uid
-                    ? <Badge className="h-auto max-w-full items-start overflow-visible whitespace-normal bg-emerald-100 font-mono text-emerald-800">
+                    ? <Badge className="h-auto max-w-full items-start overflow-visible whitespace-normal bg-emerald-100 font-mono text-emerald-800 border-emerald-200/60 px-2.5 font-semibold">
                         <CreditCard className="mt-0.5 size-3 shrink-0" />
                         <span className="min-w-0 break-all">{s.card_uid}</span>
                       </Badge>
-                    : <Badge className="bg-muted text-muted-foreground">Not Linked</Badge>}
+                    : <Badge className="bg-muted text-muted-foreground border-transparent px-2.5 font-semibold">Not linked</Badge>}
                 </TableCell>
-                <TableCell>
+                <TableCell className="py-4">
                   {s.uid
-                    ? <Badge className="bg-emerald-100 text-emerald-800">Granted</Badge>
-                    : <Badge className="bg-muted text-muted-foreground">Not Granted</Badge>}
+                    ? <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold">Granted</Badge>
+                    : <Badge className="bg-muted text-muted-foreground border-transparent px-2.5 font-semibold">Not granted</Badge>}
                 </TableCell>
-                <TableCell>
+                <TableCell className="py-4">
                   {(() => {
                     const status = staffStatusValue(s, lendingStaffIds, s.id.toString())
                     return status === 'Deactivated'
-                      ? <Badge className="bg-red-100 text-red-800">Deactivated</Badge>
+                      ? <Badge className="bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold">Deactivated</Badge>
                       : status === 'Lending'
-                        ? <Badge className="bg-accent text-accent-foreground">Lending</Badge>
-                        : <Badge className="bg-emerald-100 text-emerald-800">Active</Badge>
+                        ? <Badge className="bg-accent text-accent-foreground border-transparent px-2.5 font-semibold">Lending</Badge>
+                        : <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold">Active</Badge>
                   })()}
                 </TableCell>
-                <TableCell>
+                <TableCell className="py-4 pr-6">
                   <div className="flex gap-1">
-                    <Button variant="ghost" size="icon-sm" onClick={() => openEdit(s)}>
+                    <Button variant="outline" size="icon-sm" className="border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900" onClick={() => openEdit(s)}>
                       <Pencil className="size-3.5" />
                     </Button>
                     <Button
-                      variant="ghost" size="sm"
+                      variant="outline" size="sm"
                       disabled={!s.is_active || !s.email || sendingId === s.id.toString()}
                       title={!s.is_active ? 'Staff member is deactivated' : !s.email ? 'No email on file' : undefined}
                       onClick={() => sendLoginEmail(s)}
+                      className="border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900"
                     >
                       <Mail className="size-3.5" />
                       {sendingId === s.id.toString() ? 'Sending…' : s.uid ? 'Resend Login Email' : 'Send Login Email'}
                     </Button>
                     <Button
-                      variant="ghost" size="sm"
-                      className={s.is_active ? 'text-red-600 hover:text-red-700' : 'text-emerald-600 hover:text-emerald-700'}
+                      variant="outline"
+                      size="sm"
+                      className={s.is_active
+                        ? 'h-auto rounded-lg border-[#D5C6E0] bg-[#F0EBF5] px-3 py-1.5 text-sm font-semibold text-red-600 hover:bg-[#E4D9EE] hover:text-red-700'
+                        : 'h-auto rounded-lg border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800'}
                       onClick={() => toggleActive(s)}
                     >
                       {s.is_active ? 'Deactivate' : 'Activate'}
@@ -693,41 +697,42 @@ export default function StaffPage() {
                 </TableCell>
               </TableRow>
               {isExpanded && (
-                <TableRow className="hover:bg-transparent">
+                <TableRow className="border-y border-[#E2D8E9]/80 bg-[#FBF9FD] shadow-inner hover:bg-[#FBF9FD]">
                   <TableCell />
-                  <TableCell colSpan={6} className="py-3">
-                    <div className="rounded-md border bg-muted/40 p-3">
-                      <div className="mb-2 text-xs font-medium text-muted-foreground">
+                  <TableCell colSpan={6} className="px-8 py-6">
+                    <div className="rounded-lg border border-[#E5DBEC] bg-white p-3 shadow-xs">
+                      <div className="mb-2 text-sm font-semibold text-slate-600">
                         Currently held by {s.full_name}
                       </div>
                       <div className="max-h-56 overflow-y-auto">
                       <Table>
-                        <TableHeader className="sticky top-0 z-10 bg-muted/40">
-                          <TableRow className="hover:bg-transparent">
-                            <TableHead>Product</TableHead>
-                            <TableHead>Qty</TableHead>
-                            <TableHead>Expected</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead></TableHead>
+                        <TableHeader className="sticky top-0 z-10 bg-[#F6F2F9]">
+                          <TableRow className="border-b border-[#E5DBEC] hover:bg-[#F6F2F9]">
+                            <TableHead className="h-auto py-2.5 text-base font-bold text-[#2D203A]">Product</TableHead>
+                            <TableHead className="h-auto py-2.5 text-base font-bold text-[#2D203A]">Qty</TableHead>
+                            <TableHead className="h-auto py-2.5 text-base font-bold text-[#2D203A]">Expected</TableHead>
+                            <TableHead className="h-auto py-2.5 text-base font-bold text-[#2D203A]">Status</TableHead>
+                            <TableHead className="h-auto py-2.5"></TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {lent.map(item => {
                             const st = lentItemStatus(item)
                             return (
-                              <TableRow key={item.key} className="hover:bg-transparent">
-                                <TableCell className="max-w-xs font-medium whitespace-normal break-words">{item.product_name}</TableCell>
-                                <TableCell className="font-semibold">{item.qty}</TableCell>
-                                <TableCell className="text-muted-foreground">
+                              <TableRow key={item.key} className="border-slate-100 hover:bg-[#FDFCFE]">
+                                <TableCell className="max-w-xs text-sm font-semibold text-slate-800 whitespace-normal break-words">{item.product_name}</TableCell>
+                                <TableCell className="text-sm font-medium text-slate-600">{item.qty}</TableCell>
+                                <TableCell className="text-sm text-slate-600">
                                   {item.waived ? '—' : formatDateOnly(item.expected_date)}
                                 </TableCell>
                                 <TableCell>
-                                  <Badge className={`${st.className} uppercase`}>{st.label}</Badge>
+                                  <Badge className={st.className}>{sentenceCase(st.label)}</Badge>
                                 </TableCell>
                                 <TableCell className="text-right">
                                   {isAdmin && !item.waived && (
                                     <Button
-                                      variant="ghost" size="sm"
+                                      variant="outline" size="sm"
+                                      className="border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900"
                                       onClick={() => { setResolving({ staffId: s.id.toString(), staffName: s.full_name, item }); setResolveReason('') }}
                                     >
                                       Resolve

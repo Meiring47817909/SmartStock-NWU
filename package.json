@@ -15,6 +15,7 @@
     "seed:outstanding": "node scripts/seed-outstanding.mjs",
     "seed:conflicts": "node scripts/seed-conflict-scenarios.mjs",
     "seed:comprehensive": "node scripts/seed-comprehensive-demo.mjs",
+    "seed:real-production": "node scripts/seed-real-production.mjs",
     "cleanup:borrower-test": "node scripts/cleanup-borrower-test-data.mjs",
     "set:password-policy": "node scripts/set-password-policy.mjs",
     "dev:emulators": "cross-env NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 FIREBASE_ADMIN_PROJECT_ID=demo-smartstock-nwu next dev"

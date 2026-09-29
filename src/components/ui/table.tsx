@@ -23,7 +23,19 @@ function TableHeader({ className, ...props }: React.ComponentProps<"thead">) {
   return (
     <thead
       data-slot="table-header"
-      className={cn("[&_tr]:border-b", className)}
+      // Sticky is applied per-<th> here (not just on <thead>, which some
+      // browsers don't reliably keep pinned in a table layout) so every
+      // table's column headers stay visible while its body scrolls,
+      // wherever a caller opts a given header row into it via its own
+      // "sticky top-0 z-10 bg-[color]" className. bg-inherit on both the
+      // row and the cells carries that caller-specified background color
+      // down onto each <th> so the sticky header stays opaque over the
+      // scrolling rows beneath it, instead of only the <thead> itself
+      // (which callers already do) being colored.
+      className={cn(
+        "[&_tr]:border-b [&_tr]:bg-inherit [&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-inherit",
+        className
+      )}
       {...props}
     />
   )

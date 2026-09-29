@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { Fragment, useEffect, useState, useRef, useCallback } from 'react'
 import { genRef, cn, todayDateStr, formatDateOnly, formatLendWindow } from '@/lib/utils'
 import { CreditCard, Barcode, CheckCircle, X, Plus, Minus, Users, Search, Info } from 'lucide-react'
 import { db } from '@/lib/firebase/config'
@@ -382,31 +382,65 @@ export default function StockOutPage() {
 
   const stepIndex = STEPS.indexOf(step) === -1 ? 3 : STEPS.indexOf(step)
 
+  // Lets the step bubbles above jump back to an already-visited step — only
+  // backward (i < stepIndex): stepping ahead would land on a screen with
+  // nothing filled in yet, and once the transaction is 'done' there's
+  // nothing left to revise. Jumping all the way back to Identify Staff
+  // clears everything gathered since (cart, the loan request it was tied
+  // to, the lend dates) — a different person might be picked, so none of
+  // that can be assumed to still apply. Jumping back to Scan Items from
+  // Confirm keeps the cart as-is, same as the existing "← Back" button on
+  // that screen (below), which this now shares its behaviour with.
+  function goToStep(i: number) {
+    if (step === 'done' || i >= stepIndex) return
+    if (i === 0) {
+      setStaff(null); setManualOverride(false); setPendingPickups([])
+      setActiveRequest(null); setCart([])
+      setLendFrom(todayDateStr()); setLendTo('')
+    }
+    setError('')
+    setStep(STEPS[i])
+  }
+
   return (
     <div className="max-w-[700px]">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Stock Out</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Issue equipment to NWU staff</p>
+      <div className="mb-6 space-y-1">
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Stock Out</h1>
+        <p className="text-sm text-[#5B4F67]">Issue equipment to NWU staff</p>
       </div>
 
-      {/* Step indicator */}
-      <div className="mb-6 flex gap-2">
+      {/* Step indicator — spread across the full card width, each bubble
+          clickable to jump back to a step already visited (see goToStep). */}
+      <div className="mb-6 flex w-full items-center">
         {STEPS.map((s, i) => {
           const done = stepIndex > i
           const active = step === s
+          const clickable = i < stepIndex && step !== 'done'
           return (
-            <div key={s} className="flex items-center gap-2">
-              <div className={cn(
-                'flex size-7 items-center justify-center rounded-full text-xs font-bold',
-                active ? 'bg-primary text-white' : done ? 'bg-emerald-500 text-white' : 'bg-muted text-muted-foreground'
-              )}>
-                {i + 1}
-              </div>
-              <span className={cn('text-sm', active ? 'font-semibold text-primary' : 'text-muted-foreground')}>
-                {STEP_LABELS[i]}
-              </span>
-              {i < 2 && <div className="h-px w-8 bg-border" />}
-            </div>
+            <Fragment key={s}>
+              <button
+                type="button"
+                disabled={!clickable}
+                onClick={() => goToStep(i)}
+                aria-current={active ? 'step' : undefined}
+                className={cn(
+                  'flex shrink-0 items-center gap-2 rounded-full',
+                  clickable ? 'cursor-pointer' : 'cursor-default',
+                )}
+              >
+                <span className={cn(
+                  'flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-transform',
+                  active ? 'bg-primary text-white' : done ? 'bg-emerald-500 text-white' : 'bg-muted text-muted-foreground',
+                  clickable && 'hover:scale-110 hover:ring-2 hover:ring-primary/40',
+                )}>
+                  {i + 1}
+                </span>
+                <span className={cn('text-sm whitespace-nowrap', active ? 'font-semibold text-primary' : 'text-muted-foreground')}>
+                  {STEP_LABELS[i]}
+                </span>
+              </button>
+              {i < STEPS.length - 1 && <div className="mx-3 h-px flex-1 bg-border" />}
+            </Fragment>
           )
         })}
       </div>
@@ -419,7 +453,7 @@ export default function StockOutPage() {
 
       {/* Step: Staff */}
       {step === 'staff' && (
-        <Card>
+        <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><CreditCard className="size-4" /> Step 1 — Identify Staff Member</CardTitle>
           </CardHeader>
@@ -450,7 +484,7 @@ export default function StockOutPage() {
       {/* Step: Items */}
       {step === 'items' && staff && (
         <div className="flex flex-col gap-4">
-          <Card>
+          <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
             <CardContent className="flex items-center gap-4">
               <div className="flex size-10 items-center justify-center rounded-full bg-emerald-100">
                 <CheckCircle className="size-5 text-emerald-800" />
@@ -466,7 +500,7 @@ export default function StockOutPage() {
           </Card>
 
           {pendingPickups.length > 0 && (
-            <Card className="py-0">
+            <Card className="rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
               <CardHeader className="border-b pt-4">
                 <CardTitle className="flex items-center gap-2"><ClipboardList className="size-4" /> Accepted Loan Requests</CardTitle>
               </CardHeader>
@@ -497,7 +531,7 @@ export default function StockOutPage() {
             </Card>
           )}
 
-          <Card className="py-0">
+          <Card className="rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
             <CardHeader className="border-b pt-4">
               <CardTitle className="flex items-center gap-2"><Barcode className="size-4" /> Step 2 — Scan Items</CardTitle>
             </CardHeader>
@@ -511,11 +545,11 @@ export default function StockOutPage() {
               {cart.length > 0 && (
                 <div className="max-h-96 overflow-y-auto">
                 <Table>
-                  <TableHeader className="sticky top-0 z-10 bg-card">
-                    <TableRow>
-                      <TableHead>Product</TableHead>
-                      <TableHead>Barcode</TableHead>
-                      <TableHead>Qty</TableHead>
+                  <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+                    <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+                      <TableHead className="text-base font-bold text-[#2D203A]">Product</TableHead>
+                      <TableHead className="text-base font-bold text-[#2D203A]">Barcode</TableHead>
+                      <TableHead className="text-base font-bold text-[#2D203A]">Qty</TableHead>
                       <TableHead></TableHead>
                     </TableRow>
                   </TableHeader>
@@ -543,7 +577,7 @@ export default function StockOutPage() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <Button variant="ghost" size="icon-sm" className="text-red-600 hover:text-red-700"
+                          <Button variant="outline" size="icon-sm" className="border-[#D5C6E0] bg-[#F0EBF5] text-red-600 hover:bg-[#E4D9EE] hover:text-red-700"
                             onClick={() => setCart(c => c.filter(i => i.product.id !== item.product.id))}>
                             <X className="size-3.5" />
                           </Button>
@@ -566,7 +600,7 @@ export default function StockOutPage() {
 
       {/* Step: Confirm */}
       {step === 'confirm' && staff && (
-        <Card>
+        <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
           <CardHeader>
             <CardTitle>Step 3 — Confirm Issue</CardTitle>
           </CardHeader>
@@ -579,11 +613,11 @@ export default function StockOutPage() {
             </div>
             <div className="mb-4 max-h-96 overflow-y-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-card">
-                <TableRow>
-                  <TableHead>Product</TableHead>
-                  <TableHead>Qty</TableHead>
-                  <TableHead>Available</TableHead>
+              <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+                <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+                  <TableHead className="text-base font-bold text-[#2D203A]">Product</TableHead>
+                  <TableHead className="text-base font-bold text-[#2D203A]">Qty</TableHead>
+                  <TableHead className="text-base font-bold text-[#2D203A]">Available</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -676,7 +710,7 @@ export default function StockOutPage() {
               </div>
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setStep('items')}>← Back</Button>
+              <Button variant="outline" onClick={() => goToStep(1)}>← Back</Button>
               <Button
                 disabled={loading || blockingConflicts.length > 0 || (!!lendTo && lendTo < lendFrom) || cart.some(i => i.product.quantity_on_hand < i.quantity)}
                 onClick={handleConfirm}
@@ -690,7 +724,7 @@ export default function StockOutPage() {
 
       {/* Done */}
       {step === 'done' && (
-        <Card>
+        <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
           <CardContent className="py-10 text-center">
             <CheckCircle className="mx-auto mb-4 size-12 text-emerald-500" />
             <h2 className="mb-2 text-xl font-bold">Stock Issued Successfully</h2>

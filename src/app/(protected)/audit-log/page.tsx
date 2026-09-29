@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
-import { formatDate, formatDateOnly, formatLendWindow, todayDateStr, withinDateRange } from '@/lib/utils'
+import { formatDate, formatDateOnly, formatLendWindow, sentenceCase, todayDateStr, withinDateRange } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { LENDING_INTERVALS } from '@/lib/firebase/loanRequests'
 import { collection, query, orderBy, getDocs, where } from 'firebase/firestore'
@@ -23,14 +23,14 @@ import {
 import type { AuditLogEntry, AuditAction, AuditEntityType, TransactionLine, LoanRequestLine } from '@/types/database'
 
 const ACTION_BADGE_CLASS: Record<AuditAction, string> = {
-  create: 'bg-emerald-100 text-emerald-800',
-  update: 'bg-sky-100 text-sky-800',
-  delete: 'bg-red-100 text-red-800',
-  activate: 'bg-emerald-100 text-emerald-800',
-  deactivate: 'bg-accent text-accent-foreground',
-  resolve: 'bg-violet-100 text-violet-800',
-  grant_access: 'bg-emerald-100 text-emerald-800',
-  resend_access: 'bg-sky-100 text-sky-800',
+  create: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold',
+  update: 'bg-sky-100 text-sky-800 border-sky-200/60 px-2.5 font-semibold',
+  delete: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold',
+  activate: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold',
+  deactivate: 'bg-accent text-accent-foreground border-transparent px-2.5 font-semibold',
+  resolve: 'bg-violet-100 text-violet-800 border-violet-200/60 px-2.5 font-semibold',
+  grant_access: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold',
+  resend_access: 'bg-sky-100 text-sky-800 border-sky-200/60 px-2.5 font-semibold',
 }
 
 // Same mapping as TXN_BADGE_CLASS on the Reports page's transaction-history
@@ -39,10 +39,10 @@ const ACTION_BADGE_CLASS: Record<AuditAction, string> = {
 // useful to look at in a list of IN/OUT/RETURN activity. Show the
 // transaction's actual type instead, styled the same as it is in Reports.
 const TXN_BADGE_CLASS: Record<string, string> = {
-  IN: 'bg-emerald-100 text-emerald-800',
-  OUT: 'bg-accent text-accent-foreground',
-  RETURN: 'bg-sky-100 text-sky-800',
-  ADJUST: 'bg-amber-100 text-amber-800',
+  IN: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold',
+  OUT: 'bg-accent text-accent-foreground border-transparent px-2.5 font-semibold',
+  RETURN: 'bg-sky-100 text-sky-800 border-sky-200/60 px-2.5 font-semibold',
+  ADJUST: 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold',
 }
 
 const ENTITY_LABEL: Record<AuditEntityType, string> = {
@@ -58,14 +58,14 @@ const ENTITY_LABEL: Record<AuditEntityType, string> = {
 // always logs 'update' as its action (the interesting information is which
 // status it moved to), so show the status instead of the generic verb.
 const LOAN_REQUEST_BADGE_CLASS: Record<string, string> = {
-  pending: 'bg-amber-100 text-amber-800',
-  countered: 'bg-sky-100 text-sky-800',
-  accepted: 'bg-emerald-100 text-emerald-800',
-  fulfilled: 'bg-accent text-accent-foreground',
-  declined: 'bg-red-100 text-red-800',
-  expired: 'bg-muted text-muted-foreground',
-  withdrawn: 'bg-muted text-muted-foreground',
-  no_show: 'bg-red-100 text-red-800',
+  pending: 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold',
+  countered: 'bg-sky-100 text-sky-800 border-sky-200/60 px-2.5 font-semibold',
+  accepted: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold',
+  fulfilled: 'bg-accent text-accent-foreground border-transparent px-2.5 font-semibold',
+  declined: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold',
+  expired: 'bg-muted text-muted-foreground border-transparent px-2.5 font-semibold',
+  withdrawn: 'bg-muted text-muted-foreground border-transparent px-2.5 font-semibold',
+  no_show: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold',
 }
 
 // Display labels for those same statuses. Only the ones whose raw value
@@ -456,7 +456,7 @@ function TransactionSummary({ after, lines }: { after: Record<string, unknown> |
           {formatDateOnly(lendFrom)} – {formatDateOnly(lendTo)}
         </div>
       )}
-      {manual && <Badge className="w-fit bg-amber-100 text-amber-800">Manual entry — no card scan</Badge>}
+      {manual && <Badge className="w-fit bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold">Manual entry — no card scan</Badge>}
       {notes && (
         <div>
           <span className="font-medium text-foreground">Notes:</span> {notes}
@@ -1031,25 +1031,25 @@ export default function AuditLogPage() {
     const key = activityKey(e)
     const meta = ACTIVITY[key]
     return (
-      <Badge className={`${meta?.className ?? ''} uppercase`}>
-        {activityLabel(key)}
+      <Badge className={meta?.className ?? ''}>
+        {sentenceCase(activityLabel(key))}
       </Badge>
     )
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Audit Log</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+      <div className="mb-6 space-y-1">
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Audit Log</h1>
+        <p className="text-sm text-[#5B4F67]">
           Who changed what, and when — product, category, staff and transaction activity.
         </p>
       </div>
 
-      <Card className="mb-4">
+      <Card className="mb-4 rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
         <CardContent className="flex flex-wrap items-end gap-3">
         <div className="grid gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Entities</span>
+          <span className="text-sm font-semibold text-slate-600">Entities</span>
           <Select
             items={{ [ALL_ENTITIES]: 'All entities', product: 'Product', category: 'Category', staff: 'Staff', transaction: 'Transaction', loan_request: 'Loan Request', settings: 'Settings' }}
             value={entityFilter || ALL_ENTITIES}
@@ -1068,7 +1068,7 @@ export default function AuditLogPage() {
           </Select>
         </div>
         <div className="grid gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Activities</span>
+          <span className="text-sm font-semibold text-slate-600">Activities</span>
           <Select
             items={{
               [ALL_ACTIONS]: 'All activity',
@@ -1098,17 +1098,17 @@ export default function AuditLogPage() {
             hint was all there was to say which end of the range each one
             set. htmlFor/id so clicking the label focuses the input. */}
         <div className="grid gap-1.5">
-          <label htmlFor="audit-from-date" className="text-xs font-medium text-muted-foreground">
+          <label htmlFor="audit-from-date" className="text-sm font-semibold text-slate-600">
             From date
           </label>
-          <Input id="audit-from-date" type="date" className="w-40"
+          <Input id="audit-from-date" type="date" className="w-40 border-slate-300 bg-white text-slate-700 focus-visible:border-[#8046B5] focus-visible:ring-[#8046B5]/50"
             value={fromDate} onChange={e => setFromDate(e.target.value)} />
         </div>
         <div className="grid gap-1.5">
-          <label htmlFor="audit-to-date" className="text-xs font-medium text-muted-foreground">
+          <label htmlFor="audit-to-date" className="text-sm font-semibold text-slate-600">
             To date
           </label>
-          <Input id="audit-to-date" type="date" className="w-40"
+          <Input id="audit-to-date" type="date" className="w-40 border-slate-300 bg-white text-slate-700 focus-visible:border-[#8046B5] focus-visible:ring-[#8046B5]/50"
             value={toDate} onChange={e => setToDate(e.target.value)} />
         </div>
         {(entityFilter || actionFilter || fromDate || toDate) && (
@@ -1139,17 +1139,17 @@ export default function AuditLogPage() {
         </CardContent>
       </Card>
 
-      <Card className="min-h-0 flex-1 py-0">
+      <Card className="min-h-0 flex-1 rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
-          <TableHeader className="sticky top-0 z-10 bg-card">
-            <TableRow>
-              <TableHead className="w-8"></TableHead>
-              <SortableHead column={table.getColumn('created_at')!}>Date</SortableHead>
-              <SortableHead column={table.getColumn('user_name')!}>User</SortableHead>
-              <SortableHead column={table.getColumn('activity')!}>Activity</SortableHead>
-              <SortableHead column={table.getColumn('entity_type')!}>Entity</SortableHead>
-              <SortableHead column={table.getColumn('entity_id')!}>Entity ID</SortableHead>
+          <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+            <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+              <TableHead className="h-auto w-8 py-3.5 pl-6"></TableHead>
+              <SortableHead column={table.getColumn('created_at')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Date</SortableHead>
+              <SortableHead column={table.getColumn('user_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">User</SortableHead>
+              <SortableHead column={table.getColumn('activity')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Activity</SortableHead>
+              <SortableHead column={table.getColumn('entity_type')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Entity</SortableHead>
+              <SortableHead column={table.getColumn('entity_id')!} className="h-auto py-3.5 pr-6 text-base font-bold text-[#2D203A]">Entity ID</SortableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1157,16 +1157,16 @@ export default function AuditLogPage() {
             {!loading && filtered.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">No audit entries found</TableCell></TableRow>}
             {pageRows.map(e => (
               <Fragment key={e.id}>
-                <TableRow className="cursor-pointer" onClick={() => toggleExpand(e)}>
-                  <TableCell className="text-sm text-muted-foreground">{isExpanded(e.id) ? '▲' : '▼'}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{formatDate(e.created_at)}</TableCell>
-                  <TableCell className="max-w-xs font-medium whitespace-normal break-words">{e.user_name ?? '—'}</TableCell>
-                  <TableCell>{activityBadge(e)}</TableCell>
-                  <TableCell className="text-muted-foreground">{ENTITY_LABEL[e.entity_type] ?? e.entity_type}</TableCell>
-                  <TableCell className="font-mono text-xs text-muted-foreground">{e.entity_id}</TableCell>
+                <TableRow className="group cursor-pointer hover:bg-[#FAF7FC]" onClick={() => toggleExpand(e)}>
+                  <TableCell className="py-4 pl-6 text-xs text-slate-600 transition-colors group-hover:text-primary">{isExpanded(e.id) ? '▲' : '▼'}</TableCell>
+                  <TableCell className="py-4 text-sm text-slate-600">{formatDate(e.created_at)}</TableCell>
+                  <TableCell className="max-w-xs py-4 text-sm font-semibold whitespace-normal break-words text-slate-900 transition-colors group-hover:text-primary">{e.user_name ?? '—'}</TableCell>
+                  <TableCell className="py-4">{activityBadge(e)}</TableCell>
+                  <TableCell className="py-4 text-sm text-slate-600">{ENTITY_LABEL[e.entity_type] ?? e.entity_type}</TableCell>
+                  <TableCell className="py-4 pr-6 font-mono text-sm text-slate-600">{e.entity_id}</TableCell>
                 </TableRow>
                 {isExpanded(e.id) && (
-                  <TableRow className="bg-muted/50">
+                  <TableRow className="border-y border-[#E2D8E9]/80 bg-[#FBF9FD] shadow-inner hover:bg-[#FBF9FD]">
                     {/* TableCell is whitespace-nowrap by default (see
                         components/ui/table.tsx), which is right for the data
                         rows but wrong here: this cell holds prose — a staff
@@ -1175,7 +1175,7 @@ export default function AuditLogPage() {
                         whole table past the viewport. Wrap instead, and
                         break-words so an unbroken token (a long id, a pasted
                         URL) still can't push it wide. */}
-                    <TableCell colSpan={6} className="p-4 break-words whitespace-normal">
+                    <TableCell colSpan={6} className="px-8 py-6 break-words whitespace-normal">
                       {e.entity_type === 'transaction' ? (
                         e.action === 'resolve' ? (
                           <ResolveSummary after={e.after} />
@@ -1199,13 +1199,13 @@ export default function AuditLogPage() {
                         </summary>
                         <div className="mt-2 grid grid-cols-2 gap-3">
                           <div>
-                            <div className="mb-1 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">Before</div>
+                            <div className="mb-1 text-xs font-bold text-muted-foreground">Before</div>
                             <pre className="m-0 overflow-x-auto rounded-md border bg-background p-3 text-xs whitespace-pre-wrap break-words text-muted-foreground">
                               {e.before ? JSON.stringify(reorderForDisplay(e.entity_type, e.action, e.before), null, 2) : '— (none)'}
                             </pre>
                           </div>
                           <div>
-                            <div className="mb-1 text-[0.7rem] font-bold tracking-wide text-muted-foreground uppercase">After</div>
+                            <div className="mb-1 text-xs font-bold text-muted-foreground">After</div>
                             <pre className="m-0 overflow-x-auto rounded-md border bg-background p-3 text-xs whitespace-pre-wrap break-words text-muted-foreground">
                               {e.after ? JSON.stringify(reorderForDisplay(e.entity_type, e.action, e.after), null, 2) : '— (none)'}
                             </pre>

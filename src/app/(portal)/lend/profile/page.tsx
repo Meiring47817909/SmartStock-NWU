@@ -100,7 +100,7 @@ function ChangePasswordCard({ email }: { email: string }) {
   }
 
   return (
-    <Card>
+    <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
       <CardHeader>
         <CardTitle>Change password</CardTitle>
       </CardHeader>
@@ -188,7 +188,7 @@ function SetUpPasswordCard({ email }: { email: string }) {
   }
 
   return (
-    <Card>
+    <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
       <CardHeader>
         <CardTitle>Change password</CardTitle>
       </CardHeader>
@@ -216,9 +216,9 @@ export default function ProfilePage() {
     // My Requests (see (portal)/lend/layout.tsx) rather than sitting
     // flush-left in the full-width main.
     <div className="mx-auto flex max-w-[1000px] flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Profile</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Your NWU staff record, as Selouna has it on file.</p>
+      <div className="space-y-1">
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Profile</h1>
+        <p className="text-sm text-[#5B4F67]">Your NWU staff record, as Selouna has it on file.</p>
       </div>
 
       {/* Left column (identity + details cards, stacked) and right column
@@ -227,7 +227,7 @@ export default function ProfilePage() {
           single tall stack of three same-width cards. */}
       <div className="flex flex-col gap-6 md:flex-row md:items-start">
         <div className="flex flex-col gap-6 md:w-[480px]">
-          <Card>
+          <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
             <CardContent className="flex items-center gap-4">
               <Avatar className="size-14">
                 <AvatarFallback className={`text-lg font-semibold text-white ${avatarColorClass(email)}`}>
@@ -241,7 +241,7 @@ export default function ProfilePage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
             <CardContent className="flex flex-col gap-3">
               <div>
                 <div className="text-xs font-medium text-muted-foreground">Department</div>

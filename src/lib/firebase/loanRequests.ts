@@ -218,6 +218,70 @@ export async function getReservedQuantity(
   return sum
 }
 
+// Per-product reservation window, stripped down to just what a calendar-day
+// availability check needs (date range + quantity) — built once for every
+// product in the cart via getReservationIntervals below, then reused for
+// every candidate day the From/To calendars ask about, rather than
+// re-querying Firestore per day the way looping getReservedQuantity would.
+export interface ReservationInterval {
+  fromDate: string
+  toDate: string
+  quantity: number
+}
+
+// Fetches the active reservation windows for a set of products in one pass
+// (one loan_requests query, then one loan_request_lines query per product,
+// run in parallel) — the same underlying data getReservedQuantity queries,
+// just returned as plain intervals so reservedQuantityInRange below can
+// answer "is this day/range available" entirely in memory. Used by the cart
+// page's From/To date pickers, which each need this answer for every day
+// currently on screen.
+export async function getReservationIntervals(
+  productIds: string[],
+): Promise<Map<string, ReservationInterval[]>> {
+  const result = new Map<string, ReservationInterval[]>()
+  productIds.forEach((id) => result.set(id, []))
+  if (productIds.length === 0) return result
+
+  const activeSnap = await getDocs(
+    query(collection(db, 'loan_requests'), where('status', 'in', ACTIVE_STATUSES)),
+  )
+  const activeById = new Map<string, LoanRequest>()
+  activeSnap.forEach((d) => activeById.set(d.id, { id: d.id, ...d.data() } as LoanRequest))
+  if (activeById.size === 0) return result
+
+  await Promise.all(productIds.map(async (productId) => {
+    const linesSnap = await getDocs(
+      query(collection(db, 'loan_request_lines'), where('product_id', '==', productId)),
+    )
+    const intervals: ReservationInterval[] = []
+    linesSnap.forEach((d) => {
+      const line = d.data() as LoanRequestLine
+      const req = activeById.get(line.request_id)
+      if (!req || line.offered_quantity <= 0) return
+      intervals.push({ fromDate: req.from_date, toDate: effectiveToDate(req.to_date), quantity: line.offered_quantity })
+    })
+    result.set(productId, intervals)
+  }))
+  return result
+}
+
+// Sum of reserved quantity across a product's fetched intervals that
+// overlaps [fromDate, toDate] — the same overlap rule getReservedQuantity
+// uses, just against the already-fetched list from getReservationIntervals
+// instead of a fresh Firestore round trip, so it's cheap enough to call
+// once per calendar day.
+export function reservedQuantityInRange(
+  intervals: ReservationInterval[],
+  fromDate: string,
+  toDate: string,
+): number {
+  return intervals.reduce(
+    (sum, iv) => (fromDate <= iv.toDate && toDate >= iv.fromDate ? sum + iv.quantity : sum),
+    0,
+  )
+}
+
 // 3.2 — Cart validation. Checks each product's own lend window, its own
 // lending interval, and live availability. Collects every failing
 // product's error at once so the UI can show every problem, not just the
@@ -733,4 +797,22 @@ export async function loadLoanRequestsAlertCount(): Promise<number> {
     return expireIfNeeded(r)
   }))
   return resolved.filter(status => status === 'pending' || status === 'countered').length
+}
+
+// Portal counterpart to the above -- badges the header's "My Requests" nav
+// button with one staff member's own combined total across My Requests'
+// three actionable tabs (Needs your response, Awaiting Selouna, Upcoming).
+// Unlike the admin badge, Upcoming/accepted IS counted here: the portal
+// has no separate Incoming Pickups view of its own for a staff member to
+// double-count against, so all three ACTIVE_STATUSES belong in this sum.
+// History is still excluded -- same reasoning, it's already resolved.
+// Kept in sync with (portal)/lend/requests/page.tsx's own tab filters.
+export async function loadMyRequestsAlertCount(staffId: string): Promise<number> {
+  const reqSnap = await getDocs(query(collection(db, 'loan_requests'), where('staff_id', '==', staffId)))
+  const reqs = reqSnap.docs.map(d => ({ id: d.id, ...d.data() })) as LoanRequest[]
+  const resolved = await Promise.all(reqs.map(async (r) => {
+    if (!ACTIVE_STATUSES.includes(r.status)) return r.status
+    return expireIfNeeded(r)
+  }))
+  return resolved.filter(status => (ACTIVE_STATUSES as string[]).includes(status)).length
 }

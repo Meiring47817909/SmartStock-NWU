@@ -1,8 +1,8 @@
 'use client'
 
-import { Fragment, useEffect, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
-import { formatDate, formatDateOnly, isoToLocalDateStr, todayDateStr, withinDateRange } from '@/lib/utils'
+import { cn, formatDate, formatDateOnly, isoToLocalDateStr, sentenceCase, todayDateStr, withinDateRange } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
 import { loadWaivedByTxn, waivedQty } from '@/lib/firebase/waivers'
 import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore'
@@ -18,7 +18,7 @@ import {
 } from '@/components/data-table-helpers'
 import { ChevronDown, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -46,33 +46,6 @@ const TABS: { id: ReportTab; label: string }[] = [
 // filter state or none of them — it gets its own visible checkbox.
 const UNCATEGORIZED_CATEGORY = '__uncategorized__'
 
-// The same Search-icon-and-Input idiom already used on Products/Staff/Stock
-// Out/Returns (see products/page.tsx) — reused rather than reinvented, so a
-// search box looks the same wherever it appears in the app. No label: none
-// of those pages give theirs one either, and the placeholder says what it's
-// for. `className` overrides the width to fit whichever filter row it sits
-// in — a flex-1 hero search on its own row, or a fixed width alongside the
-// date pickers on Issued per Staff / Returns.
-function SearchBox({
-  value, onChange, placeholder, className = 'w-56',
-}: {
-  value: string
-  onChange: (v: string) => void
-  placeholder: string
-  className?: string
-}) {
-  return (
-    <div className={`relative ${className}`}>
-      <Search className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-      <Input
-        className="pl-8"
-        placeholder={placeholder}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-      />
-    </div>
-  )
-}
 
 // Case-insensitive "does the search text appear in any of these fields"
 // check, shared by every report's search box rather than re-implemented
@@ -100,56 +73,6 @@ function SelectAllMenuItems({ onSelectAll, onUnselectAll }: { onSelectAll: () =>
   )
 }
 
-// Labelled date pair, matching the Audit Log's filter row. A date input
-// ignores `placeholder`, so without these labels the browser's own dd/mm/yyyy
-// hint is all there is to say what each control does. htmlFor/id so clicking a
-// label focuses its input; `idPrefix` keeps those ids unique, since two tabs
-// each render a pair. `children` is the report's own summary line, sharing the
-// row's items-end alignment.
-//
-// The labels are overridable because the two ends do not always bound the same
-// field: Returns brackets one date (when the return was made), while Issued per
-// Staff bounds two different ones (issued from / expected back by). Where that
-// is so, the labels are the only thing telling Selouna which is which, so they
-// say the field rather than just the end of a range.
-function DateRangeFilter({
-  idPrefix, fromDate, toDate, onFromChange, onToChange, children,
-  fromLabel = 'From date', toLabel = 'To date',
-}: {
-  idPrefix: string
-  fromDate: string
-  toDate: string
-  onFromChange: (v: string) => void
-  onToChange: (v: string) => void
-  children?: ReactNode
-  fromLabel?: string
-  toLabel?: string
-}) {
-  return (
-    <Card className="mb-4">
-      <CardContent className="flex flex-wrap items-end gap-3">
-      <div className="grid gap-1.5">
-        <label htmlFor={`${idPrefix}-from-date`} className="text-xs font-medium text-muted-foreground">
-          {fromLabel}
-        </label>
-        <Input id={`${idPrefix}-from-date`} type="date" className="w-40"
-          value={fromDate} onChange={e => onFromChange(e.target.value)} />
-      </div>
-      <div className="grid gap-1.5">
-        <label htmlFor={`${idPrefix}-to-date`} className="text-xs font-medium text-muted-foreground">
-          {toLabel}
-        </label>
-        <Input id={`${idPrefix}-to-date`} type="date" className="w-40"
-          value={toDate} onChange={e => onToChange(e.target.value)} />
-      </div>
-      {(fromDate || toDate) && (
-        <Button variant="ghost" onClick={() => { onFromChange(''); onToChange('') }}>Clear dates</Button>
-      )}
-      {children}
-      </CardContent>
-    </Card>
-  )
-}
 
 // Both date-bounded reports have the same edge case — a row with no expected
 // date, which the expected-date end of the filter has nothing to test — and
@@ -162,13 +85,16 @@ function DateRangeFilter({
 // which is the part worth seeing without being asked for; the explanation is
 // one hover away. The dotted underline is what says there is something to hover.
 function UndatedToggle({
-  id, count, checked, onCheckedChange, explanation,
+  id, count, checked, onCheckedChange, explanation, className,
 }: {
   id: string
   count: number
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   explanation: string
+  // Opt-in override -- Returns (the toggle's other caller) doesn't pass
+  // this, so its box keeps the original border-input/bg-transparent look.
+  className?: string
 }) {
   return (
     <TooltipProvider delay={200}>
@@ -187,7 +113,7 @@ function UndatedToggle({
           render={
             <Label
               htmlFor={id}
-              className="h-8 cursor-help rounded-lg border border-input bg-transparent px-2.5 text-xs dark:bg-input/30"
+              className={cn('h-8 cursor-help rounded-lg border border-input bg-transparent px-2.5 text-xs dark:bg-input/30', className)}
             />
           }
         >
@@ -203,9 +129,9 @@ function UndatedToggle({
 }
 
 const STATUS_BADGE_CLASS: Record<string, string> = {
-  'OUT OF STOCK': 'bg-red-100 text-red-800',
-  'LOW STOCK': 'bg-amber-100 text-amber-800',
-  'IN STOCK': 'bg-emerald-100 text-emerald-800',
+  'OUT OF STOCK': 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold',
+  'LOW STOCK': 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold',
+  'IN STOCK': 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold',
 }
 
 // Ranked by urgency, not alphabetically — "IN STOCK" < "LOW STOCK" < "OUT OF
@@ -227,7 +153,7 @@ const STOCK_STATUS_DOT: Record<string, string> = {
 function stockStatusFilterLabel(selected: Set<string>): string {
   if (selected.size === 0) return 'No statuses'
   if (selected.size === STOCK_STATUS_VALUES.length) return 'All statuses'
-  if (selected.size === 1) return [...selected][0]
+  if (selected.size === 1) return sentenceCase([...selected][0])
   return 'Custom'
 }
 
@@ -248,7 +174,7 @@ function StockStatusFilter({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button variant="outline" className="w-40 justify-between font-normal" />}>
+      <DropdownMenuTrigger render={<Button variant="outline" className="w-40 justify-between border-[#E2D8E9] bg-[#F8F6FA] font-normal text-[#2A1D39] hover:border-[#6C3D91] hover:bg-white" />}>
         <span className="truncate">{stockStatusFilterLabel(selected)}</span>
         <ChevronDown className="size-3.5 text-muted-foreground" />
       </DropdownMenuTrigger>
@@ -264,7 +190,7 @@ function StockStatusFilter({
             onCheckedChange={checked => toggle(value, checked)}
           >
             <span className={`size-2 rounded-full ${STOCK_STATUS_DOT[value]}`} />
-            {value}
+            {sentenceCase(value)}
           </DropdownMenuCheckboxItem>
         ))}
       </DropdownMenuContent>
@@ -289,23 +215,25 @@ export default function ReportsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Reports</h1>
-        <p className="mt-1 text-sm text-muted-foreground">NWU IT Store · Potchefstroom</p>
+      <div className="mb-6 space-y-1">
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Reports</h1>
+        <p className="text-sm text-[#5B4F67]">NWU IT Store · Potchefstroom</p>
       </div>
 
       <Tabs value={tab} onValueChange={v => setTab(v as ReportTab)} className="min-h-0 flex-1">
-        {/* Same language-toggle pattern as the CAPS Assessment Generator's
-            test setup page (SetupMode.tsx's English/Afrikaans switch): a
-            bordered light-grey track holding tightly-packed buttons, the
-            active one a soft tinted pill (there: blue; here: NWU purple)
-            rather than a stark white card. */}
-        <TabsList className="mb-6 flex w-full !h-14 gap-0 overflow-hidden rounded-lg border border-(--nwu-purple)/30 bg-border p-1.5">
+        {/* Same segmented-control tab bar as Dashboard/Loan Requests: a
+            bordered light-grey track, each tab flex-1 across the full
+            width, the active one a solid NWU-purple pill with white text.
+            Forced !h-14/!h-11 heights (rather than h-auto) because
+            TabsTrigger's own base class hardcodes h-[calc(100%-1px)],
+            which otherwise wins and stretches every tab to the track's
+            full height with no breathing room top/bottom. */}
+        <TabsList className="mb-4 flex w-full !h-14 gap-1.5 overflow-hidden rounded-2xl border border-purple-200/50 bg-white/60 p-1.5 backdrop-blur-sm">
           {TABS.map(t => (
             <TabsTrigger
               key={t.id}
               value={t.id}
-              className="!h-11 flex-1 cursor-pointer self-center rounded-md px-6 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+              className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
             >
               {t.label}
             </TabsTrigger>
@@ -360,7 +288,7 @@ function CategoryFilter({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button variant="outline" className="w-48 justify-between font-normal" />}>
+      <DropdownMenuTrigger render={<Button variant="outline" className="w-48 justify-between border-[#E2D8E9] bg-[#F8F6FA] font-normal text-[#2A1D39] hover:border-[#6C3D91] hover:bg-white" />}>
         <span className="truncate">{categoryFilterLabel(selected, cats)}</span>
         <ChevronDown className="size-3.5 text-muted-foreground" />
       </DropdownMenuTrigger>
@@ -451,19 +379,29 @@ function StockLevelsReport() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Card className="mb-4">
-        <CardContent className="flex flex-wrap items-end gap-3">
-        <div className="grid gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Categories</span>
+      {/* Same NWU-Stitch restyle as Issued per Staff -- rounded-2xl white filter
+          card, lavender dropdown/search controls, purple focus ring. */}
+      <section className="mb-4 flex flex-wrap items-end gap-4 rounded-2xl border border-[#E2D8E9] bg-white px-5 py-3.5 shadow-sm">
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-semibold text-slate-600">Categories</span>
           <CategoryFilter selected={catFilter} onChange={setCatFilter} cats={cats} />
         </div>
-        <div className="grid gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Status</span>
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-semibold text-slate-600">Status</span>
           <StockStatusFilter selected={statusFilter} onChange={setStatusFilter} />
         </div>
-        <span className="text-sm text-muted-foreground">{sorted.length} products · {totalUnits} total units</span>
-        <SearchBox value={search} onChange={setSearch} placeholder="Search name, category…" className="flex-1" />
+        <span className="pb-1.5 text-sm font-medium text-[#645A73]">{sorted.length} products · {totalUnits} total units</span>
+        <div className="relative min-w-[220px] flex-1">
+          <Search className="absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-[#5B4F67]" />
+          <Input
+            className="w-full rounded-lg border-[#E2D8E9] bg-[#F8F6FA] pl-9 text-xs text-[#2A1D39] placeholder:text-[#5B4F67] focus-visible:border-[#6C3D91] focus-visible:ring-[#6C3D91]/50"
+            placeholder="Search name, category…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
         <ExportCsvButton
+          className="border-[#D5CBE0] text-[#322342] hover:border-[#6C3D91] hover:bg-[#F8F5FA]"
           filename={`stock-levels-${todayDateStr()}.csv`}
           rows={sorted}
           columns={[
@@ -474,24 +412,23 @@ function StockLevelsReport() {
             { header: 'Status', value: (p: any) => p.status },
           ]}
         />
-        </CardContent>
-      </Card>
-      <Card className="min-h-0 flex-1 py-0">
+      </section>
+      <Card className="min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
-          <TableHeader className="sticky top-0 z-10 bg-card">
-            <TableRow>
-              <SortableHead column={table.getColumn('name')!}>Product</SortableHead>
-              <SortableHead column={table.getColumn('category_name')!}>Category</SortableHead>
-              <SortableHead column={table.getColumn('qty')!}>Qty On Hand</SortableHead>
-              <SortableHead column={table.getColumn('threshold')!}>Threshold</SortableHead>
-              <SortableHead column={table.getColumn('status')!}>Status</SortableHead>
+          <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+            <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+              <SortableHead column={table.getColumn('name')!} className="h-auto py-3.5 pl-6 text-base font-bold text-[#2D203A]">Product</SortableHead>
+              <SortableHead column={table.getColumn('category_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Category</SortableHead>
+              <SortableHead column={table.getColumn('qty')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Qty On Hand</SortableHead>
+              <SortableHead column={table.getColumn('threshold')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Threshold</SortableHead>
+              <SortableHead column={table.getColumn('status')!} className="h-auto py-3.5 pr-6 text-base font-bold text-[#2D203A]">Status</SortableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
+            {loading && <TableRow><TableCell colSpan={5} className="py-8 text-center text-[#5B4F67]">Loading…</TableCell></TableRow>}
             {!loading && sorted.length === 0 && (
-              <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+              <TableRow><TableCell colSpan={5} className="py-8 text-center text-[#5B4F67]">
                 {search ? `No products match "${search}"`
                   : catFilter?.size === 0 ? 'No categories selected'
                   : statusFilter.size === 0 ? 'No statuses selected'
@@ -499,18 +436,19 @@ function StockLevelsReport() {
               </TableCell></TableRow>
             )}
             {pageRows.map((p: any) => (
-              <TableRow key={p.id}>
-                <TableCell className="max-w-xs font-medium whitespace-normal break-words">{p.name}</TableCell>
-                <TableCell className="max-w-xs whitespace-normal break-words text-muted-foreground">{p.category_name ?? '—'}</TableCell>
-                <TableCell className="font-semibold">{p.qty}</TableCell>
-                <TableCell className="text-muted-foreground">{p.threshold}</TableCell>
-                <TableCell><Badge className={STATUS_BADGE_CLASS[p.status]}>{p.status}</Badge></TableCell>
+              <TableRow key={p.id} className="border-b border-[#E5DBEC] text-sm text-[#231A2F] hover:bg-[#FAF7FC]">
+                <TableCell className="max-w-xs py-4 pl-6 font-semibold whitespace-normal break-words text-[#191024]">{p.name}</TableCell>
+                <TableCell className="max-w-xs py-4 whitespace-normal break-words text-[#524663]">{p.category_name ?? '—'}</TableCell>
+                <TableCell className="py-4 font-bold text-[#191024]">{p.qty}</TableCell>
+                <TableCell className="py-4 text-[#524663]">{p.threshold}</TableCell>
+                <TableCell className="py-4 pr-6"><Badge className={STATUS_BADGE_CLASS[p.status]}>{sentenceCase(p.status)}</Badge></TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
         </div>
         <TablePagination
+          className="border-t border-[#E2D8E9] bg-white text-[#5C506C]"
           pageIndex={safeIndex}
           pageSize={pageSize}
           totalRows={sorted.length}
@@ -572,15 +510,25 @@ function LowStockReport() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Card className="mb-4">
-        <CardContent className="flex flex-wrap items-center gap-3">
+      {/* Same NWU-Stitch restyle as Issued per Staff -- rounded-2xl white filter
+          card, lavender search box, purple focus ring. */}
+      <section className="mb-4 flex flex-wrap items-center gap-4 rounded-2xl border border-[#E2D8E9] bg-white px-5 py-3.5 shadow-sm">
         {!loading && (
           <div className={`text-sm font-semibold ${data.length > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
             {data.length === 0 ? '✓ All stock levels are healthy' : `${data.length} item${data.length !== 1 ? 's' : ''} at or below reorder threshold`}
           </div>
         )}
-        <SearchBox value={search} onChange={setSearch} placeholder="Search name, category…" className="flex-1" />
+        <div className="relative min-w-[220px] flex-1">
+          <Search className="absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-[#5B4F67]" />
+          <Input
+            className="w-full rounded-lg border-[#E2D8E9] bg-[#F8F6FA] pl-9 text-xs text-[#2A1D39] placeholder:text-[#5B4F67] focus-visible:border-[#6C3D91] focus-visible:ring-[#6C3D91]/50"
+            placeholder="Search name, category…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
         <ExportCsvButton
+          className="border-[#D5CBE0] text-[#322342] hover:border-[#6C3D91] hover:bg-[#F8F5FA]"
           filename={`low-stock-${todayDateStr()}.csv`}
           rows={sorted}
           columns={[
@@ -591,24 +539,23 @@ function LowStockReport() {
             { header: 'Shortage', value: (p: any) => p.quantity_on_hand - p.reorder_threshold },
           ]}
         />
-        </CardContent>
-      </Card>
-      <Card className="min-h-0 flex-1 py-0">
+      </section>
+      <Card className="min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
-          <TableHeader className="sticky top-0 z-10 bg-card">
-            <TableRow>
-              <SortableHead column={table.getColumn('name')!}>Product</SortableHead>
-              <SortableHead column={table.getColumn('category_name')!}>Category</SortableHead>
-              <SortableHead column={table.getColumn('qty')!}>Qty On Hand</SortableHead>
-              <SortableHead column={table.getColumn('threshold')!}>Threshold</SortableHead>
-              <SortableHead column={table.getColumn('shortage')!}>Shortage</SortableHead>
+          <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+            <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+              <SortableHead column={table.getColumn('name')!} className="h-auto py-3.5 pl-6 text-base font-bold text-[#2D203A]">Product</SortableHead>
+              <SortableHead column={table.getColumn('category_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Category</SortableHead>
+              <SortableHead column={table.getColumn('qty')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Qty On Hand</SortableHead>
+              <SortableHead column={table.getColumn('threshold')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Threshold</SortableHead>
+              <SortableHead column={table.getColumn('shortage')!} className="h-auto py-3.5 pr-6 text-base font-bold text-[#2D203A]">Shortage</SortableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
+            {loading && <TableRow><TableCell colSpan={5} className="py-8 text-center text-[#5B4F67]">Loading…</TableCell></TableRow>}
             {!loading && sorted.length === 0 && (
-              <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+              <TableRow><TableCell colSpan={5} className="py-8 text-center text-[#5B4F67]">
                 {search ? `No low stock items match "${search}"` : 'No low stock items'}
               </TableCell></TableRow>
             )}
@@ -616,12 +563,12 @@ function LowStockReport() {
               const qty = p.quantity_on_hand
               const threshold = p.reorder_threshold
               return (
-                <TableRow key={p.id}>
-                  <TableCell className="max-w-xs font-medium whitespace-normal break-words">{p.name}</TableCell>
-                  <TableCell className="max-w-xs whitespace-normal break-words text-muted-foreground">{p.category_name ?? '—'}</TableCell>
-                  <TableCell className={`font-semibold ${qty === 0 ? 'text-red-600' : 'text-amber-600'}`}>{qty}</TableCell>
-                  <TableCell>{threshold}</TableCell>
-                  <TableCell className="font-semibold text-red-600">-{threshold - qty}</TableCell>
+                <TableRow key={p.id} className="border-b border-[#E5DBEC] text-sm text-[#231A2F] hover:bg-[#FAF7FC]">
+                  <TableCell className="max-w-xs py-4 pl-6 font-semibold whitespace-normal break-words text-[#191024]">{p.name}</TableCell>
+                  <TableCell className="max-w-xs py-4 whitespace-normal break-words text-[#524663]">{p.category_name ?? '—'}</TableCell>
+                  <TableCell className={`py-4 font-bold ${qty === 0 ? 'text-red-600' : 'text-amber-600'}`}>{qty}</TableCell>
+                  <TableCell className="py-4 text-[#524663]">{threshold}</TableCell>
+                  <TableCell className="py-4 pr-6 font-bold text-red-600">-{threshold - qty}</TableCell>
                 </TableRow>
               )
             })}
@@ -629,6 +576,7 @@ function LowStockReport() {
         </Table>
         </div>
         <TablePagination
+          className="border-t border-[#E2D8E9] bg-white text-[#5C506C]"
           pageIndex={safeIndex}
           pageSize={pageSize}
           totalRows={sorted.length}
@@ -792,32 +740,70 @@ function IssuedPerStaffReport() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <DateRangeFilter
-        idPrefix="issued"
-        fromLabel="Issued from"
-        toLabel="Expected back by"
-        fromDate={fromDate}
-        toDate={toDate}
-        onFromChange={setFromDate}
-        onToChange={setToDate}
-      >
-        {/* Only bears on the expected-back-by end: every transaction has an
-            issued date, so issued-from never meets an undated row. Hidden until
-            that date is set and there is at least one such row to decide. */}
-        {toDate && undatedCount > 0 && (
-          <UndatedToggle
-            id="issued-include-undated"
-            count={undatedCount}
-            checked={includeUndated}
-            onCheckedChange={setIncludeUndated}
-            explanation="These were issued with no return date agreed, so Expected back by has nothing to test them against. They still obey Issued from."
-          />
-        )}
-        <span className="text-sm text-muted-foreground">
-          {sortedStaff.length} staff · {rangeTxns} transactions · {rangeItems} items
-        </span>
-        <SearchBox value={search} onChange={setSearch} placeholder="Search staff, department…" className="flex-1" />
+      {/* NWU-Stitch mockup's filter card (stitch_smartstock_nwu_issued_per_staff) --
+          rounded-2xl white card, soft lavender inputs, purple focus ring. Rebuilt
+          inline here (rather than through the shared DateRangeFilter/SearchBox) so
+          the restyle stays scoped to this one tab -- Stock Levels/Low Stock/Returns
+          keep their existing look untouched. */}
+      <section className="mb-4 flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-[#E2D8E9] bg-white px-5 py-3.5 shadow-sm">
+        <div className="flex flex-1 flex-wrap items-end gap-4">
+          <div className="flex flex-col gap-1">
+            <label htmlFor="issued-from-date" className="text-sm font-semibold text-slate-600">Issued from</label>
+            <Input
+              id="issued-from-date"
+              type="date"
+              className="w-36 rounded-lg border-[#E2D8E9] bg-[#F8F6FA] py-1.5 text-xs text-[#2A1D39] focus-visible:border-[#6C3D91] focus-visible:ring-[#6C3D91]/50"
+              value={fromDate}
+              onChange={e => setFromDate(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="issued-to-date" className="text-sm font-semibold text-slate-600">Expected back by</label>
+            <Input
+              id="issued-to-date"
+              type="date"
+              className="w-36 rounded-lg border-[#E2D8E9] bg-[#F8F6FA] py-1.5 text-xs text-[#2A1D39] focus-visible:border-[#6C3D91] focus-visible:ring-[#6C3D91]/50"
+              value={toDate}
+              onChange={e => setToDate(e.target.value)}
+            />
+          </div>
+          {(fromDate || toDate) && (
+            <Button
+              variant="ghost"
+              className="text-[#6C3D91] hover:bg-[#F8F5FA] hover:text-[#4F256E]"
+              onClick={() => { setFromDate(''); setToDate('') }}
+            >
+              Clear dates
+            </Button>
+          )}
+          {/* Only bears on the expected-back-by end: every transaction has an
+              issued date, so issued-from never meets an undated row. Hidden until
+              that date is set and there is at least one such row to decide. */}
+          {toDate && undatedCount > 0 && (
+            <UndatedToggle
+              id="issued-include-undated"
+              count={undatedCount}
+              checked={includeUndated}
+              onCheckedChange={setIncludeUndated}
+              explanation="These were issued with no return date agreed, so Expected back by has nothing to test them against. They still obey Issued from."
+              className="border-[#E2D8E9] bg-[#F8F6FA] text-[#6C5F7D]"
+            />
+          )}
+          <span className="pb-1.5 text-sm font-medium text-[#645A73]">
+            {sortedStaff.length} staff · {rangeTxns} transactions · {rangeItems} items
+          </span>
+          <div className="relative min-w-[220px] flex-1">
+            <Search className="absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-[#5B4F67]" />
+            <Input
+              className="w-full rounded-lg border-[#E2D8E9] bg-[#F8F6FA] pl-9 text-xs text-[#2A1D39] placeholder:text-[#5B4F67] focus-visible:border-[#6C3D91] focus-visible:ring-[#6C3D91]/50"
+              placeholder="Search staff, department…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
         <ExportCsvButton
+          className="border-[#D5CBE0] text-[#322342] hover:border-[#6C3D91] hover:bg-[#F8F5FA]"
           filename={`issued-per-staff-${todayDateStr()}.csv`}
           rows={staffCsvRows}
           columns={[
@@ -831,38 +817,46 @@ function IssuedPerStaffReport() {
             { header: 'Quantity', value: (s: any) => s.quantity ?? '—' },
           ]}
         />
-      </DateRangeFilter>
-      <Card className="min-h-0 flex-1 py-0">
+      </section>
+      <Card className="min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
       <div className="min-h-0 flex-1 overflow-y-auto">
       <Table>
-        <TableHeader className="sticky top-0 z-10 bg-card">
-          <TableRow>
-            <TableHead className="w-8"></TableHead>
-            <SortableHead column={table.getColumn('full_name')!}>Staff Member</SortableHead>
-            <SortableHead column={table.getColumn('department')!}>Department</SortableHead>
-            <SortableHead column={table.getColumn('txn_count')!}>Total OUT Transactions</SortableHead>
-            <SortableHead column={table.getColumn('totalQty')!}>Total Items Issued</SortableHead>
+        <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+          <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+            <TableHead className="h-auto w-8 py-3.5 pl-6"></TableHead>
+            <SortableHead column={table.getColumn('full_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff Member</SortableHead>
+            <SortableHead column={table.getColumn('department')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Department</SortableHead>
+            <SortableHead column={table.getColumn('txn_count')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Total OUT Transactions</SortableHead>
+            <SortableHead column={table.getColumn('totalQty')!} className="h-auto py-3.5 pr-6 text-base font-bold text-[#2D203A]">Total Items Issued</SortableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {loading && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
+          {loading && <TableRow><TableCell colSpan={5} className="py-8 text-center text-[#5B4F67]">Loading…</TableCell></TableRow>}
           {!loading && sortedStaff.length === 0 && (
-            <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+            <TableRow><TableCell colSpan={5} className="py-8 text-center text-[#5B4F67]">
               {search ? `No staff match "${search}"` : fromDate || toDate ? 'No transactions match the selected dates' : 'No active staff members'}
             </TableCell></TableRow>
           )}
           {pageStaff.map((s: any) => {
             const txns = s.txns
+            const expanded = rowExpanded(s.id)
             return (
               <Fragment key={s.id}>
-                <TableRow className="cursor-pointer" onClick={() => toggleRow(s.id)}>
-                  <TableCell className="text-xs text-muted-foreground">{rowExpanded(s.id) ? '▲' : '▼'}</TableCell>
-                  <TableCell className="max-w-xs font-medium whitespace-normal break-words">{s.full_name}</TableCell>
-                  <TableCell className="max-w-xs whitespace-normal break-words text-muted-foreground">{s.department ?? '—'}</TableCell>
-                  <TableCell className="font-semibold">{txns.length}</TableCell>
-                  <TableCell className="font-semibold">{s.totalQty}</TableCell>
+                <TableRow
+                  className={
+                    expanded
+                      ? 'cursor-pointer border-b-0 bg-[#F8F4FB] text-sm text-[#231A2F] hover:bg-[#F8F4FB]'
+                      : 'cursor-pointer border-b border-[#E5DBEC] text-sm text-[#231A2F] hover:bg-[#FAF7FC]'
+                  }
+                  onClick={() => toggleRow(s.id)}
+                >
+                  <TableCell className={expanded ? 'py-4 pl-6 text-[10px] text-[#6C3D91]' : 'py-4 pl-6 text-[10px] text-[#847896]'}>{expanded ? '▲' : '▼'}</TableCell>
+                  <TableCell className={`max-w-xs py-4 whitespace-normal break-words text-[#191024] ${expanded ? 'font-bold' : 'font-semibold'}`}>{s.full_name}</TableCell>
+                  <TableCell className="max-w-xs py-4 whitespace-normal break-words text-[#524663]">{s.department ?? '—'}</TableCell>
+                  <TableCell className={`py-4 text-center text-[#191024] ${expanded ? 'font-extrabold' : 'font-bold'}`}>{txns.length}</TableCell>
+                  <TableCell className={`py-4 pr-6 text-center text-[#191024] ${expanded ? 'font-extrabold' : 'font-bold'}`}>{s.totalQty}</TableCell>
                 </TableRow>
-                {rowExpanded(s.id) && (
+                {expanded && (
                   txns.flatMap((t: any) => {
                     // One row per line item on the transaction (not one row
                     // per transaction with every item mashed into a single
@@ -880,19 +874,19 @@ function IssuedPerStaffReport() {
                     const tLines = t.transaction_lines || []
                     const rows = tLines.length > 0 ? tLines : [null]
                     return rows.map((l: any, idx: number) => (
-                      <TableRow key={`${t.id}_${idx}`} className="bg-muted/50">
-                        <TableCell className="pl-8 text-xs text-muted-foreground"></TableCell>
-                        <TableCell className="max-w-xs text-xs whitespace-normal break-words text-muted-foreground">
-                          <div className="font-mono text-xs break-all">{t.reference_no}</div>
-                          Issued at {formatDate(t.created_at)}
+                      <TableRow key={`${t.id}_${idx}`} className="border-b border-[#F0EBF5] bg-[#FDFCFF] text-sm hover:bg-[#FDFCFF]">
+                        <TableCell className="pl-8 text-[10px] text-[#5B4F67]"></TableCell>
+                        <TableCell className="max-w-xs pl-4 text-sm whitespace-normal break-words text-[#564966]">
+                          <div className="font-mono text-sm font-bold text-[#322342]">{t.reference_no}</div>
+                          <div className="mt-0.5 text-sm text-[#5B4F67]">Issued at {formatDate(t.created_at)}</div>
                         </TableCell>
-                        <TableCell className="max-w-xs text-xs whitespace-normal break-words text-muted-foreground">
+                        <TableCell className="max-w-xs text-sm whitespace-normal break-words text-[#3C304D]">
                           {l ? (l.product_name ?? '?') : 'No items recorded'}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
+                        <TableCell className="text-center text-sm font-semibold text-[#191024]">
                           {l ? l.quantity : '—'}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
+                        <TableCell className="text-sm font-medium text-[#564966]">
                           {t.lend_to ? <>Expected {formatDateOnly(t.lend_to)}</> : '—'}
                         </TableCell>
                       </TableRow>
@@ -906,6 +900,7 @@ function IssuedPerStaffReport() {
       </Table>
       </div>
       <TablePagination
+        className="border-t border-[#E2D8E9] bg-white text-[#5C506C]"
         pageIndex={safeIndex}
         pageSize={pageSize}
         totalRows={sortedStaff.length}
@@ -924,12 +919,12 @@ function IssuedPerStaffReport() {
 // date this return was actually made against the originating Lend To date
 // — a historical judgement, not a live "today" one.
 function returnRowStatus(t: any): { label: string; className: string } | null {
-  if (t.partial) return { label: 'Partial', className: 'bg-amber-100 text-amber-800' }
+  if (t.partial) return { label: 'Partial', className: 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold' }
   if (!t.expected_date) return null
   const returnedOn = t.created_at ? isoToLocalDateStr(t.created_at) : ''
-  if (returnedOn < t.expected_date) return { label: 'Early', className: 'bg-emerald-100 text-emerald-800' }
-  if (returnedOn === t.expected_date) return { label: 'On time', className: 'bg-sky-100 text-sky-800' }
-  return { label: 'Late', className: 'bg-red-100 text-red-800' }
+  if (returnedOn < t.expected_date) return { label: 'Early', className: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold' }
+  if (returnedOn === t.expected_date) return { label: 'On time', className: 'bg-sky-100 text-sky-800 border-sky-200/60 px-2.5 font-semibold' }
+  return { label: 'Late', className: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold' }
 }
 
 // Both ends bound t.expected_date — the lend_to copied off the Stock Out this
@@ -1014,7 +1009,7 @@ function StatusFilter({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button variant="outline" className="w-40 justify-between font-normal" />}>
+      <DropdownMenuTrigger render={<Button variant="outline" className="w-40 justify-between border-[#E2D8E9] bg-[#F8F6FA] font-normal text-[#2A1D39] hover:border-[#6C3D91] hover:bg-white" />}>
         <span className="truncate">{statusFilterLabel(selected)}</span>
         <ChevronDown className="size-3.5 text-muted-foreground" />
       </DropdownMenuTrigger>
@@ -1212,17 +1207,43 @@ function ReturnsReport() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <DateRangeFilter
-        idPrefix="returns"
-        fromLabel="Expected from"
-        toLabel="Expected to"
-        fromDate={fromDate}
-        toDate={toDate}
-        onFromChange={setFromDate}
-        onToChange={setToDate}
-      >
-        <div className="grid gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Status</span>
+      {/* Same NWU-Stitch restyle as Issued per Staff -- rounded-2xl white filter
+          card, lavender inputs/dropdown, purple focus ring. Rebuilt inline
+          (rather than through the shared DateRangeFilter/SearchBox) so the
+          restyle stays scoped to this tab -- Stock Levels/Low Stock keep the
+          plain DateRangeFilter/SearchBox look where they don't use dates. */}
+      <section className="mb-4 flex flex-wrap items-end gap-4 rounded-2xl border border-[#E2D8E9] bg-white px-5 py-3.5 shadow-sm">
+        <div className="flex flex-col gap-1">
+          <label htmlFor="returns-from-date" className="text-sm font-semibold text-slate-600">Expected from</label>
+          <Input
+            id="returns-from-date"
+            type="date"
+            className="w-36 rounded-lg border-[#E2D8E9] bg-[#F8F6FA] py-1.5 text-xs text-[#2A1D39] focus-visible:border-[#6C3D91] focus-visible:ring-[#6C3D91]/50"
+            value={fromDate}
+            onChange={e => setFromDate(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor="returns-to-date" className="text-sm font-semibold text-slate-600">Expected to</label>
+          <Input
+            id="returns-to-date"
+            type="date"
+            className="w-36 rounded-lg border-[#E2D8E9] bg-[#F8F6FA] py-1.5 text-xs text-[#2A1D39] focus-visible:border-[#6C3D91] focus-visible:ring-[#6C3D91]/50"
+            value={toDate}
+            onChange={e => setToDate(e.target.value)}
+          />
+        </div>
+        {(fromDate || toDate) && (
+          <Button
+            variant="ghost"
+            className="text-[#6C3D91] hover:bg-[#F8F5FA] hover:text-[#4F256E]"
+            onClick={() => { setFromDate(''); setToDate('') }}
+          >
+            Clear dates
+          </Button>
+        )}
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-semibold text-slate-600">Status</span>
           <StatusFilter selected={statusFilter} onChange={setStatusFilter} />
         </div>
         {/* Only worth showing once a range is set — with no dates the rows are
@@ -1235,14 +1256,24 @@ function ReturnsReport() {
             checked={includeUndated}
             onCheckedChange={setIncludeUndated}
             explanation="The Stock Out these settle set no return date, or they are not linked to one. With no due date to place them in a range, they show under every window."
+            className="border-[#E2D8E9] bg-[#F8F6FA] text-[#6C5F7D]"
           />
         )}
-        <span className="text-sm text-muted-foreground">
+        <span className="pb-1.5 text-sm font-medium text-[#645A73]">
           {sortedReturns.length} {sortedReturns.length === 1 ? 'return' : 'returns'}
           {(fromDate || toDate) && <> · by date expected back</>}
         </span>
-        <SearchBox value={search} onChange={setSearch} placeholder="Search reference, staff, item…" className="flex-1" />
+        <div className="relative min-w-[220px] flex-1">
+          <Search className="absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-[#5B4F67]" />
+          <Input
+            className="w-full rounded-lg border-[#E2D8E9] bg-[#F8F6FA] pl-9 text-xs text-[#2A1D39] placeholder:text-[#5B4F67] focus-visible:border-[#6C3D91] focus-visible:ring-[#6C3D91]/50"
+            placeholder="Search reference, staff, item…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
         <ExportCsvButton
+          className="border-[#D5CBE0] text-[#322342] hover:border-[#6C3D91] hover:bg-[#F8F5FA]"
           filename={`returns-${todayDateStr()}.csv`}
           rows={returnsCsvRows}
           columns={[
@@ -1261,26 +1292,26 @@ function ReturnsReport() {
             { header: 'Outstanding Qty', value: (t: any) => t.outstandingQty ?? '—' },
           ]}
         />
-      </DateRangeFilter>
-      <Card className="min-h-0 flex-1 py-0">
+      </section>
+      <Card className="min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
       <div className="min-h-0 flex-1 overflow-y-auto">
       <Table>
-        <TableHeader className="sticky top-0 z-10 bg-card">
-          <TableRow>
-            <TableHead className="w-8"></TableHead>
-            <SortableHead column={table.getColumn('reference_no')!}>Reference</SortableHead>
-            <SortableHead column={table.getColumn('staff_name')!}>Staff</SortableHead>
-            <TableHead>Items Returned</TableHead>
-            <SortableHead column={table.getColumn('linked_txn_ref')!}>Returning For</SortableHead>
-            <SortableHead column={table.getColumn('status')!}>Status</SortableHead>
-            <SortableHead column={table.getColumn('expected_date')!}>Expected</SortableHead>
-            <SortableHead column={table.getColumn('created_at')!}>Date Returned</SortableHead>
+        <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+          <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+            <TableHead className="h-auto w-8 py-3.5 pl-6"></TableHead>
+            <SortableHead column={table.getColumn('reference_no')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Reference</SortableHead>
+            <SortableHead column={table.getColumn('staff_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff</SortableHead>
+            <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Items Returned</TableHead>
+            <SortableHead column={table.getColumn('linked_txn_ref')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Returning For</SortableHead>
+            <SortableHead column={table.getColumn('status')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Status</SortableHead>
+            <SortableHead column={table.getColumn('expected_date')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Expected</SortableHead>
+            <SortableHead column={table.getColumn('created_at')!} className="h-auto py-3.5 pr-6 text-base font-bold text-[#2D203A]">Date Returned</SortableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {loading && <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
+          {loading && <TableRow><TableCell colSpan={8} className="py-8 text-center text-[#5B4F67]">Loading…</TableCell></TableRow>}
           {!loading && sortedReturns.length === 0 && (
-            <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+            <TableRow><TableCell colSpan={8} className="py-8 text-center text-[#5B4F67]">
               {search ? `No returns match "${search}"`
                 : statusFilter.size === 0 ? 'No statuses selected'
                 : fromDate || toDate ? 'No returns were expected in the selected date range'
@@ -1294,14 +1325,14 @@ function ReturnsReport() {
             return (
               <Fragment key={t.id}>
                 <TableRow
-                  className={t.partial ? 'cursor-pointer' : ''}
+                  className={`border-b border-[#E5DBEC] text-sm text-[#231A2F] hover:bg-[#FAF7FC] ${t.partial ? 'cursor-pointer' : ''}`}
                   onClick={() => t.partial && toggleRow(t.id)}
                 >
-                  <TableCell className="text-sm text-muted-foreground">
+                  <TableCell className="py-4 pl-6 text-[10px] text-[#6C3D91]">
                     {t.partial && (isExpanded ? '▲' : '▼')}
                   </TableCell>
-                  <TableCell className="max-w-xs font-mono text-xs whitespace-normal break-all">{t.reference_no}</TableCell>
-                  <TableCell className="max-w-xs font-medium whitespace-normal break-words">{t.staff_name ?? '—'}</TableCell>
+                  <TableCell className="max-w-xs py-4 font-mono text-sm whitespace-normal break-all text-[#322342]">{t.reference_no}</TableCell>
+                  <TableCell className="max-w-xs py-4 font-semibold whitespace-normal break-words text-[#191024]">{t.staff_name ?? '—'}</TableCell>
                   {/* TableCell defaults to whitespace-nowrap, which is fine for
                       every other column here but not this one: a return with
                       several product lines comma-joins into a single unbroken
@@ -1312,25 +1343,25 @@ function ReturnsReport() {
                       of the row this column is allowed to claim before it has to
                       wrap, so a return with many items grows down, not the table
                       out. Same fix as the Audit Log's expanded detail cell. */}
-                  <TableCell className="max-w-xs text-sm break-words whitespace-normal">
+                  <TableCell className="max-w-xs py-4 text-sm break-words whitespace-normal text-[#3C304D]">
                     {tLines.map((l: any) => `${l.product_name ?? '?'} ×${l.quantity}`).join(', ')}
                   </TableCell>
-                  <TableCell className="max-w-xs font-mono text-xs whitespace-normal break-all text-muted-foreground">
+                  <TableCell className="max-w-xs py-4 font-mono text-sm whitespace-normal break-all text-[#5B4F67]">
                     {t.linked_txn_ref ?? '—'}
                   </TableCell>
-                  <TableCell>{status && <Badge className={`${status.className} uppercase`}>{status.label}</Badge>}</TableCell>
-                  <TableCell className="text-muted-foreground">{formatDateOnly(t.expected_date)}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{formatDate(t.created_at)}</TableCell>
+                  <TableCell className="py-4">{status && <Badge className={status.className}>{sentenceCase(status.label)}</Badge>}</TableCell>
+                  <TableCell className="py-4 text-[#524663]">{formatDateOnly(t.expected_date)}</TableCell>
+                  <TableCell className="py-4 pr-6 text-sm text-[#5B4F67]">{formatDate(t.created_at)}</TableCell>
                 </TableRow>
                 {isExpanded && t.partial && (
-                  <TableRow className="bg-muted/50">
+                  <TableRow className="border-b border-[#F0EBF5] bg-[#FDFCFF] hover:bg-[#FDFCFF]">
                     <TableCell colSpan={8} className="p-4">
                       <div className="text-sm">
-                        <span className="font-medium text-foreground">Still outstanding on {t.linked_txn_ref ?? 'the original Stock Out'}:</span>
-                        <ul className="mt-1 ml-4 list-disc">
+                        <span className="font-semibold text-[#191024]">Still outstanding on {t.linked_txn_ref ?? 'the original Stock Out'}:</span>
+                        <ul className="mt-1 ml-4 list-disc text-[#3C304D]">
                           {t.outstandingLines.map((l: any, i: number) => (
                             <li key={i}>
-                              {l.product_name} <span className="text-muted-foreground">× {l.outstanding}</span>
+                              {l.product_name} <span className="text-[#5B4F67]">× {l.outstanding}</span>
                             </li>
                           ))}
                         </ul>
@@ -1345,6 +1376,7 @@ function ReturnsReport() {
       </Table>
       </div>
       <TablePagination
+        className="border-t border-[#E2D8E9] bg-white text-[#5C506C]"
         pageIndex={safeIndex}
         pageSize={pageSize}
         totalRows={sortedReturns.length}

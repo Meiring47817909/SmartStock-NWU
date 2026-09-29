@@ -141,45 +141,45 @@ export default function CategoriesPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-5 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Categories</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{categories.length} categories</p>
+      <div className="mb-6 flex items-center justify-between">
+        <div className="space-y-1">
+          <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Categories</h1>
+          <p className="text-sm text-[#5B4F67]">{categories.length} categories</p>
         </div>
         <Button onClick={openAdd}><Plus className="size-4" /> Add Category</Button>
       </div>
 
-      <Card className="min-h-0 flex-1 py-0">
+      <Card className="min-h-0 flex-1 rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
-          <TableHeader className="sticky top-0 z-10 bg-card">
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead></TableHead>
+          <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+            <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+              <TableHead className="h-auto py-3.5 pl-6 text-base font-bold text-[#2D203A]">Name</TableHead>
+              <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Description</TableHead>
+              <TableHead className="h-auto py-3.5 pr-6"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && <TableRow><TableCell colSpan={3} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>}
             {!loading && categories.length === 0 && <TableRow><TableCell colSpan={3} className="py-8 text-center text-muted-foreground">No categories yet</TableCell></TableRow>}
             {categories.map(c => (
-              <TableRow key={c.id}>
-                <TableCell className="max-w-xs font-medium whitespace-normal">
+              <TableRow key={c.id} className="hover:bg-[#FAF7FC]">
+                <TableCell className="max-w-xs py-4 pl-6 font-medium whitespace-normal">
                   <span className="inline-flex min-w-0 items-start gap-1.5">
                     <Tag className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 break-words">{c.name}</span>
                   </span>
                 </TableCell>
-                <TableCell className="max-w-xs whitespace-normal break-words text-muted-foreground">{c.description ?? '—'}</TableCell>
-                <TableCell>
+                <TableCell className="max-w-xs py-4 whitespace-normal break-words text-muted-foreground">{c.description ?? '—'}</TableCell>
+                <TableCell className="py-4 pr-6">
                   <div className="flex gap-1">
-                    <Button variant="ghost" size="icon-sm" onClick={() => openEdit(c)}>
+                    <Button variant="outline" size="icon-sm" className="border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900" onClick={() => openEdit(c)}>
                       <Pencil className="size-3.5" />
                     </Button>
                     <Button
-                      variant="ghost" size="icon-sm"
+                      variant="outline" size="icon-sm"
                       onClick={() => openDelete(c)}
-                      className="text-destructive hover:text-destructive"
+                      className="border-[#D5C6E0] bg-[#F0EBF5] text-red-600 hover:bg-[#E4D9EE] hover:text-red-700"
                     >
                       <Trash2 className="size-3.5" />
                     </Button>

@@ -141,6 +141,21 @@ export default function LendBrowsePage() {
 
   return (
     <div>
+      {/* Page header — the "Browse Equipment" title + intro line from
+          lend_browse_v2_final_1.html's own Page Header Section, restyled
+          onto this app's semantic text-foreground/text-muted-foreground
+          tokens rather than the mockup's raw hex. The enquiries line
+          points at Selouna's actual mailbox, matching the mailto already
+          used on the deactivated/unlinked-account screens in
+          (portal)/lend/layout.tsx. */}
+      <div className="mb-6 space-y-1">
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Browse Equipment</h1>
+        <p className="max-w-2xl text-sm text-[#5B4F67]">
+          Request equipment to borrow — Selouna will review and confirm your pickup window at the Potchefstroom BICS IT Service Desk. For any enquiries, contact{' '}
+          <a href="mailto:Selouna.Visser@nwu.ac.za" className="underline">Selouna.Visser@nwu.ac.za</a>.
+        </p>
+      </div>
+
       {/* Filters — matches lend_browse_v2_final_1.html's "Search & Filter
           Controls" card exactly: layout, spacing and colors (mapped onto
           this app's own --nwu-* design tokens, which already resolve to the
@@ -167,7 +182,7 @@ export default function LendBrowsePage() {
             second line. Counts are the whole catalog's per-category totals,
             not narrowed by the other filters below. */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs whitespace-nowrap">
-          <span className="mr-1 shrink-0 text-[11px] font-medium tracking-wider text-muted-foreground uppercase">Categories:</span>
+          <span className="mr-1 shrink-0 text-sm font-medium text-muted-foreground">Categories:</span>
           <button
             type="button"
             onClick={() => setCatFilter('')}
@@ -226,7 +241,7 @@ export default function LendBrowsePage() {
                 (that's what "Lendable ..." on each card already shows). */}
             <div className="flex items-center gap-2">
               <CalendarRange className="size-[18px] text-muted-foreground" />
-              <span className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">Lend Window:</span>
+              <span className="text-sm font-medium text-muted-foreground">Lend Window:</span>
               <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2.5 py-1">
                 <label htmlFor="browse-from-date" className="text-[11px] font-medium text-muted-foreground">From</label>
                 <Input

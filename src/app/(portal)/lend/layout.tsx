@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
@@ -9,6 +9,9 @@ import { auth } from '@/lib/firebase/config'
 import { markLoggingOut, consumeLoggingOut } from '@/lib/authTransition'
 import { StaffPortalProvider, useStaffPortal } from '@/context/StaffPortalContext'
 import { PortalCartProvider, usePortalCart } from '@/context/PortalCartContext'
+import { loadMyRequestsAlertCount } from '@/lib/firebase/loanRequests'
+import { subscribeToAlertsChanged } from '@/lib/alertsBus'
+import CookieNotice from '@/components/portal/CookieNotice'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -32,11 +35,38 @@ function PortalShell({ children }: { children: React.ReactNode }) {
   // quantity rather than by row.
   const cartQty = cart.reduce((sum, i) => sum + i.quantity, 0)
 
+  // Combined total of My Requests' three actionable tabs (Needs your
+  // response, Awaiting Selouna, Upcoming) -- History is excluded, see
+  // lib/firebase/loanRequests.ts's loadMyRequestsAlertCount().
+  const [myRequestsCount, setMyRequestsCount] = useState<number | null>(null)
+
   // Guest = nobody signed in. Browse and Cart both work without an
   // account (firestore.rules allows a public read of `products`; the cart
   // itself is local, in-memory state) — everything else in the portal
   // still needs a real, linked sign-in.
   const isGuest = !user
+
+  useEffect(() => {
+    if (!staffMember) return
+    let cancelled = false
+    loadMyRequestsAlertCount(staffMember.id.toString()).then(count => {
+      if (!cancelled) setMyRequestsCount(count)
+    }).catch(() => {
+      // Best-effort: the badge just stays hidden if this fails, the My
+      // Requests page itself is still the source of truth.
+    })
+    return () => { cancelled = true }
+  }, [staffMember, pathname === '/lend/requests'])
+
+  // Catches a status change made in place on My Requests itself (accept/
+  // decline/withdraw), where the pathname never changes so the effect
+  // above never re-fires on its own -- see alertsBus.ts.
+  useEffect(() => {
+    if (!staffMember) return
+    return subscribeToAlertsChanged(() => {
+      loadMyRequestsAlertCount(staffMember.id.toString()).then(setMyRequestsCount).catch(() => {})
+    })
+  }, [staffMember])
 
   useEffect(() => {
     if (loading) return
@@ -112,15 +142,13 @@ function PortalShell({ children }: { children: React.ReactNode }) {
   }
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/')
-  // Browse and Cart share the wide, spacious width; My Requests stays at
-  // the narrower reading width its stacked request cards were designed
-  // for. Either way it's a bounded, centered width with its own side
-  // margins, not edge-to-edge, and always matching the navbar's own width
-  // below so the two visually line up (same idea as takealot.com's header
-  // and product grid sharing one gutter) — the margin never differs
-  // between pages that are supposed to feel like the same "wide" section
-  // of the portal.
-  const isWide = pathname === '/lend' || pathname === '/lend/cart' || pathname === '/lend/requests' || pathname === '/lend/profile'
+  // Browse, Cart, My Requests, Profile, and the Lending Policy page all
+  // share the wide, spacious width so the navbar lines up identically
+  // across the whole portal (same idea as takealot.com's header and
+  // product grid sharing one gutter) — the margin never differs between
+  // pages that are supposed to feel like the same "wide" section of the
+  // portal.
+  const isWide = pathname === '/lend' || pathname === '/lend/cart' || pathname === '/lend/requests' || pathname === '/lend/profile' || pathname === '/lend/policy'
   const CONTENT_MAX_WIDTH = isWide ? 'max-w-[1600px]' : 'max-w-[1000px]'
   // staffMember/user.email are both unavailable for a guest — the
   // account-menu branch below never actually renders this for one, but
@@ -128,21 +156,22 @@ function PortalShell({ children }: { children: React.ReactNode }) {
   const avatarEmail = staffMember?.email ?? user?.email ?? ''
 
   // Every portal page now shares the same fixed, brand-tinted canvas
-  // gradient (design refresh) -- all four routes are the same shell,
-  // so Cart/My Requests/Profile get Browse Equipment's gradient too.
+  // gradient (design refresh) -- all five routes are the same shell, so
+  // Cart/My Requests/Profile/Lending Policy all get Browse Equipment's
+  // gradient too.
   const PORTAL_BACKGROUND: React.CSSProperties = {
     background: 'linear-gradient(180deg, #E6DCF1 0%, #D8CAE8 100%)',
     backgroundAttachment: 'fixed',
   }
   const mainStyle: React.CSSProperties | undefined =
-    pathname === '/lend' || pathname === '/lend/cart' || pathname === '/lend/requests' || pathname === '/lend/profile'
+    pathname === '/lend' || pathname === '/lend/cart' || pathname === '/lend/requests' || pathname === '/lend/profile' || pathname === '/lend/policy'
       ? PORTAL_BACKGROUND
       : undefined
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="flex min-h-screen flex-col bg-background">
       <header className="border-b bg-card">
-        <div className={`mx-auto flex items-center justify-between px-5 py-3 ${CONTENT_MAX_WIDTH}`}>
+        <div className={`mx-auto flex items-center justify-between px-5 sm:px-6 md:px-8 lg:px-10 xl:px-14 py-4 ${CONTENT_MAX_WIDTH}`}>
           <div className="flex items-center gap-6">
             {/* Same SmartStock-NWU lockup as the login page and the admin
                 sidebar, swapped in for the old plain-text "NWU Lending"
@@ -153,25 +182,40 @@ function PortalShell({ children }: { children: React.ReactNode }) {
               <Image
                 src="/smartstock-nwu-logo.svg"
                 alt="SmartStock-NWU"
-                width={920}
-                height={410}
+                width={460}
+                height={120}
                 priority
                 unoptimized
-                className="h-9 w-auto"
+                className="h-16 w-auto"
               />
             </Link>
-            <nav className="flex items-center gap-1">
-              <Button variant={isActive('/lend') && pathname === '/lend' ? 'secondary' : 'ghost'} size="sm" render={<Link href="/lend" />}>
-                <Package className="size-3.5" /> Browse
+            <nav className="flex items-center gap-1.5">
+              <Button
+                variant={isActive('/lend') && pathname === '/lend' ? 'default' : 'ghost'}
+                render={<Link href="/lend" />}
+                className="h-10 gap-2 px-4 text-base"
+              >
+                <Package className="size-4.5" /> Browse
               </Button>
-              <Button variant={isActive('/lend/cart') ? 'secondary' : 'ghost'} size="sm" render={<Link href="/lend/cart" />}>
-                <ShoppingCart className="size-3.5" /> Cart
+              <Button
+                variant={isActive('/lend/cart') ? 'default' : 'ghost'}
+                render={<Link href="/lend/cart" />}
+                className="h-10 gap-2 px-4 text-base"
+              >
+                <ShoppingCart className="size-4.5" /> Cart
                 {cartQty > 0 && (
-                  <Badge className="bg-(--nwu-turquoise) text-white">{cartQty}</Badge>
+                  <Badge className="bg-(--nwu-turquoise) text-sm text-white">{cartQty}</Badge>
                 )}
               </Button>
-              <Button variant={isActive('/lend/requests') ? 'secondary' : 'ghost'} size="sm" render={<Link href="/lend/requests" />}>
-                <ClipboardList className="size-3.5" /> My Requests
+              <Button
+                variant={isActive('/lend/requests') ? 'default' : 'ghost'}
+                render={<Link href="/lend/requests" />}
+                className="h-10 gap-2 px-4 text-base"
+              >
+                <ClipboardList className="size-4.5" /> My Requests
+                {!!myRequestsCount && (
+                  <Badge className="bg-(--nwu-turquoise) text-sm text-white">{myRequestsCount}</Badge>
+                )}
               </Button>
             </nav>
           </div>
@@ -182,7 +226,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
                 compact. Initials/color are derived from the email, not
                 stored anywhere, so there's nothing to keep in sync. */}
             {isGuest ? (
-              <Link href="/login" className="text-sm font-medium text-primary underline-offset-2 hover:underline">
+              <Link href="/login" className="text-base font-semibold text-primary underline-offset-2 hover:underline">
                 Sign In
               </Link>
             ) : (
@@ -191,8 +235,8 @@ function PortalShell({ children }: { children: React.ReactNode }) {
                   render={<button type="button" className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring" />}
                   aria-label={`Account menu for ${staffMember?.full_name}`}
                 >
-                  <Avatar>
-                    <AvatarFallback className={`text-xs font-semibold text-white ${avatarColorClass(avatarEmail)}`}>
+                  <Avatar className="size-10">
+                    <AvatarFallback className={`text-sm font-semibold text-white ${avatarColorClass(avatarEmail)}`}>
                       {avatarInitials(avatarEmail)}
                     </AvatarFallback>
                   </Avatar>
@@ -210,7 +254,37 @@ function PortalShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-      <main className={`mx-auto px-5 py-6 ${CONTENT_MAX_WIDTH}`} style={mainStyle}>{children}</main>
+      <div className="flex-1" style={mainStyle}>
+        <main className={`mx-auto px-5 sm:px-6 md:px-8 lg:px-10 xl:px-14 py-6 ${CONTENT_MAX_WIDTH}`}>{children}</main>
+      </div>
+      <footer className="border-t bg-card">
+        <div className={`mx-auto flex flex-col items-center justify-between gap-4 px-5 sm:px-6 md:px-8 lg:px-10 xl:px-14 py-8 sm:flex-row ${CONTENT_MAX_WIDTH}`}>
+          <div className="flex flex-col items-center gap-2 text-center sm:flex-row sm:gap-4 sm:text-left">
+            <div className="flex items-center gap-2">
+              <span className="text-base font-semibold text-foreground">SmartStock-NWU</span>
+              {/* NWU's own acronym wordmark (supplied by the user from NWU's
+                  brand assets), cropped to its visible artwork so it sits at
+                  a natural size next to the SmartStock-NWU text. */}
+              <Image
+                src="/nwu-wordmark.png"
+                alt="North-West University"
+                width={1572}
+                height={423}
+                unoptimized
+                className="h-5 w-auto"
+              />
+            </div>
+            <span className="hidden text-muted-foreground/40 sm:inline">·</span>
+            <span className="text-base text-muted-foreground">
+              © {new Date().getFullYear()} North-West University IT Store · Potchefstroom Campus (BICS). All rights reserved.
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-base">
+            <Link href="/lend/policy" className="text-base font-semibold text-primary underline-offset-2 hover:underline">Lending Policy</Link>
+          </div>
+        </div>
+      </footer>
+      <CookieNotice />
     </div>
   )
 }

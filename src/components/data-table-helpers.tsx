@@ -12,7 +12,7 @@ import {
   type Column,
 } from '@tanstack/react-table'
 import { ArrowDown, ArrowUp, ArrowUpDown, Download } from 'lucide-react'
-import { downloadCsv } from '@/lib/utils'
+import { cn, downloadCsv } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { CardFooter } from '@/components/ui/card'
 import {
@@ -87,16 +87,21 @@ export function SortableHead({
 // the same place in the row either way, and a disabled state says why more
 // plainly than the button just vanishing would.
 export function ExportCsvButton<T>({
-  filename, columns, rows,
+  filename, columns, rows, className,
 }: {
   filename: string
   columns: { header: string; value: (row: T) => string | number | null | undefined }[]
   rows: T[]
+  // Opt-in style override -- every other caller leaves this unset and gets
+  // the same "ml-auto" outline button as before. Issued per Staff is the
+  // only one passing something here (its NWU-Stitch restyle), so this never
+  // touches how the button looks on any other tab.
+  className?: string
 }) {
   return (
     <Button
       variant="outline"
-      className="ml-auto"
+      className={cn('ml-auto', className)}
       disabled={rows.length === 0}
       onClick={() => downloadCsv(filename, columns, rows)}
     >
@@ -146,20 +151,23 @@ export function paginate<T>(rows: T[], pageIndex: number, pageSize: PageSize): {
 // from paginate(), not raw state, so what this shows never disagrees with
 // which rows are actually on screen.
 export function TablePagination({
-  pageIndex, pageSize, totalRows, onPageIndexChange, onPageSizeChange,
+  pageIndex, pageSize, totalRows, onPageIndexChange, onPageSizeChange, className,
 }: {
   pageIndex: number
   pageSize: PageSize
   totalRows: number
   onPageIndexChange: (index: number) => void
   onPageSizeChange: (size: PageSize) => void
+  // Same opt-in override as ExportCsvButton's className above -- unset for
+  // every caller except Issued per Staff's NWU-Stitch restyle.
+  className?: string
 }) {
   const pageCount = pageCountFor(totalRows, pageSize)
   const from = totalRows === 0 ? 0 : pageSize === 'all' ? 1 : pageIndex * pageSize + 1
   const to = pageSize === 'all' ? totalRows : Math.min(totalRows, (pageIndex + 1) * pageSize)
 
   return (
-    <CardFooter className="flex flex-wrap items-center justify-between gap-3">
+    <CardFooter className={cn('flex flex-wrap items-center justify-between gap-3', className)}>
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <span>Rows per page</span>
         <Select

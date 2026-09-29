@@ -34,7 +34,7 @@ import type { Profile } from '@/types/database'
 // shell and non-admins never reach this sidebar — but the entry is kept so
 // the lookup can't come back undefined.
 const ROLE_BADGE_CLASS: Record<string, string> = {
-  admin: 'bg-[#EDE3F2] text-[#522E6E]',
+  admin: 'bg-white/20 text-purple-100',
   staff: 'bg-white/15 text-white',
 }
 
@@ -45,7 +45,7 @@ const ROLE_BADGE_CLASS: Record<string, string> = {
 // consumed elsewhere as a plain background-color, which can't hold a
 // gradient, and this wrapper also gives the collapse/expand toggle and
 // logo below a single flex column to lay out in.
-const SIDEBAR_GRADIENT = 'bg-gradient-to-b from-[#3a2667] via-[#60317f] to-[#92428b]'
+const SIDEBAR_GRADIENT = 'bg-gradient-to-b from-[#4A2467] via-[#401C5B] to-[#34164B]'
 
 // Collapsed rail overrides for the nav buttons, plus a responsive, tighter
 // row height for expanded mode (32px below the lg breakpoint, 40px at/above
@@ -57,7 +57,8 @@ const SIDEBAR_GRADIENT = 'bg-gradient-to-b from-[#3a2667] via-[#60317f] to-[#924
 // tailwind-merge drops the primitive's smaller size in favour of this one
 // rather than stacking two conflicting rules.
 const SIDEBAR_ICON_BUTTON_CLASS =
-  'h-8 lg:h-10 py-1 group-data-[collapsible=icon]:size-12! group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:justify-center'
+  'h-8 lg:h-10 py-1 rounded-lg text-purple-100/80 data-active:bg-white/15 data-active:text-white data-active:shadow-inner data-active:font-semibold '
+  + 'group-data-[collapsible=icon]:size-12! group-data-[collapsible=icon]:mx-auto group-data-[collapsible=icon]:justify-center'
 
 // Collapsed-rail badge override — the primitive hides SidebarMenuBadge
 // entirely once collapsed (no room next to a 32px icon). With the wider
@@ -166,7 +167,7 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
     // Improved_Sidebar.jpg's "Collapsed State" column for the target look.
     <SidebarPrimitive collapsible="icon">
       <div className={`flex min-h-0 flex-1 flex-col ${SIDEBAR_GRADIENT}`}>
-        <SidebarHeader className="gap-3 border-b border-sidebar-border px-3 py-3">
+        <SidebarHeader className="gap-3 border-b border-white/10 px-3 py-4 lg:px-5 lg:pt-6 lg:pb-4">
           <SidebarCollapseToggle />
 
           {/* Full icon+wordmark lockup, expanded only. No more white card
@@ -187,8 +188,8 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
             <Image
               src="/smartstock-nwu-logo-light.svg"
               alt="SmartStock-NWU"
-              width={920}
-              height={410}
+              width={460}
+              height={120}
               priority
               unoptimized
               className="h-auto w-full"
@@ -202,8 +203,8 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
             <Image
               src="/smartstock-nwu-icon.svg"
               alt="SmartStock-NWU"
-              width={260}
-              height={370}
+              width={100}
+              height={100}
               priority
               unoptimized
               className="h-14 w-auto"
@@ -213,7 +214,7 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
           <div className="text-[0.7rem] text-white/65 group-data-[collapsible=icon]:hidden lg:text-[0.8rem]">NWU IT Store · Potch</div>
         </SidebarHeader>
 
-        <SidebarContent className="px-1.5 py-2 group-data-[collapsible=icon]:overflow-auto">
+        <SidebarContent className="px-1.5 py-2 group-data-[collapsible=icon]:overflow-x-hidden group-data-[collapsible=icon]:overflow-y-auto">
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
@@ -231,7 +232,7 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
           </SidebarGroup>
 
           <SidebarGroup>
-            <SidebarGroupLabel className="text-white/50 text-xs lg:text-sm">Stock</SidebarGroupLabel>
+            <SidebarGroupLabel className="text-[11px] font-bold tracking-wider text-purple-200/50 uppercase lg:text-xs">Stock</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 <SidebarMenuItem>
@@ -255,7 +256,7 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
 
           {canManageProducts && (
             <SidebarGroup>
-              <SidebarGroupLabel className="text-white/50 text-xs lg:text-sm">Catalogue</SidebarGroupLabel>
+              <SidebarGroupLabel className="text-[11px] font-bold tracking-wider text-purple-200/50 uppercase lg:text-xs">Catalogue</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
                   <SidebarMenuItem>
@@ -275,7 +276,7 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
 
           {(canViewReports || canManageStaff || canManageSettings) && (
             <SidebarGroup>
-              <SidebarGroupLabel className="text-white/50 text-xs lg:text-sm">Admin</SidebarGroupLabel>
+              <SidebarGroupLabel className="text-[11px] font-bold tracking-wider text-purple-200/50 uppercase lg:text-xs">Admin</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
                   {canManageStaff && (
@@ -322,7 +323,7 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
           )}
         </SidebarContent>
 
-        <SidebarFooter className="border-t border-sidebar-border p-2">
+        <SidebarFooter className="border-t border-white/10 bg-[#2E1242]/70 p-3">
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -333,7 +334,7 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
               }
               aria-label={`Account menu for ${profile?.full_name ?? 'User'}`}
             >
-              <Avatar className="size-9 shrink-0">
+              <Avatar className="size-9 shrink-0 ring-2 ring-white/20">
                 <AvatarFallback className={`text-sm font-semibold text-white ${avatarColorClass(profile?.full_name ?? '')}`}>
                   {nameInitials(profile?.full_name ?? '')}
                 </AvatarFallback>

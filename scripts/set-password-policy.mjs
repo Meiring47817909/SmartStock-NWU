@@ -9,9 +9,16 @@
 // src/app/(portal)/lend/profile/page.tsx.
 //
 // Mirrors the in-app rule already enforced in ChangePasswordCard on the
-// Profile page: 6-20 characters. No character-class requirements are
-// added here (uppercase/lowercase/number/symbol) since the in-app rule
-// only checks length.
+// Profile page: 6-20 characters, no character-class requirements. The
+// composition flags below are set explicitly to false -- Identity
+// Platform's own API defaults an omitted flag to true (a stricter
+// "strong password" baseline) the first time ENFORCE is turned on for a
+// project, which is why an earlier run of this script against a fresh
+// project silently left uppercase + symbol requirements in place even
+// though only minLength/maxLength were specified here. Confirmed via a
+// live "password123" rejection: PASSWORD_DOES_NOT_MEET_REQUIREMENTS --
+// Missing [uppercase, non-alphanumeric] -- so those two must be pinned
+// to false, not just left out, to actually match the in-app rule.
 //
 // Run once, deliberately, against the live project:
 //   node scripts/set-password-policy.mjs
@@ -49,6 +56,10 @@ await auth.projectConfigManager().updateProjectConfig({
     constraints: {
       minLength: 6,
       maxLength: 20,
+      requireLowercase: false,
+      requireUppercase: false,
+      requireNumeric: false,
+      requireNonAlphanumeric: false,
     },
   },
 })

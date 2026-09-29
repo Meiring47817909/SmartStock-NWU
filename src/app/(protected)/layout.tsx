@@ -37,8 +37,8 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
     '/stock-out': 'linear-gradient(135deg, #E6DFEE 0%, #DCD3E7 50%, #D2C7DF 100%)',
     // Same family as Dashboard -- another overview/monitoring screen.
     '/audit-log': 'linear-gradient(180deg, #E2DBEC 0%, #D4C8E2 100%)',
-    // Same family as Loan Requests/Staff -- analytics and settings screens.
-    '/reports': 'linear-gradient(180deg, #E4DCF0 0%, #D5CCE4 100%)',
+    // Reports' own NWU-Stitch mockup gradient (diagonal, 3-stop).
+    '/reports': 'linear-gradient(135deg, #E6E0EE 0%, #DDD3E7 50%, #D5C9E2 100%)',
     '/profile': 'linear-gradient(180deg, #E4DCF0 0%, #D5CCE4 100%)',
     '/settings/notifications': 'linear-gradient(180deg, #E4DCF0 0%, #D5CCE4 100%)',
   }

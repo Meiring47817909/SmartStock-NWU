@@ -5,15 +5,18 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { usePortalCart } from '@/context/PortalCartContext'
 import { useStaffPortal } from '@/context/StaffPortalContext'
-import { submitLoanRequest, validateCartDates, tightestLendingCap, lendingIntervalLabel } from '@/lib/firebase/loanRequests'
+import {
+  submitLoanRequest, validateCartDates, tightestLendingCap, lendingIntervalLabel,
+  getReservationIntervals, reservedQuantityInRange, type ReservationInterval,
+} from '@/lib/firebase/loanRequests'
 import { todayDateStr, addDaysToDateStr, formatLendWindow } from '@/lib/utils'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { AvailabilityDatePicker } from '@/components/portal/AvailabilityDatePicker'
 import { X, ShoppingCart } from 'lucide-react'
 
 export default function LendCartPage() {
@@ -49,6 +52,64 @@ export default function LendCartPage() {
   }, [staffMember, cart, fromDate, toDate])
 
   const tightestCap = tightestLendingCap(cart)
+
+  // Reservation windows for every product in the cart, fetched once (not
+  // once per calendar day) so the From/To date pickers below can color
+  // each visible day green/red without a network round trip per day. Same
+  // signed-in-only gate as the validateCartDates effect above — a guest
+  // sees an uncolored calendar until they sign in.
+  const [intervals, setIntervals] = useState<Map<string, ReservationInterval[]> | null>(null)
+  useEffect(() => {
+    // No setIntervals(null) on the early-out branch (unlike the errors
+    // effect above) — deliberately, so this never calls setState
+    // synchronously within the effect body. Guests and an empty cart are
+    // both already excluded from ever seeing colored days by the
+    // `!staffMember` check inside fromDayStatus/toDayStatus themselves, so
+    // there's nothing for a stale `intervals` value to leak into meanwhile.
+    if (!staffMember || cart.length === 0) return
+    let cancelled = false
+    getReservationIntervals(cart.map(({ product }) => product.id.toString())).then((result) => {
+      if (!cancelled) setIntervals(result)
+    }).catch((err) => {
+      // Surfaced rather than left as a silently-rejected promise — without
+      // this, a rules/permission problem here would leave the From/To
+      // calendars stuck uncolored forever with nothing in the UI or
+      // console to explain why.
+      console.error('Failed to load reservation data for the availability calendar', err)
+    })
+    return () => { cancelled = true }
+  }, [staffMember, cart])
+
+  // A single day is "available" for the From picker when every cart item
+  // falls inside its own lendable window that day AND has enough unreserved
+  // stock for just that one day — a full-range check isn't possible yet
+  // since the To date (and therefore the actual loan length) hasn't been
+  // chosen. Colors green/red only; a red From date stays clickable, same as
+  // any other, and validateCartDates' own errors below still catch it
+  // either way once picked.
+  function fromDayStatus(day: string): 'available' | 'unavailable' | null {
+    if (!staffMember || !intervals) return null
+    return cart.every(({ product, quantity }) => {
+      if (!product.lend_from || day < product.lend_from) return false
+      if (product.lend_to && day > product.lend_to) return false
+      const reserved = reservedQuantityInRange(intervals.get(product.id.toString()) ?? [], day, day)
+      return product.quantity_on_hand - reserved >= quantity
+    }) ? 'available' : 'unavailable'
+  }
+
+  // Once a From date is chosen, a candidate To date is "available" when the
+  // FULL [From, To] window still has enough stock for every item — the
+  // already-enforced min/max bounds (the tightest lending-interval cap,
+  // each product's own lend_to) keep genuinely out-of-window dates disabled
+  // exactly as before; this only colors the days still selectable within
+  // them.
+  function toDayStatus(day: string): 'available' | 'unavailable' | null {
+    if (!staffMember || !intervals || !fromDate) return null
+    return cart.every(({ product, quantity }) => {
+      const reserved = reservedQuantityInRange(intervals.get(product.id.toString()) ?? [], fromDate, day)
+      return product.quantity_on_hand - reserved >= quantity
+    }) ? 'available' : 'unavailable'
+  }
 
   async function handleSubmit() {
     // No linked staff account (guest browsing, or a signed-out visitor who
@@ -96,21 +157,21 @@ export default function LendCartPage() {
     // whole page used to be before that layout widened, not just the 700px
     // this content itself used to claim.
     <div className="mx-auto max-w-[1000px]">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Your Cart</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Choose your pickup dates, then submit your request.</p>
+      <div className="mb-6 space-y-1">
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Your Cart</h1>
+        <p className="text-sm text-[#5B4F67]">Choose your pickup dates, then submit your request.</p>
       </div>
 
-      <Card className="mb-4 py-0">
+      <Card className="mb-4 rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
         <div className="max-h-96 overflow-y-auto">
         <Table>
-          <TableHeader className="sticky top-0 z-10 bg-card">
-            <TableRow>
-              <TableHead>Product</TableHead>
-              <TableHead>Lendable</TableHead>
-              <TableHead>Max loan</TableHead>
-              <TableHead>Quantity</TableHead>
-              <TableHead></TableHead>
+          <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+            <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+              <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Product</TableHead>
+              <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Lendable</TableHead>
+              <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Max loan</TableHead>
+              <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Quantity</TableHead>
+              <TableHead className="h-auto py-3.5"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -131,7 +192,7 @@ export default function LendCartPage() {
                   </div>
                 </TableCell>
                 <TableCell>
-                  <Button variant="ghost" size="icon-sm" onClick={() => removeFromCart(item.product.id)}>
+                  <Button variant="outline" size="icon-sm" className="border-[#D5C6E0] bg-[#F0EBF5] text-red-600 hover:bg-[#E4D9EE] hover:text-red-700" onClick={() => removeFromCart(item.product.id)}>
                     <X className="size-3.5" />
                   </Button>
                 </TableCell>
@@ -142,7 +203,7 @@ export default function LendCartPage() {
         </div>
       </Card>
 
-      <Card>
+      <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
         <CardHeader>
           <CardTitle>Pickup dates</CardTitle>
         </CardHeader>
@@ -150,16 +211,25 @@ export default function LendCartPage() {
           <div className="flex flex-wrap gap-4">
             <div className="grid gap-1.5">
               <Label htmlFor="from-date">From</Label>
-              <Input id="from-date" type="date" className="w-44" value={fromDate} min={todayDateStr()}
-                onChange={(e) => { setFromDate(e.target.value); if (toDate && toDate < e.target.value) setToDate('') }} />
+              <AvailabilityDatePicker
+                id="from-date"
+                value={fromDate}
+                min={todayDateStr()}
+                dayStatus={fromDayStatus}
+                onChange={(next) => { setFromDate(next); if (toDate && toDate < next) setToDate('') }}
+              />
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="to-date">To {!tightestCap && <span className="font-normal text-muted-foreground">(optional)</span>}</Label>
-              <Input id="to-date" type="date" className="w-44" value={toDate}
+              <AvailabilityDatePicker
+                id="to-date"
+                value={toDate}
                 min={fromDate || todayDateStr()}
                 max={fromDate && tightestCap ? addDaysToDateStr(fromDate, tightestCap.days) : undefined}
                 disabled={!fromDate}
-                onChange={(e) => setToDate(e.target.value)} />
+                dayStatus={toDayStatus}
+                onChange={setToDate}
+              />
             </div>
           </div>
 

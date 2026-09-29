@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { genRef, formatDateOnly, todayDateStr } from '@/lib/utils'
+import { genRef, formatDateOnly, sentenceCase, todayDateStr } from '@/lib/utils'
 import { CreditCard, CheckCircle, Users, Search, RotateCcw } from 'lucide-react'
 import { db } from '@/lib/firebase/config'
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, getDoc, orderBy } from 'firebase/firestore'
@@ -51,12 +51,12 @@ interface OpenLine {
 // describing an actual past return) would misleadingly imply the return
 // already happened.
 function lineStatus(l: OpenLine): { label: string; className: string } | null {
-  if (l.already_returned > 0) return { label: 'Partial', className: 'bg-amber-100 text-amber-800' }
+  if (l.already_returned > 0) return { label: 'Partial', className: 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold' }
   if (!l.expected_date) return null
   const today = todayDateStr()
-  if (today > l.expected_date) return { label: 'Overdue', className: 'bg-red-100 text-red-800' }
-  if (today === l.expected_date) return { label: 'Due Today', className: 'bg-amber-100 text-amber-800' }
-  return { label: 'Not Due Yet', className: 'bg-emerald-100 text-emerald-800' }
+  if (today > l.expected_date) return { label: 'Overdue', className: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold' }
+  if (today === l.expected_date) return { label: 'Due Today', className: 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold' }
+  return { label: 'Not Due Yet', className: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold' }
 }
 
 type Step = 'staff' | 'items' | 'done'
@@ -355,9 +355,9 @@ export default function ReturnsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Returns</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Process equipment returns from NWU staff</p>
+      <div className="mb-6 space-y-1">
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Returns</h1>
+        <p className="text-sm text-[#5B4F67]">Process equipment returns from NWU staff</p>
       </div>
 
       {error && (
@@ -368,7 +368,7 @@ export default function ReturnsPage() {
 
       {/* Step: Staff */}
       {step === 'staff' && (
-        <Card className="max-w-[700px]">
+        <Card className="max-w-[700px] rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><CreditCard className="size-4" /> Identify Staff Member</CardTitle>
           </CardHeader>
@@ -395,7 +395,7 @@ export default function ReturnsPage() {
       {/* Step: Items */}
       {step === 'items' && staff && (
         <div className="flex min-h-0 flex-1 flex-col gap-4">
-          <Card>
+          <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
             <CardContent className="flex items-center gap-4">
               <div className="flex size-10 items-center justify-center rounded-full bg-accent">
                 <RotateCcw className="size-5 text-accent-foreground" />
@@ -408,7 +408,7 @@ export default function ReturnsPage() {
             </CardContent>
           </Card>
 
-          <Card className="flex min-h-0 flex-1 flex-col py-0">
+          <Card className="flex min-h-0 flex-1 flex-col rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
             <CardHeader className="flex-row items-center justify-between border-b pt-4">
               <CardTitle>Items Currently Issued</CardTitle>
               <span className="text-sm text-muted-foreground">Set quantity to return (0 = keep)</span>
@@ -420,15 +420,15 @@ export default function ReturnsPage() {
                 </div>
               ) : (
                 <Table>
-                  <TableHeader className="sticky top-0 z-10 bg-card">
-                    <TableRow>
-                      <TableHead>Product</TableHead>
-                      <TableHead>Ref</TableHead>
-                      <TableHead>Issued</TableHead>
-                      <TableHead>Returnable</TableHead>
-                      <TableHead>Expected</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Returning</TableHead>
+                  <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+                    <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+                      <TableHead className="text-base font-bold text-[#2D203A]">Product</TableHead>
+                      <TableHead className="text-base font-bold text-[#2D203A]">Ref</TableHead>
+                      <TableHead className="text-base font-bold text-[#2D203A]">Issued</TableHead>
+                      <TableHead className="text-base font-bold text-[#2D203A]">Returnable</TableHead>
+                      <TableHead className="text-base font-bold text-[#2D203A]">Expected</TableHead>
+                      <TableHead className="text-base font-bold text-[#2D203A]">Status</TableHead>
+                      <TableHead className="text-base font-bold text-[#2D203A]">Returning</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -444,7 +444,7 @@ export default function ReturnsPage() {
                           <TableCell className="font-semibold">{l.returnable}</TableCell>
                           <TableCell className="text-muted-foreground">{formatDateOnly(l.expected_date)}</TableCell>
                           <TableCell>
-                            {status && <Badge className={status.className}>{status.label}</Badge>}
+                            {status && <Badge className={status.className}>{sentenceCase(status.label)}</Badge>}
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1.5">
@@ -476,7 +476,7 @@ export default function ReturnsPage() {
 
       {/* Done */}
       {step === 'done' && (
-        <Card className="max-w-[700px]">
+        <Card className="max-w-[700px] rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
           <CardContent className="py-10 text-center">
             <CheckCircle className="mx-auto mb-4 size-12 text-emerald-500" />
             <h2 className="mb-2 text-xl font-bold">Return Processed Successfully</h2>

@@ -102,10 +102,10 @@ const productBarcodes = (p: {
 
 const STATUS_BADGE_CLASS = (qty: number, threshold: number) =>
   qty === 0
-    ? "bg-red-100 text-red-800"
+    ? "bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold"
     : qty <= threshold
-      ? "bg-amber-100 text-amber-800"
-      : "bg-emerald-100 text-emerald-800";
+      ? "bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold"
+      : "bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold";
 
 // Availability items keyed by string since Base UI's Select works on string
 // values — mapped back to/from the boolean `available` field on save/load.
@@ -115,7 +115,9 @@ const AVAILABLE_ITEMS: Record<"true" | "false", string> = {
 };
 
 const AVAILABLE_BADGE_CLASS = (available: boolean) =>
-  available ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800";
+  available
+    ? "bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold"
+    : "bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold";
 
 // Out of stock outranks Low stock outranks In stock, so sorting the Status
 // column surfaces the most depleted products first either direction — same
@@ -765,10 +767,10 @@ export default function ProductsPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-5 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Products</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+      <div className="mb-6 flex items-center justify-between">
+        <div className="space-y-1">
+          <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Products</h1>
+          <p className="text-sm text-[#5B4F67]">
             {products.length} items
           </p>
         </div>
@@ -778,10 +780,10 @@ export default function ProductsPage() {
       </div>
 
       {/* Filters */}
-      <Card className="mb-4">
+      <Card className="mb-4 rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
         <CardContent className="flex flex-wrap items-end gap-3">
         <div className="grid gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Categories</span>
+          <span className="text-sm font-semibold text-slate-600">Categories</span>
           <Select
             items={{
               [ALL_CATEGORIES]: "All categories",
@@ -806,11 +808,11 @@ export default function ProductsPage() {
           </Select>
         </div>
         <div className="grid gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Status</span>
+          <span className="text-sm font-semibold text-slate-600">Status</span>
           <StatusFilter selected={statusFilter} onChange={setStatusFilter} />
         </div>
         <div className="grid gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">Availability</span>
+          <span className="text-sm font-semibold text-slate-600">Availability</span>
           <AvailableFilter selected={availableFilter} onChange={setAvailableFilter} />
         </div>
         <div className="relative min-w-40 flex-1">
@@ -826,18 +828,18 @@ export default function ProductsPage() {
       </Card>
 
       {/* Table */}
-      <Card className="min-h-0 flex-1 py-0">
+      <Card className="min-h-0 flex-1 rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
-          <TableHeader className="sticky top-0 z-10 bg-card">
-            <TableRow>
-              <SortableHead column={table.getColumn("name")!}>Product</SortableHead>
-              <SortableHead column={table.getColumn("barcode")!}>Barcode</SortableHead>
-              <SortableHead column={table.getColumn("category_name")!}>Category</SortableHead>
-              <SortableHead column={table.getColumn("quantity_on_hand")!}>Qty</SortableHead>
-              <SortableHead column={table.getColumn("status")!}>Status</SortableHead>
-              <SortableHead column={table.getColumn("available")!}>Available</SortableHead>
-              <TableHead></TableHead>
+          <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+            <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+              <SortableHead column={table.getColumn("name")!} className="h-auto py-3.5 pl-6 text-base font-bold text-[#2D203A]">Product</SortableHead>
+              <SortableHead column={table.getColumn("barcode")!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Barcode</SortableHead>
+              <SortableHead column={table.getColumn("category_name")!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Category</SortableHead>
+              <SortableHead column={table.getColumn("quantity_on_hand")!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Qty</SortableHead>
+              <SortableHead column={table.getColumn("status")!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Status</SortableHead>
+              <SortableHead column={table.getColumn("available")!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Available</SortableHead>
+              <TableHead className="h-auto py-3.5 pr-6"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -868,7 +870,7 @@ export default function ProductsPage() {
               </TableRow>
             )}
             {sortedProducts.map((p) => (
-              <TableRow key={p.id}>
+              <TableRow key={p.id} className="hover:bg-[#FAF7FC]">
                 {/* TableCell is whitespace-nowrap by default (see
                     components/ui/table.tsx) — fine for the short columns
                     that follow, but a long product description would
@@ -878,7 +880,7 @@ export default function ProductsPage() {
                     shouldn't be able to push it wide either), capped at a
                     fixed width so it wraps THERE instead of growing to fit
                     the longest description in the list. */}
-                <TableCell className="max-w-xs whitespace-normal break-words">
+                <TableCell className="max-w-xs py-4 pl-6 whitespace-normal break-words">
                   <div className="font-medium text-foreground">{p.name}</div>
                   {p.description && (
                     <div className="mt-0.5 text-xs text-muted-foreground">
@@ -908,7 +910,7 @@ export default function ProductsPage() {
                     (Tailwind's break-all) doesn't have that spec carve-out,
                     so it genuinely participates in the sizing and actually
                     forces the break once the column's width is reached. */}
-                <TableCell className="max-w-xs font-mono text-xs whitespace-normal text-muted-foreground">
+                <TableCell className="max-w-xs py-4 font-mono text-xs whitespace-normal text-muted-foreground">
                   {productBarcodes(p)[0] ? (
                     <span className="inline-flex min-w-0 items-start gap-1">
                       <span className="min-w-0 break-all">
@@ -932,13 +934,13 @@ export default function ProductsPage() {
                     </span>
                   )}
                 </TableCell>
-                <TableCell className="text-muted-foreground">
+                <TableCell className="py-4 text-muted-foreground">
                   {p.category_name ?? "—"}
                 </TableCell>
-                <TableCell className="font-semibold">
+                <TableCell className="py-4 font-semibold">
                   {p.quantity_on_hand}
                 </TableCell>
-                <TableCell>
+                <TableCell className="py-4">
                   <Badge
                     className={STATUS_BADGE_CLASS(
                       p.quantity_on_hand,
@@ -948,33 +950,35 @@ export default function ProductsPage() {
                     {stockStatusLabel(p.quantity_on_hand, p.reorder_threshold)}
                   </Badge>
                 </TableCell>
-                <TableCell>
+                <TableCell className="py-4">
                   <Badge className={AVAILABLE_BADGE_CLASS(p.available ?? true)}>
                     {p.available ?? true ? "Available" : "Unavailable"}
                   </Badge>
                 </TableCell>
-                <TableCell>
+                <TableCell className="py-4 pr-6">
                   <div className="flex gap-1">
                     <Button
-                      variant="ghost"
+                      variant="outline"
                       size="icon-sm"
+                      className="border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900"
                       onClick={() => openEdit(p)}
                     >
                       <Pencil className="size-3.5" />
                     </Button>
                     <Button
-                      variant="ghost"
+                      variant="outline"
                       size="icon-sm"
+                      className="border-slate-300 bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900"
                       onClick={() => setPreviewProduct(p)}
                     >
                       <Eye className="size-3.5" />
                     </Button>
                     {isAdmin && (
                       <Button
-                        variant="ghost"
+                        variant="outline"
                         size="icon-sm"
                         onClick={() => openDelete(p)}
-                        className="text-destructive hover:text-destructive"
+                        className="border-[#D5C6E0] bg-[#F0EBF5] text-red-600 hover:bg-[#E4D9EE] hover:text-red-700"
                       >
                         <Trash2 className="size-3.5" />
                       </Button>
@@ -1000,7 +1004,7 @@ export default function ProductsPage() {
             <div className="grid grid-cols-1 gap-x-8 gap-y-4 md:grid-cols-2">
               {/* Left column: Product details */}
               <div className="flex flex-col gap-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <h3 className="text-sm font-semibold text-muted-foreground">
                   Product details
                 </h3>
                 <div className="grid gap-1.5">
@@ -1124,7 +1128,7 @@ export default function ProductsPage() {
 
               {/* Right column: Product availability */}
               <div className="flex flex-col gap-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <h3 className="text-sm font-semibold text-muted-foreground">
                   Product availability
                 </h3>
                 <div className="grid grid-cols-2 items-start gap-3">
@@ -1265,7 +1269,7 @@ export default function ProductsPage() {
                 </div>
               </div>
             </div>
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <h3 className="text-sm font-semibold text-muted-foreground">
               Barcodes
             </h3>
             {/* Its own top-level section, spanning the full card width --

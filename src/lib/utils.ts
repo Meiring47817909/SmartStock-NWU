@@ -191,6 +191,19 @@ export function stockStatusLabel(qty: number, threshold: number): string {
   return 'In stock'
 }
 
+// Normal reading case for anything that started life as an ALL CAPS enum
+// value, a Title Case dict label, or a raw lowercase status string --
+// "OUT OF STOCK" / "Not Picked Up" / "pending" all come out as "Out of
+// stock" / "Not picked up" / "Pending". Used at the point a status or
+// activity label is actually rendered (badges, table cells) rather than
+// by rewriting every underlying enum/dict value, since those are also
+// used as Record keys, sort ranks and filter values elsewhere and aren't
+// safe to rename.
+export function sentenceCase(s: string): string {
+  if (!s) return s
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()
+}
+
 // Shared by every report's Export CSV button. `columns` pairs each CSV
 // column's header with how to read that column out of a row, so a caller
 // states "what goes in this column" once and this handles the RFC

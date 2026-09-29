@@ -112,7 +112,7 @@ export default function StockInPage() {
 
   if (done) return (
     <div className="max-w-[500px]">
-      <Card>
+      <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
         <CardContent className="py-10 text-center">
           <CheckCircle className="mx-auto mb-4 size-12 text-emerald-500" />
           <h2 className="mb-2 text-xl font-bold">Stock Received Successfully</h2>
@@ -127,9 +127,9 @@ export default function StockInPage() {
 
   return (
     <div className="max-w-[680px]">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Stock In</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Receive new stock into the store</p>
+      <div className="mb-6 space-y-1">
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Stock In</h1>
+        <p className="text-sm text-[#5B4F67]">Receive new stock into the store</p>
       </div>
 
       {error && (
@@ -139,7 +139,7 @@ export default function StockInPage() {
       )}
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <Card className="py-0">
+        <Card className="rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
           <CardHeader className="border-b pt-4">
             <CardTitle className="flex items-center gap-2"><Barcode className="size-4" /> Scan Items</CardTitle>
           </CardHeader>
@@ -160,12 +160,12 @@ export default function StockInPage() {
             {cart.length > 0 && (
               <div className="max-h-96 overflow-y-auto">
               <Table>
-                <TableHeader className="sticky top-0 z-10 bg-card">
-                  <TableRow>
-                    <TableHead>Product</TableHead>
-                    <TableHead>Current Stock</TableHead>
-                    <TableHead>Receiving</TableHead>
-                    <TableHead>After</TableHead>
+                <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
+                  <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+                    <TableHead className="text-base font-bold text-[#2D203A]">Product</TableHead>
+                    <TableHead className="text-base font-bold text-[#2D203A]">Current Stock</TableHead>
+                    <TableHead className="text-base font-bold text-[#2D203A]">Receiving</TableHead>
+                    <TableHead className="text-base font-bold text-[#2D203A]">After</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -193,7 +193,7 @@ export default function StockInPage() {
                         {item.product.quantity_on_hand + item.quantity}
                       </TableCell>
                       <TableCell>
-                        <Button type="button" variant="ghost" size="icon-sm" className="text-red-600 hover:text-red-700"
+                        <Button type="button" variant="outline" size="icon-sm" className="border-[#D5C6E0] bg-[#F0EBF5] text-red-600 hover:bg-[#E4D9EE] hover:text-red-700"
                           onClick={() => setCart(c => c.filter(i => i.product.id !== item.product.id))}>
                           <X className="size-3.5" />
                         </Button>
@@ -208,7 +208,7 @@ export default function StockInPage() {
         </Card>
 
         {cart.length > 0 && (
-          <Card>
+          <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
             <CardContent>
               <div className="mb-4 grid gap-1.5">
                 <Label htmlFor="si-notes">Notes (optional)</Label>

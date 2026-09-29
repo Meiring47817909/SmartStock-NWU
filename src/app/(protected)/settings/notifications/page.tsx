@@ -26,10 +26,10 @@ function NotificationRow({
   onToggle: (next: boolean) => void
 }) {
   return (
-    <div className="flex items-start justify-between gap-6 border-b border-border py-4 last:border-b-0">
-      <div className="max-w-xl">
-        <div className="text-sm font-medium text-foreground">{definition.label}</div>
-        <p className="mt-1 text-xs text-muted-foreground">{definition.description}</p>
+    <div className="flex items-start justify-between gap-6 border-b border-[#E5DBEC] py-4 last:border-b-0">
+      <div className="flex-1">
+        <div className="text-sm font-semibold text-[#22162B]">{definition.label}</div>
+        <p className="mt-1 text-sm font-normal text-[#5B4F67]">{definition.description}</p>
       </div>
       <Switch
         checked={checked}
@@ -116,8 +116,8 @@ export default function NotificationSettingsPage() {
   return (
     <div className="flex max-w-4xl flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Notification Settings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Notification Settings</h1>
+        <p className="text-sm text-[#5B4F67]">
           Turn individual email notifications on or off. Switching one off only stops that one email —
           every other setting here keeps working independently of it.
         </p>
@@ -126,18 +126,18 @@ export default function NotificationSettingsPage() {
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       {!settings ? (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">Loading…</CardContent>
+        <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
+          <CardContent className="py-8 text-center text-sm text-[#5B4F67]">Loading…</CardContent>
         </Card>
       ) : (
         <>
-          <Card>
+          <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
             <CardHeader>
               <CardTitle>Admin notification address</CardTitle>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSaveEmail} className="flex flex-col gap-2">
-                <p className="text-xs text-muted-foreground">
+                <p className="text-sm text-[#5B4F67]">
                   Where the five &quot;Emails to Administrators&quot; below are actually delivered. Change this if
                   administration duties move to someone else — nothing here needs the toggles below touched.
                 </p>
@@ -147,18 +147,19 @@ export default function NotificationSettingsPage() {
                     <Input
                       id="admin-notification-email"
                       type="email"
+                      className="border-slate-300 bg-white text-slate-700 focus-visible:border-[#8046B5] focus-visible:ring-[#8046B5]/50"
                       value={adminEmail}
                       onChange={(e) => setAdminEmail(e.target.value)}
                       placeholder={user?.email ?? 'admin@nwu.ac.za'}
                     />
                   </div>
-                  <Button type="submit" disabled={savingEmail || adminEmail.trim() === savedAdminEmail.trim()}>
+                  <Button type="submit" disabled={savingEmail || adminEmail.trim() === savedAdminEmail.trim()} className="h-8 rounded-lg bg-primary px-5 text-sm font-medium text-white shadow-sm hover:bg-[#582e78]">
                     {savingEmail ? 'Saving…' : 'Save'}
                   </Button>
                 </div>
                 {emailError && <p className="text-sm text-red-600">{emailError}</p>}
                 {!savedAdminEmail && !emailError && (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-sm text-[#5B4F67]">
                     Not set yet — the five emails below have nowhere to go until an address is saved here.
                   </p>
                 )}
@@ -166,7 +167,7 @@ export default function NotificationSettingsPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
             <CardHeader>
               <CardTitle>Emails to staff members</CardTitle>
             </CardHeader>
@@ -183,7 +184,7 @@ export default function NotificationSettingsPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
             <CardHeader>
               <CardTitle>Emails to Administrators</CardTitle>
             </CardHeader>
@@ -200,7 +201,7 @@ export default function NotificationSettingsPage() {
             </CardContent>
           </Card>
 
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-[#5B4F67]">
             Password-reset emails (&quot;Send/Resend Login Email&quot; on the Staff page) aren&apos;t listed here —
             they already go out through Firebase&apos;s own built-in email flow, separate from these settings.
           </p>

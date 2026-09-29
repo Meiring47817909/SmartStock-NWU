@@ -6,7 +6,8 @@ import { db } from '@/lib/firebase/config'
 import { collection, query, where, getDocs } from 'firebase/firestore'
 import { useStaffPortal } from '@/context/StaffPortalContext'
 import { acceptCounter, declineCounter, withdrawRequest, expireIfNeeded, computeExpiryDate, effectiveToDate, OPEN_ENDED_TO } from '@/lib/firebase/loanRequests'
-import { formatDateOnly, formatLendWindow } from '@/lib/utils'
+import { notifyAlertsChanged } from '@/lib/alertsBus'
+import { formatDateOnly, formatLendWindow, sentenceCase } from '@/lib/utils'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,14 +16,14 @@ import { PortalPagination, paginateList, type PortalPageSize } from '@/component
 import type { LoanRequest, LoanRequestLine, LoanRequestStatus } from '@/types/database'
 
 const STATUS_BADGE_CLASS: Record<LoanRequestStatus, string> = {
-  pending: 'bg-amber-100 text-amber-800',
-  countered: 'bg-sky-100 text-sky-800',
-  accepted: 'bg-emerald-100 text-emerald-800',
-  fulfilled: 'bg-accent text-accent-foreground',
-  declined: 'bg-red-100 text-red-800',
-  expired: 'bg-muted text-muted-foreground',
-  withdrawn: 'bg-muted text-muted-foreground',
-  no_show: 'bg-red-100 text-red-800',
+  pending: 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold',
+  countered: 'bg-sky-100 text-sky-800 border-sky-200/60 px-2.5 font-semibold',
+  accepted: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold',
+  fulfilled: 'bg-accent text-accent-foreground border-transparent px-2.5 font-semibold',
+  declined: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold',
+  expired: 'bg-muted text-muted-foreground border-transparent px-2.5 font-semibold',
+  withdrawn: 'bg-muted text-muted-foreground border-transparent px-2.5 font-semibold',
+  no_show: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold',
 }
 
 const TERMINAL: LoanRequestStatus[] = ['declined', 'expired', 'withdrawn', 'fulfilled', 'no_show']
@@ -42,7 +43,7 @@ function RequestCard({
   const datesChanged = request.from_date !== request.original_from_date || request.to_date !== request.original_to_date
 
   return (
-    <Card>
+    <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
       <CardHeader className="flex-row items-center justify-between border-b py-3">
         <CardTitle className="flex flex-wrap items-baseline gap-2 text-sm">
           {formatLendWindow(request.from_date, request.to_date)}
@@ -54,7 +55,7 @@ function RequestCard({
             </span>
           )}
         </CardTitle>
-        <Badge className={`${STATUS_BADGE_CLASS[request.status]} uppercase`}>{request.status.replace('_', ' ')}</Badge>
+        <Badge className={STATUS_BADGE_CLASS[request.status]}>{sentenceCase(request.status.replace('_', ' '))}</Badge>
       </CardHeader>
       <div className="flex flex-col gap-3 p-4">
         {request.status === 'countered' && (
@@ -104,9 +105,13 @@ function RequestCard({
 
         <div className="flex items-center gap-2">
           {onAccept && <Button size="sm" disabled={busy} onClick={onAccept}>{busy ? '…' : 'Accept'}</Button>}
-          {onDecline && <Button size="sm" variant="outline" disabled={busy} onClick={onDecline}>Decline</Button>}
+          {onDecline && (
+            <Button size="sm" variant="outline" disabled={busy} onClick={onDecline} className="border-[#D5C6E0] bg-[#F0EBF5] font-semibold text-red-600 hover:bg-[#E4D9EE] hover:text-red-700">
+              Decline
+            </Button>
+          )}
           {onWithdraw && (
-            <Button size="sm" variant="ghost" disabled={busy} onClick={onWithdraw} className="text-destructive hover:text-destructive">
+            <Button size="sm" variant="outline" disabled={busy} onClick={onWithdraw} className="border-[#D5C6E0] bg-[#F0EBF5] font-semibold text-red-600 hover:bg-[#E4D9EE] hover:text-red-700">
               Withdraw
             </Button>
           )}
@@ -167,6 +172,7 @@ export default function MyRequestsPage() {
       await acceptCounter(r, { userId: user?.uid, userName: staffMember?.full_name })
       toast.success('Accepted — see you at pickup!')
       await load()
+      notifyAlertsChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to accept.')
     }
@@ -179,6 +185,7 @@ export default function MyRequestsPage() {
       await declineCounter(r, { userId: user?.uid, userName: staffMember?.full_name })
       toast.success('Declined.')
       await load()
+      notifyAlertsChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to decline.')
     }
@@ -191,6 +198,7 @@ export default function MyRequestsPage() {
       await withdrawRequest(r, { userId: user?.uid, userName: staffMember?.full_name })
       toast.success('Request withdrawn.')
       await load()
+      notifyAlertsChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to withdraw.')
     }
@@ -248,50 +256,50 @@ export default function MyRequestsPage() {
     // and as wide as Cart's own content, rather than sitting flush-left in
     // the extra space at 700px.
     <div className="mx-auto flex max-w-[1000px] flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">My Requests</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Track your lending requests and respond to Selouna&apos;s counters.</p>
+      <div className="space-y-1">
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">My Requests</h1>
+        <p className="text-sm text-[#5B4F67]">Track your lending requests and respond to Selouna&apos;s counters.</p>
       </div>
 
       {requests.length === 0 ? (
         <p className="text-sm text-muted-foreground">You haven&apos;t submitted any requests yet.</p>
       ) : (
         <Tabs value={tab} onValueChange={changeTab} className="flex flex-col gap-4">
-          {/* Same segmented-control tab bar as the Reports page: a bordered
-              light-grey track, each tab flex-1 across the full width, the
-              active one a white pill with NWU-purple text. Forced !h-14/!h-11
-              heights (rather than h-auto) because TabsTrigger's own base
-              class hardcodes h-[calc(100%-1px)], which otherwise wins and
-              stretches every tab to the track's full height with no
-              breathing room top/bottom. */}
-          <TabsList className="flex w-full !h-14 gap-0 overflow-hidden rounded-lg border border-(--nwu-purple)/30 bg-border p-1.5">
+          {/* Same segmented-control tab bar as Dashboard/Reports/Loan
+              Requests: a bordered light-grey track, each tab flex-1 across
+              the full width, the active one a solid NWU-purple pill with
+              white text. Forced !h-14/!h-11 heights (rather than h-auto)
+              because TabsTrigger's own base class hardcodes
+              h-[calc(100%-1px)], which otherwise wins and stretches every
+              tab to the track's full height with no breathing room
+              top/bottom. */}
+          <TabsList className="flex w-full !h-14 gap-1.5 overflow-hidden rounded-2xl border border-purple-200/50 bg-white/60 p-1.5 backdrop-blur-sm">
             <TabsTrigger
               value="countered"
-              className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+              className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
             >
               Needs your response
-              {countered.length > 0 && <Badge className="bg-sky-100 text-sky-800">{countered.length}</Badge>}
+              {countered.length > 0 && <Badge className="bg-(--nwu-turquoise) text-white">{countered.length}</Badge>}
             </TabsTrigger>
             <TabsTrigger
               value="pending"
-              className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+              className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
             >
               Awaiting Selouna
-              {pending.length > 0 && <Badge className="bg-amber-100 text-amber-800">{pending.length}</Badge>}
+              {pending.length > 0 && <Badge className="bg-(--nwu-turquoise) text-white">{pending.length}</Badge>}
             </TabsTrigger>
             <TabsTrigger
               value="accepted"
-              className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+              className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
             >
               Upcoming
-              {accepted.length > 0 && <Badge className="bg-emerald-100 text-emerald-800">{accepted.length}</Badge>}
+              {accepted.length > 0 && <Badge className="bg-(--nwu-turquoise) text-white">{accepted.length}</Badge>}
             </TabsTrigger>
             <TabsTrigger
               value="history"
-              className="!h-11 flex-1 cursor-pointer self-center rounded-md px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all hover:text-foreground data-active:border data-active:border-(--nwu-purple)/30 data-active:bg-card data-active:text-(--nwu-purple) data-active:shadow-sm"
+              className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
             >
               History
-              {history.length > 0 && <Badge className="bg-muted text-muted-foreground">{history.length}</Badge>}
             </TabsTrigger>
           </TabsList>
 

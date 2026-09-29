@@ -149,21 +149,39 @@ function LoginPageInner() {
 
   return (
     <div className="flex min-h-screen items-center justify-center" style={{ background: 'radial-gradient(circle, #E5DCF0 0%, #D1C0E2 60%, #BBA4D1 100%)' }}>
-      <Card className="w-full max-w-[400px] border-t-4 border-t-(--nwu-purple) shadow-[0_4px_24px_rgba(0,0,0,0.06)]">
-        <CardContent className="p-10 pt-6">
+      <Card className="w-full max-w-[400px] border-t-4 border-t-(--nwu-purple) py-0 shadow-[0_4px_24px_rgba(0,0,0,0.06)]">
+        <CardContent className="p-6">
           {/* Header */}
           <div className="mb-8 text-center">
             <Image
               src="/smartstock-nwu-logo.svg"
               alt="SmartStock-NWU"
-              width={920}
-              height={410}
+              width={460}
+              height={120}
               priority
               unoptimized
-              className="mx-auto mb-4 h-auto w-[200px]"
+              className="mx-auto mb-4 h-auto w-[300px]"
             />
-            <h1 className="text-xl font-bold text-foreground">NWU IT Store</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Potchefstroom Campus</p>
+            {/* North-West University's own official badge (holding-shape
+                lockup, supplied by the user from NWU's brand assets) --
+                sits to the left of the "NWU IT Store" wordmark, per the
+                Stitch mockup. Boxed off from the SmartStock-NWU lockup
+                above it, per the user's mockup, to read as the
+                institution's own identity block. */}
+            <div className="rounded-xl border border-border bg-muted/40 px-4 py-3.5">
+              <div className="flex items-center justify-center gap-2.5">
+                <Image
+                  src="/nwu-logo.png"
+                  alt="North-West University"
+                  width={247}
+                  height={247}
+                  unoptimized
+                  className="h-16 w-16 shrink-0"
+                />
+                <h1 className="text-xl font-bold text-foreground">NWU IT Store</h1>
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">Potchefstroom Campus</p>
+            </div>
           </div>
 
           <form onSubmit={handleLogin} className="flex flex-col gap-4">
@@ -217,7 +235,7 @@ function LoginPageInner() {
 
           <div className="my-5 flex items-center gap-3">
             <Separator className="flex-1" />
-            <span className="text-[0.72rem] tracking-wide text-muted-foreground uppercase">or</span>
+            <span className="text-sm text-muted-foreground">or</span>
             <Separator className="flex-1" />
           </div>
 
