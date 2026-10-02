@@ -1269,3 +1269,32 @@ Follow-up to cont. 9/10: instead of living inside the left column (Product detai
 The `min-w-0` chain from cont. 10 still applies exactly as before, just one link shorter: the chip's text wrapper, the chip row, and the chip list all still need it (long barcode content still has to not bubble up through those), but the left-column and two-column-grid links are gone since Barcodes no longer nests inside either — it goes straight from its own wrapper into `<form>`, then into the already-fixed `DialogPrimitive.Popup`.
 
 `npx tsc --noEmit` clean; `npx eslint` unchanged from cont. 10's baseline.
+
+---
+
+## Session Handoff — 2026-10-02: Email notifications
+
+Ten more emails now go through the Mailpit mailer (see the Mailpit handoff for how to run it: Docker Desktop, `npm run mailpit`, `npm run dev:emulators`). Spec: `docs/superpowers/specs/2026-10-02-email-notifications-design.md`; plan: `docs/superpowers/plans/2026-10-02-email-notifications.md`.
+
+**What sends, and when** (each is gated by its toggle on Settings → Notifications; only an explicit "off" stops it)
+- Staff member: loan request approved, countered, declined; approved pickup cancelled (admin cancels on the Dashboard); counter offer accepted, counter offer declined, request withdrawn (staff, in the portal).
+- Admin inbox (the "Admin notification email" on the same Settings page; skipped if blank): new loan request (staff submits), incoming pickup confirmed (request becomes accepted, either approved as-is or after the staff member accepts a counter), low stock (a Stock Out takes a product to or below its reorder threshold or to zero; one email lists all of them).
+- **Not built, always off:** loan request expired, overdue return alert, incoming pickup insufficient stock (they need a timer). The Settings page shows "Not implemented yet" and refuses to switch them on.
+
+**How it works**
+- Loan-request changes stay client-side as before. After one succeeds, the page calls `notifyLoanRequestEvent()` (`src/lib/firebase/notifyEvent.ts`) in the background; it posts `{ event, requestId, reason? }` to `POST /api/notifications/loan-request`, which re-reads the request, checks who is calling and that the request is in the right state, then sends. A failure shows "Saved, but the email couldn't be sent." and never undoes the action. Low stock is handled by the existing Stock Out route.
+- Duplicates are prevented by marker documents in the server-only `sent_notifications` collection (clients cannot read or write it). To make the app resend one email while testing, delete its marker in the emulator UI (http://localhost:4000, Firestore).
+- Email buttons link to `APP_BASE_URL` (optional; default `http://localhost:3000`).
+- The cancel reason typed on the Dashboard is not stored on the request, so it travels with the notify call.
+
+**Try it** (Docker Desktop running, `npm install` done, `npm run mailpit`, then `npm run dev:emulators`; set the Admin notification email under Settings → Notifications first; read the mail at http://localhost:8025)
+1. Portal: submit a request. Admin inbox gets "New loan request".
+2. Loan Requests: approve it as-is. Staff gets "approved", admin inbox gets "Pickup confirmed".
+3. Submit another and counter it. Staff gets "countered". In the portal accept it: staff gets "counter accepted" and the admin inbox "Pickup confirmed". Do it again and decline the counter: "counter declined".
+4. Submit another and decline it as admin: staff gets "declined".
+5. Submit another and withdraw it in the portal: "withdrawn".
+6. Approve one, then Dashboard, Cancel pickup, with a reason: staff gets "pickup cancelled" with the reason.
+7. Stock Out a product down to its reorder threshold: admin inbox gets "Low stock".
+8. Turn one toggle off and repeat its action: no email.
+9. Try to switch on "Loan request expired": a "not implemented yet" message appears and it stays off.
+10. Stop Mailpit and approve a request: the toast "Saved, but the email couldn't be sent." appears and the request is still approved.
