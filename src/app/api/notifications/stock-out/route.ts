@@ -1,12 +1,24 @@
 import 'server-only'
 import { NextRequest, NextResponse } from 'next/server'
 import { adminDb } from '@/lib/firebase/admin'
-import { requireSignedIn, ApiError } from '@/lib/server/staffAdmin'
+import { requireAdmin, ApiError } from '@/lib/server/staffAdmin'
 import { isMailEnabled, sendMail, MailUnreachableError, MailConfigError } from '@/lib/server/mailer'
-import { stockOutConfirmationEmail } from '@/lib/server/emailTemplates'
-import { collapseLinesByProduct } from '@/lib/transactionLines'
+import { stockOutConfirmationEmail, type StockOutEmailLine } from '@/lib/server/emailTemplates'
 
 type SkipReason = 'mail_disabled' | 'toggle_off' | 'no_email' | 'not_out'
+
+// One line per product with the summed quantity (a product scanned under two
+// barcodes is two transaction_lines documents), in first-seen order.
+function collapseForEmail(lines: { product_id?: unknown; product_name?: string; quantity?: number }[]): StockOutEmailLine[] {
+  const byProduct = new Map<string, StockOutEmailLine>()
+  for (const l of lines) {
+    const key = String(l.product_id)
+    const entry = byProduct.get(key) ?? { productName: l.product_name ?? 'Item', quantity: 0 }
+    entry.quantity += l.quantity || 0
+    byProduct.set(key, entry)
+  }
+  return Array.from(byProduct.values())
+}
 
 function skipped(reason: SkipReason) {
   console.info(`stock-out confirmation not sent: ${reason}`)
@@ -16,16 +28,17 @@ function skipped(reason: SkipReason) {
 /**
  * Emails the staff member a confirmation after a Stock Out has been saved.
  * Called in the background by the Stock Out page once the transaction and its
- * lines are written; the Stock Out never depends on this succeeding. Any
- * signed-in user may call it (Stock Out is not admin-only). Read-only: the
- * transaction document is never modified.
+ * lines are written; the Stock Out never depends on this succeeding. Admin
+ * only: firestore.rules lets only admins create transactions, so only an admin
+ * can have just completed a Stock Out. Read-only: the transaction document is
+ * never modified.
  *
  * Body: { transactionId: string } — the Firestore document ID in `transactions`.
  * Response: { sent: boolean, reason?: 'mail_disabled' | 'toggle_off' | 'no_email' | 'not_out' }
  */
 export async function POST(request: NextRequest) {
   try {
-    await requireSignedIn(request)
+    await requireAdmin(request)
 
     const body = await request.json().catch(() => null)
     const transactionId = typeof body?.transactionId === 'string' ? body.transactionId : null
@@ -53,10 +66,7 @@ export async function POST(request: NextRequest) {
     if (!staffEmail) return skipped('no_email')
 
     const linesSnap = await adminDb.collection('transaction_lines').where('transaction_id', '==', transactionId).get()
-    const lines = collapseLinesByProduct(linesSnap.docs.map((d) => d.data())).map((l) => ({
-      productName: l.product_name ?? 'Item',
-      quantity: l.quantity,
-    }))
+    const lines = collapseForEmail(linesSnap.docs.map((d) => d.data()))
 
     const { subject, html, text } = stockOutConfirmationEmail({
       staffName: txn.staff_name || staffData?.full_name || 'there',
