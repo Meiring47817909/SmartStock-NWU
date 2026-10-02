@@ -268,3 +268,90 @@ export function requestWithdrawnEmail(i: RequestEmailBase): RenderedEmail {
     items: standingItems(i.lines),
   })
 }
+
+// ---- Emails to the administrators' inbox -----------------------------------
+
+export function newLoanRequestEmail(i: {
+  staffName: string
+  reference: string | null
+  fromDate: string
+  toDate: string | null
+  lines: RequestEmailLine[]
+  message: string | null
+  buttonUrl: string
+}): RenderedEmail {
+  const { html, text } = renderEmailLayout({
+    heading: 'New loan request',
+    paragraphs: [
+      `${i.staffName} submitted a loan request${refText(i.reference)}.`,
+      describeWindow(i.fromDate, i.toDate),
+      ...(i.message ? [`Their note: ${i.message}`] : []),
+    ],
+    items: i.lines.map((l) => ({ name: l.productName, quantity: l.requested })),
+    button: { label: 'Review request', url: i.buttonUrl },
+  })
+  return {
+    subject: i.reference ? `New loan request ${i.reference} from ${i.staffName}` : `New loan request from ${i.staffName}`,
+    html,
+    text,
+  }
+}
+
+export function incomingPickupConfirmedEmail(i: {
+  staffName: string
+  reference: string | null
+  fromDate: string
+  toDate: string | null
+  lines: RequestEmailLine[]
+  viaCounter: boolean
+  buttonUrl: string
+}): RenderedEmail {
+  const { html, text } = renderEmailLayout({
+    heading: 'Incoming pickup confirmed',
+    paragraphs: [
+      `${i.staffName}'s loan request${refText(i.reference)} is confirmed as a pickup, ${
+        i.viaCounter ? 'after a counter offer' : 'approved as requested'
+      }.`,
+      describeWindow(i.fromDate, i.toDate),
+    ],
+    items: standingItems(i.lines),
+    button: { label: 'Open the dashboard', url: i.buttonUrl },
+  })
+  return {
+    subject: i.reference ? `Pickup confirmed: ${i.staffName} (${i.reference})` : `Pickup confirmed: ${i.staffName}`,
+    html,
+    text,
+  }
+}
+
+export interface LowStockProduct {
+  name: string
+  onHand: number
+  threshold: number
+}
+
+export function lowStockEmail(i: { products: LowStockProduct[]; buttonUrl: string }): RenderedEmail {
+  const n = i.products.length
+  const { html, text } = renderEmailLayout({
+    heading: 'Low stock',
+    paragraphs: [
+      n === 1
+        ? 'This product dropped to or below its reorder level.'
+        : 'These products dropped to or below their reorder level.',
+      ...i.products.map((p) =>
+        p.onHand <= 0
+          ? `${p.name}: OUT OF STOCK (${p.onHand} on hand, reorder at ${p.threshold})`
+          : `${p.name}: ${p.onHand} on hand (reorder at ${p.threshold})`,
+      ),
+    ],
+    button: { label: 'Open Products', url: i.buttonUrl },
+  })
+  return {
+    subject:
+      n === 1
+        ? 'Low stock: 1 product at or below its reorder level'
+        : `Low stock: ${n} products at or below their reorder level`,
+    html,
+    text,
+  }
+}
