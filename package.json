@@ -18,7 +18,9 @@
     "seed:real-production": "node scripts/seed-real-production.mjs",
     "cleanup:borrower-test": "node scripts/cleanup-borrower-test-data.mjs",
     "set:password-policy": "node scripts/set-password-policy.mjs",
-    "dev:emulators": "cross-env NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 FIREBASE_ADMIN_PROJECT_ID=demo-smartstock-nwu next dev"
+    "mailpit": "node scripts/mailpit.mjs start",
+    "mailpit:stop": "node scripts/mailpit.mjs stop",
+    "dev:emulators": "cross-env NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 FIREBASE_ADMIN_PROJECT_ID=demo-smartstock-nwu MAIL_TRANSPORT=smtp SMTP_HOST=127.0.0.1 SMTP_PORT=1025 next dev"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -32,6 +34,7 @@
     "lucide-react": "^1.30.0",
     "next": "16.3.0",
     "next-themes": "^0.4.6",
+    "nodemailer": "^10.0.13",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "server-only": "^0.0.1",
