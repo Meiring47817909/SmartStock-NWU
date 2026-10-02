@@ -117,7 +117,7 @@ Dates use the existing `formatDate`; a null `to_date` reads "No return date set.
 
 ## 8. Settings → Notifications changes
 
-- `NotificationEmailDefinition` gains an optional `implemented?: boolean` (default true); the three unbuilt toggles set `implemented: false`. This flag is the single source of truth for the page and the defaults; the server uses the exported `isNotificationImplemented(key)` helper next to the definitions.
+- `NotificationEmailDefinition` gains an optional `implemented?: boolean` (default true); the three unbuilt toggles set `implemented: false`. The unbuilt keys live in one set in a new pure module `src/lib/notificationCatalog.ts` (the definitions' flag, the defaults and the loader all derive from it); the server uses its `isNotificationImplemented(key)`. It is a separate pure file because `notificationSettings.ts` imports the client Firebase SDK, which server code must not load. The same file exports the `LoanRequestEvent` type.
 - `DEFAULT_NOTIFICATION_SETTINGS` is `false` for those three, `true` for the rest. `loadNotificationSettings()` forces them to `false` even if Firestore holds `true`.
 - The page shows a "Not implemented yet" badge on those rows. `handleToggle(key, true)` for one of them does not call `setNotificationSetting`; it shows an inline message ("<label> isn't implemented yet, so it can't be turned on.") and the toggle stays off. Switching off is a no-op.
 - The server's toggle check treats those three as off regardless of Firestore (belt and braces for the `not_implemented` skip).
@@ -147,7 +147,7 @@ Harness outside the repo, same approach as the foundation (`$HOME/mailtest`, stu
 
 ## 11. Files
 
-New: `src/app/api/notifications/loan-request/route.ts`, `src/lib/firebase/notifyEvent.ts`, and `src/lib/server/notificationDelivery.ts` (toggle check, recipient lookup, dedupe marker, shared by both routes).
+New: `src/lib/notificationCatalog.ts`, `src/app/api/notifications/loan-request/route.ts`, `src/lib/firebase/notifyEvent.ts`, and `src/lib/server/notificationDelivery.ts` (toggle check, recipient lookup, dedupe marker, shared by both routes).
 Changed: `src/lib/server/emailTemplates.ts`, `src/app/api/notifications/stock-out/route.ts`, `src/lib/firebase/notificationSettings.ts`, `src/types/database.ts` (comments), `src/app/(protected)/settings/notifications/page.tsx`, the four call-site pages in section 9, `handout.md`.
 
 ## 12. Risks and notes
