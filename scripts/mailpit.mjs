@@ -2,7 +2,8 @@
 //   npm run mailpit        -> (re)starts the container
 //   npm run mailpit:stop   -> removes it
 // SMTP listens on 1025 (the app sends here) and the web inbox is at
-// http://localhost:8025. Plain Node so it behaves the same in PowerShell.
+// http://localhost:8025. Both ports are published on loopback only, so the
+// inbox (which shows live set-password links) is not reachable from the network. Plain Node so it behaves the same in PowerShell.
 import { spawnSync } from 'node:child_process'
 
 const NAME = 'mailpit'
@@ -24,7 +25,7 @@ const mode = process.argv[2] ?? 'start'
 if (mode === 'start') {
   // Removing first makes running this twice replace the container.
   if (!docker(['rm', '-f', NAME], true)) fail()
-  if (!docker(['run', '-d', '--name', NAME, '-p', '1025:1025', '-p', '8025:8025', IMAGE], false)) fail()
+  if (!docker(['run', '-d', '--name', NAME, '-p', '127.0.0.1:1025:1025', '-p', '127.0.0.1:8025:8025', IMAGE], false)) fail()
   console.log('Mailpit running: inbox http://localhost:8025, SMTP 127.0.0.1:1025')
 } else if (mode === 'stop') {
   if (!docker(['rm', '-f', NAME], true)) fail()
