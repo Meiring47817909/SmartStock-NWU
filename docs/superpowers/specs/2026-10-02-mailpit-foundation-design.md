@@ -77,7 +77,7 @@ reachable. Is Mailpit running? (npm run mailpit)".
 After `handleConfirm` saves the transaction and its lines, the page makes one
 background `POST /api/notifications/stock-out` with `{ transactionId }` and the
 caller's ID token.
-Server (`requireSignedIn`): load the transaction, lines and staff via `adminDb`;
+Server (`requireAdmin`: `firestore.rules` lets only admins create transactions, so only an admin can have just completed a Stock Out): load the transaction, lines and staff via `adminDb`;
 read `settings/notifications` (missing or non-boolean means on, matching
 `DEFAULT_NOTIFICATION_SETTINGS`); then send. It skips, logging the reason on the
 server, when the toggle is off, the staff member has no email, or the mailer is
