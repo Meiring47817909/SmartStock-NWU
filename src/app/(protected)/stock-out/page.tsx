@@ -8,6 +8,8 @@ import { collection, query, where, getDocs, getDoc, addDoc, updateDoc, doc, orde
 import { logAudit } from '@/lib/firebase/audit'
 import { findProductByBarcode } from '@/lib/firebase/products'
 import { getReservationHolders, reservationStatusLabel, resolutionInstruction, requestAuditSnapshot, OPEN_ENDED_TO, type ReservationHolder } from '@/lib/firebase/loanRequests'
+import { postStaffAdmin } from '@/lib/firebase/staff'
+import { toast } from 'sonner'
 import { useAuth } from '@/context/AuthContext'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
@@ -364,6 +366,15 @@ export default function StockOutPage() {
             fulfilled_txn_ref: ref,
           }),
         })
+      }
+
+      // Notification emails: a confirmation to the staff member and, when a product
+      // dropped to or below its reorder threshold, a low-stock alert to the admin
+      // inbox. Background and best-effort: it never blocks or fails the Stock Out,
+      // which is already saved above.
+      if (user) {
+        postStaffAdmin('/api/notifications/stock-out', user, { transactionId: txnRef.id })
+          .catch(() => toast.error("Stock Out saved, but the notification emails couldn't be sent."))
       }
 
       setReference(ref)
