@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
 import { toast } from 'sonner'
+import { notifyLoanRequestEvent } from '@/lib/firebase/notifyEvent'
 import { db } from '@/lib/firebase/config'
 import { collection, doc, getDoc, getDocs } from 'firebase/firestore'
 import { useAuth } from '@/context/AuthContext'
@@ -204,6 +205,7 @@ export default function LoanRequestsPage() {
     setBusy(r.id); setRowErrors((prev) => ({ ...prev, [r.id]: '' }))
     try {
       await approveAsIs(r, linesByRequest[r.id] ?? [], actor)
+      notifyLoanRequestEvent(user, 'loan_request_approved', r.id)
       toast.success(`Approved ${r.staff_name}'s request.`)
       collapseRow(r.id)
       await load()
@@ -240,6 +242,7 @@ export default function LoanRequestsPage() {
         draft.lines.map((l) => ({ lineId: l.id, product_id: l.product_id, offered_quantity: l.offered_quantity })),
         draft.fromDate, draft.toDate || null, counterMessage, actor,
       )
+      notifyLoanRequestEvent(user, 'loan_request_countered', r.id)
       toast.success(`Counter sent to ${r.staff_name}.`)
       collapseRow(r.id)
       setCountering(null)
@@ -268,6 +271,7 @@ export default function LoanRequestsPage() {
     setDeclineBusy(true)
     try {
       await declineRequest(r, declineMessage, linesByRequest[r.id], actor)
+      notifyLoanRequestEvent(user, 'loan_request_declined', r.id)
       toast.success(`Declined ${r.staff_name}'s request.`)
       collapseRow(r.id)
       setDeclining(null)

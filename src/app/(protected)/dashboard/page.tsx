@@ -8,6 +8,7 @@ import { collection, query, where, orderBy, getDocs, getCountFromServer } from '
 import { useTable, type SortingState } from '@tanstack/react-table'
 import { SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead } from '@/components/data-table-helpers'
 import { toast } from 'sonner'
+import { notifyLoanRequestEvent } from '@/lib/firebase/notifyEvent'
 import { expireIfNeeded, isNoShowCandidate, withdrawRequest, getReservedQuantity, effectiveToDate } from '@/lib/firebase/loanRequests'
 import { notifyAlertsChanged } from '@/lib/alertsBus'
 import { loadWaivedByTxn, waivedQty, createReturnWaiver } from '@/lib/firebase/waivers'
@@ -399,6 +400,8 @@ export default function DashboardPage() {
         { userId: user?.uid, userName: profile?.full_name ?? user?.email },
         cancelReason.trim() || null,
       )
+      // The reason isn't stored on the request, so it travels with the call.
+      notifyLoanRequestEvent(user, 'approved_pickup_cancelled', cancelling.id, { reason: cancelReason })
       // Drop the row locally rather than refetching the whole dashboard —
       // same convention as Resolve below.
       setIncomingPickups(prev => prev.filter(x => x.id !== cancelling.id))

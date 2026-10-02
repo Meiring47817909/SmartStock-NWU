@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import { notifyLoanRequestEvent } from '@/lib/firebase/notifyEvent'
 import { db } from '@/lib/firebase/config'
 import { collection, query, where, getDocs } from 'firebase/firestore'
 import { useStaffPortal } from '@/context/StaffPortalContext'
@@ -170,6 +171,7 @@ export default function MyRequestsPage() {
     setBusy(r.id)
     try {
       await acceptCounter(r, { userId: user?.uid, userName: staffMember?.full_name })
+      notifyLoanRequestEvent(user, 'loan_request_counter_accepted', r.id)
       toast.success('Accepted — see you at pickup!')
       await load()
       notifyAlertsChanged()
@@ -183,6 +185,7 @@ export default function MyRequestsPage() {
     setBusy(r.id)
     try {
       await declineCounter(r, { userId: user?.uid, userName: staffMember?.full_name })
+      notifyLoanRequestEvent(user, 'loan_request_counter_declined', r.id)
       toast.success('Declined.')
       await load()
       notifyAlertsChanged()
@@ -196,6 +199,7 @@ export default function MyRequestsPage() {
     setBusy(r.id)
     try {
       await withdrawRequest(r, { userId: user?.uid, userName: staffMember?.full_name })
+      notifyLoanRequestEvent(user, 'loan_request_withdrawn', r.id)
       toast.success('Request withdrawn.')
       await load()
       notifyAlertsChanged()

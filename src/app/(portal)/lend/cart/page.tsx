@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { notifyLoanRequestEvent } from '@/lib/firebase/notifyEvent'
 import { usePortalCart } from '@/context/PortalCartContext'
 import { useStaffPortal } from '@/context/StaffPortalContext'
 import {
@@ -126,10 +127,11 @@ export default function LendCartPage() {
     if (cart.length === 0 || !fromDate || (!toDate && tightestCap)) return
     setSubmitting(true)
     try {
-      await submitLoanRequest(
+      const requestId = await submitLoanRequest(
         staffMember.id.toString(), staffMember.full_name, cart, fromDate, toDate,
         message.trim() || null, { userId: user?.uid, userName: staffMember.full_name },
       )
+      notifyLoanRequestEvent(user, 'new_loan_request', requestId)
       toast.success('Request submitted — Selouna will review it soon.')
       clearCart()
       router.push('/lend/requests')
