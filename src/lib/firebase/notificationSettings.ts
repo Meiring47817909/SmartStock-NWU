@@ -2,6 +2,7 @@ import { db } from './config'
 import { doc, getDoc, setDoc } from 'firebase/firestore'
 import { logAudit } from './audit'
 import type { NotificationSettingKey } from '@/types/database'
+import { isNotificationImplemented } from '@/lib/notificationCatalog'
 
 // Singleton doc -- one operational inbox (Selouna's) and one lending-portal
 // audience to notify, not one set of preferences per admin.
@@ -12,6 +13,9 @@ export interface NotificationEmailDefinition {
   label: string
   recipient: 'Staff member' | 'Administrators'
   description: string
+  // false for emails that need a timer that doesn't exist yet -- the Settings
+  // page shows "Not implemented yet" and refuses to turn them on.
+  implemented?: boolean
 }
 
 // One row per email the app can eventually send -- mirrors the "Full
@@ -23,7 +27,7 @@ export interface NotificationEmailDefinition {
 // email flow (see api/staff/send-reset-email/route.ts), not through this
 // app's own notification pipeline, so there's nothing here for a toggle
 // to gate.
-export const NOTIFICATION_EMAIL_DEFINITIONS: NotificationEmailDefinition[] = [
+const DEFINITIONS: NotificationEmailDefinition[] = [
   {
     key: 'stock_out_confirmation',
     label: 'Stock Out confirmation',
@@ -57,7 +61,7 @@ export const NOTIFICATION_EMAIL_DEFINITIONS: NotificationEmailDefinition[] = [
     label: 'Approved pickup cancelled',
     recipient: 'Staff member',
     description:
-      "Email a staff member if an administrator cancels a pickup they already approved. They're asked for a message every time this fires, so the staff member always knows why.",
+      "Email a staff member if an administrator cancels a pickup they already approved. If the administrator leaves a reason when cancelling, it is included so the staff member knows why.",
   },
   {
     key: 'loan_request_expired',
@@ -124,12 +128,15 @@ export const NOTIFICATION_EMAIL_DEFINITIONS: NotificationEmailDefinition[] = [
   },
 ]
 
-// Every email defaults to on. Nothing actually sends until each one is
-// wired up to a real trigger (see the email-notifications review doc) —
-// "on" here just means "send this once it exists," not that anything is
-// live today.
+export const NOTIFICATION_EMAIL_DEFINITIONS: NotificationEmailDefinition[] = DEFINITIONS.map((d) => ({
+  ...d,
+  implemented: isNotificationImplemented(d.key),
+}))
+
+// Every email that has a trigger defaults to on. The three that still need a
+// timer (see notificationCatalog.ts) default to off and cannot be turned on.
 export const DEFAULT_NOTIFICATION_SETTINGS: Record<NotificationSettingKey, boolean> = Object.fromEntries(
-  NOTIFICATION_EMAIL_DEFINITIONS.map((d) => [d.key, true]),
+  NOTIFICATION_EMAIL_DEFINITIONS.map((d) => [d.key, isNotificationImplemented(d.key)]),
 ) as Record<NotificationSettingKey, boolean>
 
 export async function loadNotificationSettings(): Promise<Record<NotificationSettingKey, boolean>> {
@@ -139,6 +146,10 @@ export async function loadNotificationSettings(): Promise<Record<NotificationSet
   const data = snap.data()
   for (const key of Object.keys(DEFAULT_NOTIFICATION_SETTINGS) as NotificationSettingKey[]) {
     if (typeof data[key] === 'boolean') result[key] = data[key] as boolean
+  }
+  // A leftover `true` from before these were switched off must not show as on.
+  for (const key of Object.keys(result) as NotificationSettingKey[]) {
+    if (!isNotificationImplemented(key)) result[key] = false
   }
   return result
 }

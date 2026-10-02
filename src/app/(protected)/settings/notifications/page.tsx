@@ -28,7 +28,14 @@ function NotificationRow({
   return (
     <div className="flex items-start justify-between gap-6 border-b border-[#E5DBEC] py-4 last:border-b-0">
       <div className="flex-1">
-        <div className="text-sm font-semibold text-[#22162B]">{definition.label}</div>
+        <div className="flex items-center gap-2 text-sm font-semibold text-[#22162B]">
+          {definition.label}
+          {definition.implemented === false && (
+            <span className="rounded-full bg-[#F0EBF5] px-2 py-0.5 text-xs font-medium text-[#5B4F67]">
+              Not implemented yet
+            </span>
+          )}
+        </div>
         <p className="mt-1 text-sm font-normal text-[#5B4F67]">{definition.description}</p>
       </div>
       <Switch
@@ -42,11 +49,10 @@ function NotificationRow({
   )
 }
 
-// Sending isn't actually wired up anywhere yet (see the email-notifications
-// review) — this page just gives Selouna a place to decide, ahead of time,
-// which of these she wants once each one is built. Every toggle here saves
+// Turn individual notification emails on or off. Every toggle here saves
 // itself immediately, same as the Staff page's Activate/Deactivate button —
-// there's no separate "Save" step to forget.
+// there's no separate "Save" step to forget. The three emails that still
+// need a timer can't be turned on yet (see lib/notificationCatalog.ts).
 export default function NotificationSettingsPage() {
   const { user, profile } = useAuth()
   const [settings, setSettings] = useState<Record<NotificationSettingKey, boolean> | null>(null)
@@ -93,6 +99,11 @@ export default function NotificationSettingsPage() {
 
   async function handleToggle(key: NotificationSettingKey, next: boolean) {
     if (!settings) return
+    const definition = NOTIFICATION_EMAIL_DEFINITIONS.find((d) => d.key === key)
+    if (next && definition?.implemented === false) {
+      setError(`${definition.label} isn't implemented yet, so it can't be turned on.`)
+      return
+    }
     setError('')
     const previous = settings[key]
     setSettings({ ...settings, [key]: next }) // optimistic

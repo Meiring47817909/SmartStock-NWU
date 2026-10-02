@@ -273,8 +273,10 @@ export interface ReturnWaiver {
 // and (protected)/settings/notifications for the page that edits these).
 // One singleton document, not one per admin -- there is one operational
 // inbox (Selouna's) and one lending-portal audience to notify, not several.
-// Note this only gates whether an email WOULD be sent once the sender
-// exists; none of the actual sending is wired up yet.
+// Each toggle gates one email; only an explicit `false` turns it off. The
+// three that need a timer (loan_request_expired, overdue_return_alert,
+// insufficient_pickup_alert) are not built yet: they are always off and
+// cannot be turned on (see lib/notificationCatalog.ts).
 export type NotificationSettingKey =
   | 'stock_out_confirmation'
   | 'loan_request_approved'
