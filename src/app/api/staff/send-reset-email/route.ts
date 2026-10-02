@@ -4,6 +4,32 @@ import { adminAuth, adminDb } from '@/lib/firebase/admin'
 import { auth as clientAuth } from '@/lib/firebase/config'
 import { sendPasswordResetEmail } from 'firebase/auth'
 import { ApiError, requireAdmin, findStaffDocOwningUid } from '@/lib/server/staffAdmin'
+import { isMailEnabled, sendMail, MailUnreachableError, MailConfigError } from '@/lib/server/mailer'
+import { loginEmail } from '@/lib/server/emailTemplates'
+
+// Sends the "set your password" email. With the mailer on (local emulator
+// testing, MAIL_TRANSPORT=smtp) we build the reset link ourselves and send our
+// own email, so it lands in Mailpit; otherwise Firebase's built-in email flow
+// is used exactly as before.
+async function deliverLoginEmail(email: string, name: string): Promise<void> {
+  if (!isMailEnabled()) {
+    await sendPasswordResetEmail(clientAuth, email)
+    return
+  }
+  try {
+    const link = await adminAuth.generatePasswordResetLink(email)
+    const { subject, html, text } = loginEmail({ name, link })
+    await sendMail({ to: email, subject, html, text })
+  } catch (err) {
+    if (err instanceof MailUnreachableError) {
+      throw new ApiError(502, 'Mail server not reachable. Is Mailpit running? (npm run mailpit)')
+    }
+    if (err instanceof MailConfigError) {
+      throw new ApiError(500, err.message)
+    }
+    throw err
+  }
+}
 
 /**
  * Provisions (if needed) and (re)sends a "set your password" email for a
@@ -30,6 +56,7 @@ export async function POST(request: NextRequest) {
     }
     const staffData = staffSnap.data()!
     const existingUid: string | undefined = staffData.uid || undefined
+    const displayName: string = staffData.name || staffData.full_name || 'there'
 
     // 1. Already linked — this record is confirmedly tied to an Auth
     // account. Resend to whatever email that account actually has, not
@@ -45,7 +72,7 @@ export async function POST(request: NextRequest) {
         linkedUser = null
       }
       if (linkedUser?.email) {
-        await sendPasswordResetEmail(clientAuth, linkedUser.email)
+        await deliverLoginEmail(linkedUser.email, displayName)
         return NextResponse.json({ linked: false, email: linkedUser.email, uid: linkedUser.uid })
       }
     }
@@ -69,7 +96,7 @@ export async function POST(request: NextRequest) {
       // ever set; the reset email IS the "set your password" step.
       const created = await adminAuth.createUser({ email })
       await staffRef.update({ uid: created.uid, updated_at: new Date().toISOString() })
-      await sendPasswordResetEmail(clientAuth, email)
+      await deliverLoginEmail(email, displayName)
       return NextResponse.json({ linked: true, email, uid: created.uid })
     }
 
@@ -88,7 +115,7 @@ export async function POST(request: NextRequest) {
     if (staffData.uid !== authUser.uid) {
       await staffRef.update({ uid: authUser.uid, updated_at: new Date().toISOString() })
     }
-    await sendPasswordResetEmail(clientAuth, email)
+    await deliverLoginEmail(email, displayName)
     return NextResponse.json({ linked: true, email, uid: authUser.uid })
   } catch (err) {
     if (err instanceof ApiError) {
