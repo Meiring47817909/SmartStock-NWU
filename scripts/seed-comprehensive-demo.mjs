@@ -87,7 +87,11 @@ import { getStorage } from 'firebase-admin/storage'
 const PROJECT_ID = 'demo-smartstock-nwu'
 const LOCATION = 'NWU - Potchefstroom, Building G4, Room 28'
 const DEPARTMENT = 'Computer Science and Information Systems'
-const ADMIN_NAME = 'Selouna'
+// The administrator's display name (profile + every audit entry attributed to them).
+const ADMIN_NAME = 'Jonathan Pritchard'
+const ADMIN_EMAIL = 'admin@nwu.test'
+// Settings -> Notifications: the system sending address (every email comes From it).
+const SYSTEM_FROM_EMAIL = 'noreply@smartstock-nwu.com'
 const ADMIN_UID = 'seed-admin'
 // Must match NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET in .env.local -- see
 // scripts/seed-products.mjs's own copy of this constant for why.
@@ -443,12 +447,26 @@ async function main() {
   // 0. LOGINS -- the two Firebase Auth accounts needed to actually sign
   //    into the app, not just have data sitting in it. ADMIN_UID/ADMIN_NAME
   //    are reused as the real account's uid/display name, so every audit
-  //    entry already attributed to "Selouna" below corresponds to an
+  //    entry already attributed to the administrator below corresponds to an
   //    account you can really sign in as and see them under.
   // =====================================================================
-  const adminUser = await upsertUser('admin@nwu.test', 'password123', ADMIN_UID)
+  const adminUser = await upsertUser(ADMIN_EMAIL, 'password123', ADMIN_UID)
   await db.collection('profiles').doc(adminUser.uid).set(
     { id: adminUser.uid, full_name: ADMIN_NAME, role: 'admin', created_at: new Date().toISOString() },
+    { merge: true },
+  )
+
+  // Settings -> Notifications addresses: administrator emails are delivered to
+  // the administrator's own login address, and every email is sent From the
+  // system address. Merged, so the notification toggles are left untouched.
+  await db.collection('settings').doc('notifications').set(
+    {
+      admin_notification_email: ADMIN_EMAIL,
+      system_from_email: SYSTEM_FROM_EMAIL,
+      updated_at: new Date().toISOString(),
+      updated_by_uid: ADMIN_UID,
+      updated_by_name: ADMIN_NAME,
+    },
     { merge: true },
   )
 
@@ -1249,7 +1267,8 @@ async function main() {
   // =====================================================================
   console.log('Seeded comprehensive demo data:\n')
   console.log('LOGINS:')
-  console.log('  BICS admin:      admin@nwu.test / password123               -> http://localhost:3000/login')
+  console.log(`  BICS admin:      ${ADMIN_EMAIL} / password123               -> http://localhost:3000/login   (${ADMIN_NAME})`)
+  console.log(`  Notifications:   administrator emails -> ${ADMIN_EMAIL}; sent from ${SYSTEM_FROM_EMAIL}`)
   console.log('  Portal borrower: demo.portallinked@example.com / password123 -> http://localhost:3000/lend/login')
   console.log('')
   console.log('DASHBOARD -> Outstanding Returns: No Date / Overdue / Due Today / Not Due Yet /')

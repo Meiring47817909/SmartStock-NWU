@@ -1288,7 +1288,7 @@ Ten more emails now go through the Mailpit mailer (see the Mailpit handoff for h
 - Email buttons link to `APP_BASE_URL` (optional; default `http://localhost:3000`).
 - The cancel reason typed on the Dashboard is not stored on the request, so it travels with the notify call.
 
-**Try it** (Docker Desktop running, `npm install` done, `npm run mailpit`, then `npm run dev:emulators`; set the Admin notification address under Settings → Notifications first; read the mail at http://localhost:8025)
+**Try it** (Docker Desktop running, `npm install` done, `npm run mailpit`, then `npm run dev:emulators`; `npm run seed:comprehensive` already sets the Admin notification address (the admin login's email, `admin@nwu.test`) and the System email (`noreply@smartstock-nwu.com`); without that seed, set the Admin notification address under Settings → Notifications first; read the mail at http://localhost:8025)
 1. Portal: submit a request. Admin inbox gets "New loan request".
 2. Loan Requests: approve it as-is. Staff gets "approved", admin inbox gets "Pickup confirmed".
 3. Submit another and counter it. Staff gets "countered". In the portal accept it: staff gets "counter accepted" and the admin inbox "Pickup confirmed". Do it again and decline the counter: "counter declined".
