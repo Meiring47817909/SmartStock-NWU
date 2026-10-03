@@ -216,6 +216,25 @@ async function upsertUser(email, password, uid) {
   }
 }
 
+// The administrator's own record in `staff` -- what My Profile reads and edits
+// (and what Stock Out lists as a borrower). Same shape the My Profile page
+// writes itself; the Staff page filters it out through is_admin_account.
+// Safe to re-run, and keeps a card UID someone already assigned.
+async function upsertAdminStaffRecord({ uid, name, surname, email, department }) {
+  const now = new Date().toISOString()
+  const payload = {
+    name, surname, full_name: `${name} ${surname}`, email, department,
+    uid, is_admin_account: true, is_active: true, updated_at: now,
+  }
+  const existing = await db.collection('staff').where('uid', '==', uid).limit(1).get()
+  if (!existing.empty) {
+    await existing.docs[0].ref.set(payload, { merge: true })
+    return existing.docs[0].id
+  }
+  const ref = await db.collection('staff').add({ ...payload, card_uid: null, created_at: now })
+  return ref.id
+}
+
 async function upsertStaff(spec) {
   const now = new Date().toISOString()
   const existingSnap = await db.collection('staff').where('email', '==', spec.email).get()
@@ -475,6 +494,12 @@ async function main() {
     },
     { merge: true },
   )
+
+  // My Profile -> My details (name, surname, department) reads this record.
+  const [adminFirstName, ...adminRest] = ADMIN_NAME.split(' ')
+  await upsertAdminStaffRecord({
+    uid: ADMIN_UID, name: adminFirstName, surname: adminRest.join(' '), email: ADMIN_EMAIL, department: DEPARTMENT,
+  })
 
   // A portal-borrower login, linked to the "Staff -- Portal Access Granted"
   // staff record created in section 2 below (that record's own point was to
