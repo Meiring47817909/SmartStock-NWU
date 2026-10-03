@@ -8,7 +8,7 @@
 
 // Shown when nothing is saved yet or the request fails, so there is never a
 // blank or a broken mailto link.
-export const FALLBACK_CONTACT_EMAIL = 'Jonathan.Pritchard@nwu.ac.za'
+export const FALLBACK_CONTACT_EMAIL = 'jonathan.pritchard@nwu.ac.za'
 
 export async function fetchContactEmail(): Promise<string> {
   try {

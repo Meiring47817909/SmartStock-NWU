@@ -127,7 +127,7 @@ How it works: `firebase.json` / `.firebaserc` configure Auth + Firestore + Stora
 
 **Run it (three terminals):**
 1. `npm run emulators` — starts Auth/Firestore/Storage emulators + the UI at `http://127.0.0.1:4000`. Leave running.
-2. `npm run seed:emulators` — one-off script (`scripts/seed-emulator.mjs`) that creates a test admin login (`admin@nwu.test` / `password123`, with a `profiles` doc so `requireAdmin` accepts it) and one `staff` record (`test.borrower@example.com`) with no `uid` yet, ready to click "Send Login Email" on.
+2. `npm run seed:emulators` — one-off script (`scripts/seed-emulator.mjs`) that creates a test admin login (`jonathan.pritchard@nwu.ac.za` / `password123`, with a `profiles` doc so `requireAdmin` accepts it) and one `staff` record (`test.borrower@example.com`) with no `uid` yet, ready to click "Send Login Email" on.
 3. `npm run dev:emulators` — same dev server as usual, just with the emulator env vars set (`cross-env` handles this cross-platform). Sign into the app with the seeded admin login, go to Staff, click "Send Login Email" on the seeded Test Borrower row.
 
 **No real email is ever sent**, for any address — the Auth emulator intercepts `sendPasswordResetEmail` entirely. Grab the actual generated reset link either from the Emulator UI's Auth tab, or the emulator's REST endpoint: `GET http://127.0.0.1:9099/emulator/v1/projects/demo-smartstock-nwu/oobCodes` (lists every generated link with the email it targets).
@@ -360,7 +360,7 @@ Three emulator logins now:
 
 | Account | Password | Lands on |
 |---|---|---|
-| `admin@nwu.test` | password123 | `/dashboard` — full BICS |
+| `jonathan.pritchard@nwu.ac.za` | password123 | `/dashboard` — full BICS |
 | `test.borrower@example.com` | password123 | `/lend` — portal only |
 | `borrower@nwu.test` (from `seed:lending`) | password123 | `/lend` — portal only |
 
@@ -1285,11 +1285,11 @@ Ten more emails now go through the Mailpit mailer (see the Mailpit handoff for h
 - Loan-request changes stay client-side as before. After one succeeds, the page calls `notifyLoanRequestEvent()` (`src/lib/firebase/notifyEvent.ts`) in the background; it posts `{ event, requestId, reason? }` to `POST /api/notifications/loan-request`, which re-reads the request, checks who is calling and that the request is in the right state, then sends. A failure shows "Saved, but the email couldn't be sent." and never undoes the action. Low stock is handled by the existing Stock Out route.
 - Duplicates are prevented by marker documents in the server-only `sent_notifications` collection (clients cannot read or write it). To make the app resend one email while testing, delete its marker in the emulator UI (http://localhost:4000, Firestore).
 - Settings → Notifications has two address cards. "Admin notification address" is where the administrator emails are delivered. "System emails" holds the system sending address: the From header of every email (notifications, Stock Out confirmation, staff login reset), shown as "SmartStock NWU". Until one is saved the field shows the default sender (`no-reply@smartstock.local`, shared by the mailer and the page via `DEFAULT_SYSTEM_EMAIL`); if the stored value is blank or not a plain address, `MAIL_FROM` is used. Stored as `system_from_email`; the administrator address is `admin_notification_email`. A real mail server may reject or spam-filter a From address it is not set up to send for.
-- The contact email shown on the login error messages and in the lending portal (home, policy, profile, deactivated-account screen) is the Admin notification address, read through the public `GET /api/contact` (settings are admin-only in Firestore, so signed-out visitors and borrowers cannot read them directly). Only the address is shown, never a name. It is read on every page load, so a change in Settings shows on the next load; if none is saved it falls back to `Jonathan.Pritchard@nwu.ac.za` (`src/lib/contactEmail.ts`). "Jonathan" in sentences such as "Jonathan will review it" is still typed in the pages and does not follow the setting.
+- The contact email shown on the login error messages and in the lending portal (home, policy, profile, deactivated-account screen) is the Admin notification address, read through the public `GET /api/contact` (settings are admin-only in Firestore, so signed-out visitors and borrowers cannot read them directly). Only the address is shown, never a name. It is read on every page load, so a change in Settings shows on the next load; if none is saved it falls back to `jonathan.pritchard@nwu.ac.za` (`src/lib/contactEmail.ts`). "Jonathan" in sentences such as "Jonathan will review it" is still typed in the pages and does not follow the setting.
 - Email buttons link to `APP_BASE_URL` (optional; default `http://localhost:3000`).
 - The cancel reason typed on the Dashboard is not stored on the request, so it travels with the notify call.
 
-**Try it** (Docker Desktop running, `npm install` done, `npm run mailpit`, then `npm run dev:emulators`; `npm run seed:comprehensive` already sets the Admin notification address (the admin login's email, `admin@nwu.test`) and the System email (`noreply@smartstock-nwu.com`); without that seed, set the Admin notification address under Settings → Notifications first; read the mail at http://localhost:8025)
+**Try it** (Docker Desktop running, `npm install` done, `npm run mailpit`, then `npm run dev:emulators`; `npm run seed:comprehensive` already sets the Admin notification address (the admin login's email, `jonathan.pritchard@nwu.ac.za`) and the System email (`noreply@smartstock-nwu.com`); without that seed, set the Admin notification address under Settings → Notifications first; read the mail at http://localhost:8025)
 1. Portal: submit a request. Admin inbox gets "New loan request".
 2. Loan Requests: approve it as-is. Staff gets "approved", admin inbox gets "Pickup confirmed".
 3. Submit another and counter it. Staff gets "countered". In the portal accept it: staff gets "counter accepted" and the admin inbox "Pickup confirmed". Do it again and decline the counter: "counter declined".

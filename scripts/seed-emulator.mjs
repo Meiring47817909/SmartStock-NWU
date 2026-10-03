@@ -31,7 +31,13 @@ async function upsertUser(email, password, uid) {
   try {
     return await auth.getUserByEmail(email)
   } catch {
-    return await auth.createUser({ uid, email, password, emailVerified: true })
+    try {
+      // The same account left over from an earlier run under an old email (the
+      // emulators keep their data while they stay up): adopt it.
+      return await auth.updateUser(uid, { email, emailVerified: true })
+    } catch {
+      return await auth.createUser({ uid, email, password, emailVerified: true })
+    }
   }
 }
 
@@ -42,7 +48,7 @@ async function main() {
   // accounts — see the passwordless createUser() call in
   // src/app/api/staff/send-reset-email/route.ts — this one just needs a
   // password because it's how *you* log into SmartStock-NWU to test it.
-  const admin = await upsertUser('admin@nwu.test', 'password123', 'seed-admin')
+  const admin = await upsertUser('jonathan.pritchard@nwu.ac.za', 'password123', 'seed-admin')
   await db.collection('profiles').doc(admin.uid).set(
     {
       id: admin.uid,
@@ -103,7 +109,7 @@ async function main() {
   )
 
   console.log('Seeded emulator data:')
-  console.log(`  BICS admin (full access):      admin@nwu.test / password123          → /dashboard`)
+  console.log(`  BICS admin (full access):      jonathan.pritchard@nwu.ac.za / password123          → /dashboard`)
   console.log(`  Portal borrower (lend only):   test.borrower@example.com / password123 → /lend`)
   console.log(`  Unprovisioned staff record:    new.borrower@example.com — no account yet, for "Send Login Email"`)
   console.log('')

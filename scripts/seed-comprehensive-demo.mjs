@@ -89,7 +89,7 @@ const LOCATION = 'NWU - Potchefstroom, Building G4, Room 28'
 const DEPARTMENT = 'Computer Science and Information Systems'
 // The administrator's display name (profile + every audit entry attributed to them).
 const ADMIN_NAME = 'Jonathan Pritchard'
-const ADMIN_EMAIL = 'admin@nwu.test'
+const ADMIN_EMAIL = 'jonathan.pritchard@nwu.ac.za'
 // Settings -> Notifications: the system sending address (every email comes From it).
 const SYSTEM_FROM_EMAIL = 'noreply@smartstock-nwu.com'
 const ADMIN_UID = 'seed-admin'
@@ -206,7 +206,13 @@ async function upsertUser(email, password, uid) {
   try {
     return await auth.getUserByEmail(email)
   } catch {
-    return await auth.createUser({ uid, email, password, emailVerified: true })
+    try {
+      // The same account left over from an earlier run under an old email (the
+      // emulators keep their data while they stay up): adopt it.
+      return await auth.updateUser(uid, { email, emailVerified: true })
+    } catch {
+      return await auth.createUser({ uid, email, password, emailVerified: true })
+    }
   }
 }
 

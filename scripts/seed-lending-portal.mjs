@@ -45,7 +45,13 @@ async function upsertUser(email, password, uid) {
   try {
     return await auth.getUserByEmail(email)
   } catch {
-    return await auth.createUser({ uid, email, password, emailVerified: true })
+    try {
+      // The same account left over from an earlier run under an old email (the
+      // emulators keep their data while they stay up): adopt it.
+      return await auth.updateUser(uid, { email, emailVerified: true })
+    } catch {
+      return await auth.createUser({ uid, email, password, emailVerified: true })
+    }
   }
 }
 
@@ -67,7 +73,7 @@ async function upsertCategory(name, description) {
 
 async function main() {
   // BICS admin — signs into /login, approves/counters requests at /loan-requests.
-  const admin = await upsertUser('admin@nwu.test', 'password123', 'seed-admin')
+  const admin = await upsertUser('jonathan.pritchard@nwu.ac.za', 'password123', 'seed-admin')
   await db.collection('profiles').doc(admin.uid).set(
     { id: admin.uid, full_name: 'Test Admin', role: 'admin', created_at: new Date().toISOString() },
     { merge: true },
@@ -115,7 +121,7 @@ async function main() {
   }
 
   console.log('Seeded lending-portal test data:')
-  console.log(`  BICS admin login:    admin@nwu.test / password123  →  http://localhost:3000/login`)
+  console.log(`  BICS admin login:    jonathan.pritchard@nwu.ac.za / password123  →  http://localhost:3000/login`)
   console.log(`  Portal borrower login: borrower@nwu.test / password123  →  http://localhost:3000/lend/login`)
   console.log(`  Product: ${productRef.id} — Test Projector, qty ${productPayload.quantity_on_hand}, lendable ${today}..${productPayload.lend_to}`)
   console.log('')
