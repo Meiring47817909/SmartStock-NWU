@@ -31,7 +31,7 @@ export default function LendBrowsePage() {
   const [catFilter, setCatFilter] = useState('')
   // Defaults to "Available" only, matching this page's behavior before
   // this filter existed — staff have to deliberately check "Unavailable"
-  // to see items Selouna has turned off, purely so they know it exists.
+  // to see items Jonathan has turned off, purely so they know it exists.
   const [inStockOnly, setInStockOnly] = useState(true)
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
@@ -145,14 +145,14 @@ export default function LendBrowsePage() {
           lend_browse_v2_final_1.html's own Page Header Section, restyled
           onto this app's semantic text-foreground/text-muted-foreground
           tokens rather than the mockup's raw hex. The enquiries line
-          points at Selouna's actual mailbox, matching the mailto already
+          points at Jonathan's actual mailbox, matching the mailto already
           used on the deactivated/unlinked-account screens in
           (portal)/lend/layout.tsx. */}
       <div className="mb-6 space-y-1">
         <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Browse Equipment</h1>
         <p className="max-w-2xl text-sm text-[#5B4F67]">
-          Request equipment to borrow — Selouna will review and confirm your pickup window at the Potchefstroom BICS IT Service Desk. For any enquiries, contact{' '}
-          <a href="mailto:Selouna.Visser@nwu.ac.za" className="underline">Selouna.Visser@nwu.ac.za</a>.
+          Request equipment to borrow — Jonathan will review and confirm your pickup window at the Potchefstroom BICS IT Service Desk. For any enquiries, contact{' '}
+          <a href="mailto:Jonathan.Pritchard@nwu.ac.za" className="underline">Jonathan.Pritchard@nwu.ac.za</a>.
         </p>
       </div>
 

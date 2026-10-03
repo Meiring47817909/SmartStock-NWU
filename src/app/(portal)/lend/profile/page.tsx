@@ -171,7 +171,7 @@ function ChangePasswordCard({ email }: { email: string }) {
 
 // The no-password-provider case — no password to change, so this offers
 // the same "set your password" email the admin's Send Login Email button
-// sends, just triggered by the staff member themselves instead of Selouna.
+// sends, just triggered by the staff member themselves instead of Jonathan.
 function SetUpPasswordCard({ email }: { email: string }) {
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
@@ -219,7 +219,7 @@ export default function ProfilePage() {
     <div className="mx-auto flex max-w-[1000px] flex-col gap-6">
       <div className="space-y-1">
         <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Profile</h1>
-        <p className="text-sm text-[#5B4F67]">Your NWU staff record, as Selouna has it on file.</p>
+        <p className="text-sm text-[#5B4F67]">Your NWU staff record, as Jonathan has it on file.</p>
       </div>
 
       {/* Left column (identity + details cards, stacked) and right column
@@ -260,8 +260,8 @@ export default function ProfilePage() {
           </Card>
 
           <p className="text-xs text-muted-foreground">
-            Something here out of date? Contact Selouna Visser at{' '}
-            <a href="mailto:Selouna.Visser@nwu.ac.za" className="underline">Selouna.Visser@nwu.ac.za</a> to have it updated.
+            Something here out of date? Contact Jonathan Pritchard at{' '}
+            <a href="mailto:Jonathan.Pritchard@nwu.ac.za" className="underline">Jonathan.Pritchard@nwu.ac.za</a> to have it updated.
           </p>
         </div>
 

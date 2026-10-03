@@ -36,7 +36,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
   const cartQty = cart.reduce((sum, i) => sum + i.quantity, 0)
 
   // Combined total of My Requests' three actionable tabs (Needs your
-  // response, Awaiting Selouna, Upcoming) -- History is excluded, see
+  // response, Awaiting Jonathan, Upcoming) -- History is excluded, see
   // lib/firebase/loanRequests.ts's loadMyRequestsAlertCount().
   const [myRequestsCount, setMyRequestsCount] = useState<number | null>(null)
 
@@ -132,8 +132,8 @@ function PortalShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center">
         <h1 className="text-lg font-bold text-foreground">Your account has been deactivated</h1>
         <p className="max-w-[360px] text-sm text-muted-foreground">
-          Please contact Selouna Visser at{' '}
-          <a href="mailto:Selouna.Visser@nwu.ac.za" className="underline">Selouna.Visser@nwu.ac.za</a>{' '}
+          Please contact Jonathan Pritchard at{' '}
+          <a href="mailto:Jonathan.Pritchard@nwu.ac.za" className="underline">Jonathan.Pritchard@nwu.ac.za</a>{' '}
           for more information.
         </p>
         <Button variant="outline" onClick={handleSignOut}>Sign out</Button>

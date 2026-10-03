@@ -99,7 +99,7 @@ function RequestCard({
 
         {request.admin_message && (
           <div className="rounded-md border bg-muted/50 p-2">
-            <p className="text-xs font-medium text-muted-foreground">Message from Selouna</p>
+            <p className="text-xs font-medium text-muted-foreground">Message from Jonathan</p>
             <p className="mt-0.5 text-sm text-foreground">&ldquo;{request.admin_message}&rdquo;</p>
           </div>
         )}
@@ -209,7 +209,7 @@ export default function MyRequestsPage() {
     setBusy(null)
   }
 
-  // Needs your response / Awaiting Selouna: soonest-to-expire first, using
+  // Needs your response / Awaiting Jonathan: soonest-to-expire first, using
   // the SAME computed expiry expireIfNeeded() itself acts on --
   // computeExpiryDate() = min(updated_at + 30 days, from_date) -- rather
   // than just the lend window's start date. A request sitting untouched
@@ -262,7 +262,7 @@ export default function MyRequestsPage() {
     <div className="mx-auto flex max-w-[1000px] flex-col gap-6">
       <div className="space-y-1">
         <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">My Requests</h1>
-        <p className="text-sm text-[#5B4F67]">Track your lending requests and respond to Selouna&apos;s counters.</p>
+        <p className="text-sm text-[#5B4F67]">Track your lending requests and respond to Jonathan&apos;s counters.</p>
       </div>
 
       {requests.length === 0 ? (
@@ -289,7 +289,7 @@ export default function MyRequestsPage() {
               value="pending"
               className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
             >
-              Awaiting Selouna
+              Awaiting Jonathan
               {pending.length > 0 && <Badge className="bg-(--nwu-turquoise) text-white">{pending.length}</Badge>}
             </TabsTrigger>
             <TabsTrigger

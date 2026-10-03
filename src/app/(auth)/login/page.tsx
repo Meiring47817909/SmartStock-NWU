@@ -51,7 +51,7 @@ function LoginPageInner() {
       } else if (code === 'auth/invalid-email') {
         setError('Enter a valid email address.')
       } else if (code === 'auth/user-disabled') {
-        setError('This account has been disabled. Please contact Selouna Visser at Selouna.Visser@nwu.ac.za for more information.')
+        setError('This account has been disabled. Please contact Jonathan Pritchard at Jonathan.Pritchard@nwu.ac.za for more information.')
       } else if (code === 'auth/too-many-requests') {
         setError('Too many attempts — please wait a moment and try again.')
       } else {
@@ -98,7 +98,7 @@ function LoginPageInner() {
       // landing on that dead-end screen.
       if (staffSnap.docs[0].data().is_active === false) {
         await signOut(auth)
-        setError('Your account has been deactivated. Please contact Selouna Visser at Selouna.Visser@nwu.ac.za for more information.')
+        setError('Your account has been deactivated. Please contact Jonathan Pritchard at Jonathan.Pritchard@nwu.ac.za for more information.')
         setLoading(false)
         return
       }

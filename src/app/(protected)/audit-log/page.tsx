@@ -173,7 +173,7 @@ const ACTIVITY_GROUPS: { label: string; keys: string[] }[] = [
 ]
 
 // Plain-English labels for the raw Firestore field names that show up in
-// product/category/staff before-after snapshots — Selouna shouldn't have to
+// product/category/staff before-after snapshots — Jonathan shouldn't have to
 // know what "quantity_on_hand" or "reorder_threshold" mean.
 const FIELD_LABELS: Record<string, string> = {
   name: 'Name',
@@ -249,7 +249,7 @@ function friendlyValue(key: string, value: unknown): string {
 // app writes, seed-script writes, and old historical data have all drifted
 // from each other in practice (see the 2026-09-26 field-order audit); this
 // is what makes every entry for the same kind of record look the same to
-// Selouna regardless of which of those wrote it. Order was chosen to read
+// Jonathan regardless of which of those wrote it. Order was chosen to read
 // naturally (identity/what-changed fields first, bookkeeping fields last),
 // not copied from any one write path.
 const AUDIT_FIELD_ORDER: Record<string, string[]> = {
@@ -616,7 +616,7 @@ function ResolveSummary({ after }: { after: Record<string, unknown> | null }) {
 //   - declining an already-*countered* request (after.countered_lines is an
 //     array): declineRequest() freezes the whole counter offer — the
 //     staff's original message, the requested-vs-offered/removed line
-//     comparison, Selouna's counter message, and her decline message — into
+//     comparison, Jonathan's counter message, and his decline message — into
 //     this one entry, since none of that survives on the live document once
 //     status flips to 'declined'. This snapshot is self-contained (no lazy
 //     fetch needed).
@@ -705,7 +705,7 @@ function LoanRequestSummary({
           )}
           {/* The staff member's own note from submission. It rides along
               on every snapshot, and on a counter it's the half of the
-              exchange Selouna was replying to — reading her counter
+              exchange Jonathan was replying to — reading his counter
               without it only tells you half the story. */}
           {typeof after.message === 'string' && after.message && (
             <div>
@@ -713,7 +713,7 @@ function LoanRequestSummary({
               <span className="text-foreground">&ldquo;{after.message}&rdquo;</span>
             </div>
           )}
-          {/* Selouna's note to the staff member. admin_message is shared
+          {/* Jonathan's note to the staff member. admin_message is shared
               between a counter and a decline (they're mutually exclusive
               transitions), so the label follows the status. It is in the
               payload either way — rendering it only on a counter would
@@ -778,7 +778,7 @@ function LoanRequestSummary({
             )}
           </div>
           {counterMessage && (
-            <div><span className="font-medium text-foreground">Selouna&apos;s counter message:</span> &ldquo;{counterMessage}&rdquo;</div>
+            <div><span className="font-medium text-foreground">Jonathan&apos;s counter message:</span> &ldquo;{counterMessage}&rdquo;</div>
           )}
           {declineMessage && (
             <div><span className="font-medium text-foreground">Decline message:</span> &ldquo;{declineMessage}&rdquo;</div>
@@ -879,11 +879,11 @@ function LoanRequestSummary({
 // breaks are deliberate: with Excel's Wrap Text turned on, each field
 // renders on its own line inside that one cell, like a small card. The
 // trailing " |" on every line but the last keeps the pipe-separator look
-// Selouna already knows, while the line break does the actual visual
+// Jonathan already knows, while the line break does the actual visual
 // separating -- this reads far better than either a single "|"-joined
 // line or a raw JSON dump. Field NAMES are kept exactly as they are in
 // Firestore (reference_no, not "Reference") rather than run through
-// friendlyLabel — Selouna cross-references these against the raw-data
+// friendlyLabel — Jonathan cross-references these against the raw-data
 // JSON view, so the two need to say the same thing. Field VALUES still go
 // through friendlyValue for the same date/status/boolean formatting the
 // on-screen views use.
@@ -1120,7 +1120,7 @@ export default function AuditLogPage() {
             plain-text line per entry (flattenAfterForCsv) rather than
             pretty-printed JSON — a JSON dump's embedded newlines wrap a
             single entry across several visual lines once opened in Excel.
-            Enough for Selouna to work out what changed by comparing one
+            Enough for Jonathan to work out what changed by comparing one
             entity's entries against each other, without carrying the
             redundant before snapshot (already the previous row's after)
             on every line. */}

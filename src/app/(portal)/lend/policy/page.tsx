@@ -49,7 +49,7 @@ export default function LendingPolicyPage() {
           <p className="mb-4 text-sm text-muted-foreground">
             Only NWU staff members with a linked SmartStock-NWU account can submit loan requests.
             If you can sign in but see a message that your account isn&apos;t linked to a staff
-            record, contact Selouna (see Enquiries below) to have it set up.
+            record, contact Jonathan (see Enquiries below) to have it set up.
           </p>
 
           <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">3. Requesting Equipment</h2>
@@ -57,13 +57,13 @@ export default function LendingPolicyPage() {
             Add what you need to your cart, choose a single pickup-to-return date range that
             covers everything in it, and submit — an optional message can go along with the
             request. Dates must fall within each item&apos;s own lendable window. Adding something
-            to your cart does not reserve it: equipment is only held for you once Selouna approves
+            to your cart does not reserve it: equipment is only held for you once Jonathan approves
             the request.
           </p>
 
-          <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">4. Selouna&apos;s Review</h2>
+          <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">4. Jonathan&apos;s Review</h2>
           <p className="mb-4 text-sm text-muted-foreground">
-            Selouna reviews every request and can approve it as submitted, or send back a
+            Jonathan reviews every request and can approve it as submitted, or send back a
             counter — a reduced quantity or an adjusted date range — if the exact request can&apos;t
             be met. You&apos;ll see exactly what changed on any counter, and can accept or decline it.
           </p>
@@ -99,8 +99,8 @@ export default function LendingPolicyPage() {
           <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">9. Enquiries</h2>
           <p className="mb-8 text-sm text-muted-foreground">
             For anything not covered here — an urgent request, a question about availability, or
-            help with your account — contact Selouna Visser at{' '}
-            <a href="mailto:Selouna.Visser@nwu.ac.za" className="underline">Selouna.Visser@nwu.ac.za</a>.
+            help with your account — contact Jonathan Pritchard at{' '}
+            <a href="mailto:Jonathan.Pritchard@nwu.ac.za" className="underline">Jonathan.Pritchard@nwu.ac.za</a>.
           </p>
 
           <h2 id="privacy-cookies" className="mt-6 mb-2 text-lg font-semibold text-foreground">10. Privacy &amp; Cookies</h2>
@@ -113,7 +113,7 @@ export default function LendingPolicyPage() {
             Your information — contact details, loan requests, and pickup history — is processed
             in line with South Africa&apos;s Protection of Personal Information Act (POPIA), and
             used only to run the lending service itself. It is not shared outside NWU IT Store
-            operations. Contact Selouna Visser (see Enquiries above) with any question about your
+            operations. Contact Jonathan Pritchard (see Enquiries above) with any question about your
             data.
           </p>
 
