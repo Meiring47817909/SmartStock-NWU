@@ -13,6 +13,8 @@ import {
   setNotificationSetting,
   loadAdminNotificationEmail,
   saveAdminNotificationEmail,
+  loadSystemFromEmail,
+  saveSystemFromEmail,
   type NotificationEmailDefinition,
 } from '@/lib/firebase/notificationSettings'
 import type { NotificationSettingKey } from '@/types/database'
@@ -68,13 +70,22 @@ export default function NotificationSettingsPage() {
   const [savingEmail, setSavingEmail] = useState(false)
   const [emailError, setEmailError] = useState('')
 
+  // The address every system email is sent From -- same save pattern as the
+  // administrator address above, but a separate field and a separate card.
+  const [systemEmail, setSystemEmail] = useState('')
+  const [savedSystemEmail, setSavedSystemEmail] = useState('')
+  const [savingSystem, setSavingSystem] = useState(false)
+  const [systemError, setSystemError] = useState('')
+
   useEffect(() => {
     // External read (Firestore), not state derivable from props.
-    Promise.all([loadNotificationSettings(), loadAdminNotificationEmail()])
-      .then(([toggles, email]) => {
+    Promise.all([loadNotificationSettings(), loadAdminNotificationEmail(), loadSystemFromEmail()])
+      .then(([toggles, email, systemFrom]) => {
         setSettings(toggles)
         setAdminEmail(email)
         setSavedAdminEmail(email)
+        setSystemEmail(systemFrom)
+        setSavedSystemEmail(systemFrom)
       })
       .catch(() => setError('Could not load notification settings.'))
   }, [])
@@ -95,6 +106,24 @@ export default function NotificationSettingsPage() {
       setEmailError(err instanceof Error ? err.message : 'Failed to save that change — try again.')
     }
     setSavingEmail(false)
+  }
+
+  async function handleSaveSystemEmail(e: React.FormEvent) {
+    e.preventDefault()
+    setSystemError('')
+    setSavingSystem(true)
+    try {
+      const trimmed = systemEmail.trim()
+      await saveSystemFromEmail(trimmed, savedSystemEmail, {
+        uid: user?.uid,
+        name: profile?.full_name ?? user?.email,
+      })
+      setSystemEmail(trimmed)
+      setSavedSystemEmail(trimmed)
+    } catch (err) {
+      setSystemError(err instanceof Error ? err.message : 'Failed to save that change — try again.')
+    }
+    setSavingSystem(false)
   }
 
   async function handleToggle(key: NotificationSettingKey, next: boolean) {
@@ -144,14 +173,13 @@ export default function NotificationSettingsPage() {
         <>
           <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
             <CardHeader>
-              <CardTitle>System email address</CardTitle>
+              <CardTitle>Admin notification address</CardTitle>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSaveEmail} className="flex flex-col gap-2">
                 <p className="text-sm text-[#5B4F67]">
-                  This is the address SmartStock NWU uses for email. Emails to administrators are delivered to it,
-                  and every email the system sends comes from it. Change it if administration duties move to
-                  someone else — the toggles below do not need touching.
+                  Where the five &quot;Emails to Administrators&quot; below are actually delivered. Change this if
+                  administration duties move to someone else — nothing here needs the toggles below touched.
                 </p>
                 <div className="flex items-end gap-3">
                   <div className="grid flex-1 gap-1.5">
@@ -172,7 +200,7 @@ export default function NotificationSettingsPage() {
                 {emailError && <p className="text-sm text-red-600">{emailError}</p>}
                 {!savedAdminEmail && !emailError && (
                   <p className="text-sm text-[#5B4F67]">
-                    Not set yet — administrator emails have nowhere to go until an address is saved here.
+                    Not set yet — the five emails below have nowhere to go until an address is saved here.
                   </p>
                 )}
               </form>
@@ -193,6 +221,42 @@ export default function NotificationSettingsPage() {
                   onToggle={(next) => handleToggle(d.key, next)}
                 />
               ))}
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
+            <CardHeader>
+              <CardTitle>System emails</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSaveSystemEmail} className="flex flex-col gap-2">
+                <p className="text-sm text-[#5B4F67]">
+                  The address SmartStock NWU sends every email from — loan request emails, Stock Out
+                  confirmations and staff login emails. Leave it blank to use the default sender.
+                </p>
+                <div className="flex items-end gap-3">
+                  <div className="grid flex-1 gap-1.5">
+                    <Label htmlFor="system-from-email">System sending address</Label>
+                    <Input
+                      id="system-from-email"
+                      type="email"
+                      className="border-slate-300 bg-white text-slate-700 focus-visible:border-[#8046B5] focus-visible:ring-[#8046B5]/50"
+                      value={systemEmail}
+                      onChange={(e) => setSystemEmail(e.target.value)}
+                      placeholder="no-reply@nwu.ac.za"
+                    />
+                  </div>
+                  <Button type="submit" disabled={savingSystem || systemEmail.trim() === savedSystemEmail.trim()} className="h-8 rounded-lg bg-primary px-5 text-sm font-medium text-white shadow-sm hover:bg-[#582e78]">
+                    {savingSystem ? 'Saving…' : 'Save'}
+                  </Button>
+                </div>
+                {systemError && <p className="text-sm text-red-600">{systemError}</p>}
+                {!savedSystemEmail && !systemError && (
+                  <p className="text-sm text-[#5B4F67]">
+                    Not set yet — emails are sent from the default sender.
+                  </p>
+                )}
+              </form>
             </CardContent>
           </Card>
 

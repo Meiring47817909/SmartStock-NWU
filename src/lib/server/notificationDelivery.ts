@@ -38,7 +38,7 @@ export async function adminInboxEmail(): Promise<string> {
   return typeof email === 'string' ? email.trim() : ''
 }
 
-// The saved system address becomes the From header of every email, shown as
+// The saved system sending address becomes the From header of every email, shown as
 // "SmartStock NWU <address>". Anything that is not a plain address (angle
 // brackets, quotes, whitespace, commas) is ignored so it can never break or
 // inject into the header; the mailer then falls back to MAIL_FROM.
@@ -49,8 +49,10 @@ export function fromHeaderFor(address: unknown): string | undefined {
   return SAFE_ADDRESS.test(trimmed) ? `SmartStock NWU <${trimmed}>` : undefined
 }
 
+// Read from its own field, never from the administrator inbox address.
 export async function systemFromAddress(): Promise<string | undefined> {
-  return fromHeaderFor(await adminInboxEmail())
+  const snap = await adminDb.collection('settings').doc('notifications').get()
+  return fromHeaderFor(snap.data()?.system_from_email)
 }
 
 function isAlreadyExists(err: unknown): boolean {
@@ -96,7 +98,7 @@ export async function deliver(opts: {
 
   try {
     const { subject, html, text } = await opts.render()
-    if (!(await sendMail({ to, subject, html, text, from: fromHeaderFor(settingsSnap.data()?.admin_notification_email) }))) {
+    if (!(await sendMail({ to, subject, html, text, from: fromHeaderFor(settingsSnap.data()?.system_from_email) }))) {
       await release()
       return skip('mail_disabled')
     }

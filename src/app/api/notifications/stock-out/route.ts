@@ -67,7 +67,7 @@ async function sendConfirmation(
     lendFrom: txn.lend_from ?? null,
     lendTo: txn.lend_to ?? null,
   })
-  await sendMail({ to: staffEmail, subject, html, text, from: fromHeaderFor(settingsSnap.data()?.admin_notification_email) })
+  await sendMail({ to: staffEmail, subject, html, text, from: fromHeaderFor(settingsSnap.data()?.system_from_email) })
   return { sent: true }
 }
 

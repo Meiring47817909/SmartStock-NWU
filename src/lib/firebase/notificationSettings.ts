@@ -159,11 +159,23 @@ export async function loadNotificationSettings(): Promise<Record<NotificationSet
 // misses anyway).
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-export async function loadAdminNotificationEmail(): Promise<string> {
+type AddressField = 'admin_notification_email' | 'system_from_email'
+
+async function loadAddress(field: AddressField): Promise<string> {
   const snap = await getDoc(doc(db, 'settings', NOTIFICATION_SETTINGS_DOC_ID))
   if (!snap.exists()) return ''
-  const data = snap.data()
-  return typeof data.admin_notification_email === 'string' ? data.admin_notification_email : ''
+  const value = snap.data()[field]
+  return typeof value === 'string' ? value : ''
+}
+
+export function loadAdminNotificationEmail(): Promise<string> {
+  return loadAddress('admin_notification_email')
+}
+
+// The address every email the system sends comes from (the From header).
+// Blank means "use the server's default sender".
+export function loadSystemFromEmail(): Promise<string> {
+  return loadAddress('system_from_email')
 }
 
 // Resolves the open question flagged in the email-notifications review --
@@ -172,7 +184,9 @@ export async function loadAdminNotificationEmail(): Promise<string> {
 // query over every profiles doc with role admin. Throws (rather than
 // silently rejecting) on an invalid address so the Settings page's form can
 // show the same message inline instead of swallowing it.
-export async function saveAdminNotificationEmail(
+async function saveAddress(
+  field: AddressField,
+  label: string,
   email: string,
   previousEmail: string,
   actor: { uid?: string | null; name?: string | null },
@@ -185,7 +199,7 @@ export async function saveAdminNotificationEmail(
   await setDoc(
     doc(db, 'settings', NOTIFICATION_SETTINGS_DOC_ID),
     {
-      admin_notification_email: trimmed || null,
+      [field]: trimmed || null,
       updated_at: now,
       updated_by_uid: actor.uid ?? null,
       updated_by_name: actor.name ?? null,
@@ -198,9 +212,25 @@ export async function saveAdminNotificationEmail(
     action: 'update',
     entityType: 'settings',
     entityId: NOTIFICATION_SETTINGS_DOC_ID,
-    before: { admin_notification_email: previousEmail || null, label: 'Admin notification email' },
-    after: { admin_notification_email: trimmed || null, label: 'Admin notification email' },
+    before: { [field]: previousEmail || null, label },
+    after: { [field]: trimmed || null, label },
   })
+}
+
+export function saveAdminNotificationEmail(
+  email: string,
+  previousEmail: string,
+  actor: { uid?: string | null; name?: string | null },
+): Promise<void> {
+  return saveAddress('admin_notification_email', 'Admin notification email', email, previousEmail, actor)
+}
+
+export function saveSystemFromEmail(
+  email: string,
+  previousEmail: string,
+  actor: { uid?: string | null; name?: string | null },
+): Promise<void> {
+  return saveAddress('system_from_email', 'System sending email', email, previousEmail, actor)
 }
 
 // Flips exactly one toggle, merged into whatever's already stored (so

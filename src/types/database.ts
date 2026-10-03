@@ -298,6 +298,9 @@ export type NotificationSettings = Record<NotificationSettingKey, boolean> & {
   // the Notification Settings page. null/empty until an admin sets one, in
   // which case nothing addressed to Selouna has anywhere to go yet.
   admin_notification_email: string | null
+  // The address every system email is sent From. null/empty = the server's
+  // default sender (MAIL_FROM).
+  system_from_email: string | null
   updated_at: string | null
   updated_by_uid: string | null
   updated_by_name: string | null
