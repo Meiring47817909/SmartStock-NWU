@@ -40,6 +40,9 @@ function NotificationRow({
           )}
         </div>
         <p className="mt-1 text-sm font-normal text-[#5B4F67]">{definition.description}</p>
+        {definition.implemented === false && definition.requirement && (
+          <p className="mt-1.5 text-sm font-normal text-[#5B4F67]">{definition.requirement}</p>
+        )}
       </div>
       <Switch
         checked={checked}

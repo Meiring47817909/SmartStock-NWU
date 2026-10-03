@@ -16,6 +16,9 @@ export interface NotificationEmailDefinition {
   // false for emails that need a timer that doesn't exist yet -- the Settings
   // page shows "Not implemented yet" and refuses to turn them on.
   implemented?: boolean
+  // For the emails that are not built: what is still missing, shown under the
+  // description on the Settings page.
+  requirement?: string
 }
 
 // One row per email the app can eventually send -- mirrors the "Full
@@ -69,6 +72,8 @@ const DEFINITIONS: NotificationEmailDefinition[] = [
     recipient: 'Staff member',
     description:
       "Email a staff member when their loan request times out unanswered — nobody approved, countered or declined it in time. This is already recorded in the Audit Log regardless of whether this email is on.",
+    requirement:
+      "Needs a scheduled job before it can be turned on. A request is only marked expired when someone opens the app, so a separate scheduled service (a cron job) has to check for expired requests every day and send this email.",
   },
   {
     key: 'loan_request_counter_accepted',
@@ -111,6 +116,8 @@ const DEFINITIONS: NotificationEmailDefinition[] = [
     recipient: 'Administrators',
     description:
       'Email Administrators the first time an issued item passes its return date without being returned. Sent once per item, right when it first turns overdue — not repeated daily while it stays that way.',
+    requirement:
+      'Needs a scheduled job before it can be turned on. Nothing in the app runs when nobody is signed in, so a separate scheduled service (a cron job) has to check every day for items past their return date and send this email once per item.',
   },
   {
     key: 'low_stock_alert',
@@ -125,6 +132,8 @@ const DEFINITIONS: NotificationEmailDefinition[] = [
     recipient: 'Administrators',
     description:
       'Email Administrators when an already-approved pickup no longer has enough stock to fulfil — most often because a same-product return is overdue. Names the shortfall and the likely cause.',
+    requirement:
+      'Needs a scheduled job before it can be turned on. A separate scheduled service (a cron job) has to check every day whether approved pickups still have enough stock and send this email when one falls short.',
   },
 ]
 
