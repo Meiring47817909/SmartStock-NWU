@@ -27,3 +27,22 @@ export function notifyLoanRequestEvent(
       toast.error("Saved, but the email couldn't be sent.")
     })
 }
+
+/**
+ * Asks the server to send the low stock email after a product edit on the
+ * Products page was saved (see api/notifications/product-stock). The server
+ * sends only when the edit made the product newly low. Same contract as
+ * notifyLoanRequestEvent: fire and forget, never throws, the edit is already
+ * saved, and only a real failure shows a toast.
+ */
+export function notifyProductStockChange(
+  user: User | null | undefined,
+  change: { productId: string; previousQuantity: number; previousThreshold: number },
+): void {
+  if (!user) return
+  void Promise.resolve()
+    .then(() => postStaffAdmin('/api/notifications/product-stock', user, change))
+    .catch(() => {
+      toast.error("Saved, but the email couldn't be sent.")
+    })
+}

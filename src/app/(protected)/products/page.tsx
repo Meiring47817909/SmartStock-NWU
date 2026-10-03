@@ -40,6 +40,7 @@ import {
 } from "@/lib/firebase/loanRequests";
 import type { LendingInterval } from "@/types/database";
 import { logAudit } from "@/lib/firebase/audit";
+import { notifyProductStockChange } from "@/lib/firebase/notifyEvent";
 import { useAuth } from "@/context/AuthContext";
 import { useRole } from "@/context/RoleContext";
 import { Card, CardContent } from "@/components/ui/card";
@@ -668,6 +669,19 @@ export default function ProductsPage() {
 
         const payload = { ...basePayload, images };
         await updateDoc(doc(db, "products", productId), payload);
+        // Low stock email: only when this edit left the product at or below
+        // its reorder threshold after it was above it (the server re-checks).
+        // Background and best-effort; the edit is already saved.
+        if (
+          Number(basePayload.quantity_on_hand) <= Number(basePayload.reorder_threshold) &&
+          (editing.quantity_on_hand ?? 0) > (editing.reorder_threshold ?? 0)
+        ) {
+          notifyProductStockChange(user, {
+            productId,
+            previousQuantity: editing.quantity_on_hand ?? 0,
+            previousThreshold: editing.reorder_threshold ?? 0,
+          });
+        }
         // The change-reason is only ever meaningful for this one audit
         // entry — it isn't a product field, so it never goes into the
         // Firestore payload, only into the `after` snapshot logged below.

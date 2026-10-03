@@ -1278,7 +1278,7 @@ Ten more emails now go through the Mailpit mailer (see the Mailpit handoff for h
 
 **What sends, and when** (each is gated by its toggle on Settings → Notifications; only an explicit "off" stops it)
 - Staff member: loan request approved, countered, declined; approved pickup cancelled (admin cancels on the Dashboard); counter offer accepted, counter offer declined, request withdrawn (staff, in the portal).
-- Admin inbox (the "Admin notification email" on the same Settings page; skipped if blank): new loan request (staff submits), incoming pickup confirmed (request becomes accepted, either approved as-is or after the staff member accepts a counter), low stock (a Stock Out takes a product to or below its reorder threshold or to zero; one email lists all of them).
+- Admin inbox (the "Admin notification email" on the same Settings page; skipped if blank): new loan request (staff submits), incoming pickup confirmed (request becomes accepted, either approved as-is or after the staff member accepts a counter), low stock (a Stock Out takes a product to or below its reorder threshold or to zero, one email listing all of them; or an edit on the Products page does the same, via `POST /api/notifications/product-stock`, one product per email). Both send only when the product was above its threshold before, so a product that is already low is not emailed again.
 - **Not built, always off:** loan request expired, overdue return alert, incoming pickup insufficient stock (they need a timer). The Settings page shows "Not implemented yet" and refuses to switch them on.
 
 **How it works**
@@ -1300,3 +1300,4 @@ Ten more emails now go through the Mailpit mailer (see the Mailpit handoff for h
 9. Try to switch on "Loan request expired": a "not implemented yet" message appears and it stays off.
 10. Stop Mailpit and approve a request: the toast "Saved, but the email couldn't be sent." appears and the request is still approved.
 11. Under System emails save a sending address, then trigger any email: Mailpit shows it From "SmartStock NWU" at that address, and administrator emails still go to the Admin notification address. Clear the field and Save: it goes back to showing the default sender, and emails come from that.
+12. Products, edit a product that is above its reorder threshold and set Qty On Hand to its threshold (or lower), Save: the admin inbox gets "Low stock". Edit it again while it is still low: no second email.
