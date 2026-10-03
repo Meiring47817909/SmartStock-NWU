@@ -18,6 +18,7 @@ import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { avatarInitials, avatarColorClass } from '@/lib/utils'
+import { ContactEmailLink } from '@/components/ContactEmailLink'
 
 // Only an account that actually has an email/password credential can
 // change one here — an account signed in via a custom token (historically,
@@ -260,8 +261,8 @@ export default function ProfilePage() {
           </Card>
 
           <p className="text-xs text-muted-foreground">
-            Something here out of date? Contact Jonathan Pritchard at{' '}
-            <a href="mailto:Jonathan.Pritchard@nwu.ac.za" className="underline">Jonathan.Pritchard@nwu.ac.za</a> to have it updated.
+            Something here out of date? Contact{' '}
+            <ContactEmailLink /> to have it updated.
           </p>
         </div>
 

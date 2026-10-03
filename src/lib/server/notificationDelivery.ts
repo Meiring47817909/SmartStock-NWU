@@ -44,9 +44,15 @@ export async function adminInboxEmail(): Promise<string> {
 // inject into the header; the mailer then falls back to MAIL_FROM.
 const SAFE_ADDRESS = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/
 
-export function fromHeaderFor(address: unknown): string | undefined {
+// The trimmed address when it is a plain, safe email address; otherwise undefined.
+export function safeAddress(address: unknown): string | undefined {
   const trimmed = typeof address === 'string' ? address.trim() : ''
-  return SAFE_ADDRESS.test(trimmed) ? `SmartStock NWU <${trimmed}>` : undefined
+  return SAFE_ADDRESS.test(trimmed) ? trimmed : undefined
+}
+
+export function fromHeaderFor(address: unknown): string | undefined {
+  const safe = safeAddress(address)
+  return safe ? `SmartStock NWU <${safe}>` : undefined
 }
 
 // Read from its own field, never from the administrator inbox address.

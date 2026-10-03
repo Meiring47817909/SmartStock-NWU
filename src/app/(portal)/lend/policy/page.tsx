@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { ContactEmailLink } from '@/components/ContactEmailLink'
 
 // Same "long-form legal/policy page" template as campus-marketplace's own
 // /terms page (Project_files_Claude_Code/campus-marketplace/src/app/terms) —
@@ -49,7 +50,7 @@ export default function LendingPolicyPage() {
           <p className="mb-4 text-sm text-muted-foreground">
             Only NWU staff members with a linked SmartStock-NWU account can submit loan requests.
             If you can sign in but see a message that your account isn&apos;t linked to a staff
-            record, contact Jonathan (see Enquiries below) to have it set up.
+            record, email the address under Enquiries below to have it set up.
           </p>
 
           <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">3. Requesting Equipment</h2>
@@ -99,8 +100,8 @@ export default function LendingPolicyPage() {
           <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">9. Enquiries</h2>
           <p className="mb-8 text-sm text-muted-foreground">
             For anything not covered here — an urgent request, a question about availability, or
-            help with your account — contact Jonathan Pritchard at{' '}
-            <a href="mailto:Jonathan.Pritchard@nwu.ac.za" className="underline">Jonathan.Pritchard@nwu.ac.za</a>.
+            help with your account — contact{' '}
+            <ContactEmailLink />.
           </p>
 
           <h2 id="privacy-cookies" className="mt-6 mb-2 text-lg font-semibold text-foreground">10. Privacy &amp; Cookies</h2>
@@ -113,7 +114,7 @@ export default function LendingPolicyPage() {
             Your information — contact details, loan requests, and pickup history — is processed
             in line with South Africa&apos;s Protection of Personal Information Act (POPIA), and
             used only to run the lending service itself. It is not shared outside NWU IT Store
-            operations. Contact Jonathan Pritchard (see Enquiries above) with any question about your
+            operations. Email the address under Enquiries above with any question about your
             data.
           </p>
 

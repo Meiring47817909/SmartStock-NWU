@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { avatarInitials, avatarColorClass } from '@/lib/utils'
+import { ContactEmailLink } from '@/components/ContactEmailLink'
 import { LogOut, Package, ShoppingCart, ClipboardList, User as UserIcon } from 'lucide-react'
 
 function PortalShell({ children }: { children: React.ReactNode }) {
@@ -132,8 +133,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center">
         <h1 className="text-lg font-bold text-foreground">Your account has been deactivated</h1>
         <p className="max-w-[360px] text-sm text-muted-foreground">
-          Please contact Jonathan Pritchard at{' '}
-          <a href="mailto:Jonathan.Pritchard@nwu.ac.za" className="underline">Jonathan.Pritchard@nwu.ac.za</a>{' '}
+          Please contact <ContactEmailLink />{' '}
           for more information.
         </p>
         <Button variant="outline" onClick={handleSignOut}>Sign out</Button>

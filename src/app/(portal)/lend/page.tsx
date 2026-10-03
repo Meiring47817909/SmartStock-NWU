@@ -15,6 +15,7 @@ import { PortalPagination, paginateList, type PortalPageSize } from '@/component
 import ProductPreviewDialog from '@/components/products/ProductPreviewDialog'
 import { Package, Clock, Search, CalendarRange, Check } from 'lucide-react'
 import { toast } from 'sonner'
+import { ContactEmailLink } from '@/components/ContactEmailLink'
 import type { Product } from '@/types/database'
 
 export default function LendBrowsePage() {
@@ -152,7 +153,7 @@ export default function LendBrowsePage() {
         <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Browse Equipment</h1>
         <p className="max-w-2xl text-sm text-[#5B4F67]">
           Request equipment to borrow — Jonathan will review and confirm your pickup window at the Potchefstroom BICS IT Service Desk. For any enquiries, contact{' '}
-          <a href="mailto:Jonathan.Pritchard@nwu.ac.za" className="underline">Jonathan.Pritchard@nwu.ac.za</a>.
+          <ContactEmailLink />.
         </p>
       </div>
 
