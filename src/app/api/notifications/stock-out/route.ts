@@ -6,7 +6,7 @@ import { isMailEnabled, sendMail, MailUnreachableError, MailConfigError } from '
 import {
   stockOutConfirmationEmail, lowStockEmail, type StockOutEmailLine, type LowStockProduct,
 } from '@/lib/server/emailTemplates'
-import { deliver, appBaseUrl, adminInboxEmail, type SkipReason } from '@/lib/server/notificationDelivery'
+import { deliver, appBaseUrl, adminInboxEmail, fromHeaderFor, type SkipReason } from '@/lib/server/notificationDelivery'
 
 interface StepResult {
   sent: boolean
@@ -67,7 +67,7 @@ async function sendConfirmation(
     lendFrom: txn.lend_from ?? null,
     lendTo: txn.lend_to ?? null,
   })
-  await sendMail({ to: staffEmail, subject, html, text })
+  await sendMail({ to: staffEmail, subject, html, text, from: fromHeaderFor(settingsSnap.data()?.admin_notification_email) })
   return { sent: true }
 }
 

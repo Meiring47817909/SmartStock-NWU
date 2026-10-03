@@ -1278,16 +1278,17 @@ Ten more emails now go through the Mailpit mailer (see the Mailpit handoff for h
 
 **What sends, and when** (each is gated by its toggle on Settings → Notifications; only an explicit "off" stops it)
 - Staff member: loan request approved, countered, declined; approved pickup cancelled (admin cancels on the Dashboard); counter offer accepted, counter offer declined, request withdrawn (staff, in the portal).
-- Admin inbox (the "Admin notification email" on the same Settings page; skipped if blank): new loan request (staff submits), incoming pickup confirmed (request becomes accepted, either approved as-is or after the staff member accepts a counter), low stock (a Stock Out takes a product to or below its reorder threshold or to zero; one email lists all of them).
+- Admin inbox (the "System email address" on the same Settings page; skipped if blank): new loan request (staff submits), incoming pickup confirmed (request becomes accepted, either approved as-is or after the staff member accepts a counter), low stock (a Stock Out takes a product to or below its reorder threshold or to zero; one email lists all of them).
 - **Not built, always off:** loan request expired, overdue return alert, incoming pickup insufficient stock (they need a timer). The Settings page shows "Not implemented yet" and refuses to switch them on.
 
 **How it works**
 - Loan-request changes stay client-side as before. After one succeeds, the page calls `notifyLoanRequestEvent()` (`src/lib/firebase/notifyEvent.ts`) in the background; it posts `{ event, requestId, reason? }` to `POST /api/notifications/loan-request`, which re-reads the request, checks who is calling and that the request is in the right state, then sends. A failure shows "Saved, but the email couldn't be sent." and never undoes the action. Low stock is handled by the existing Stock Out route.
 - Duplicates are prevented by marker documents in the server-only `sent_notifications` collection (clients cannot read or write it). To make the app resend one email while testing, delete its marker in the emulator UI (http://localhost:4000, Firestore).
+- The Settings page's "System email address" is both the administrator inbox and the From address of every email the system sends (notifications, Stock Out confirmation, staff login reset). If it is blank or not a plain address it falls back to `MAIL_FROM`. The field is still stored as `admin_notification_email`.
 - Email buttons link to `APP_BASE_URL` (optional; default `http://localhost:3000`).
 - The cancel reason typed on the Dashboard is not stored on the request, so it travels with the notify call.
 
-**Try it** (Docker Desktop running, `npm install` done, `npm run mailpit`, then `npm run dev:emulators`; set the Admin notification email under Settings → Notifications first; read the mail at http://localhost:8025)
+**Try it** (Docker Desktop running, `npm install` done, `npm run mailpit`, then `npm run dev:emulators`; set the System email address under Settings → Notifications first; read the mail at http://localhost:8025)
 1. Portal: submit a request. Admin inbox gets "New loan request".
 2. Loan Requests: approve it as-is. Staff gets "approved", admin inbox gets "Pickup confirmed".
 3. Submit another and counter it. Staff gets "countered". In the portal accept it: staff gets "counter accepted" and the admin inbox "Pickup confirmed". Do it again and decline the counter: "counter declined".
@@ -1298,3 +1299,4 @@ Ten more emails now go through the Mailpit mailer (see the Mailpit handoff for h
 8. Turn one toggle off and repeat its action: no email.
 9. Try to switch on "Loan request expired": a "not implemented yet" message appears and it stays off.
 10. Stop Mailpit and approve a request: the toast "Saved, but the email couldn't be sent." appears and the request is still approved.
+11. Save a System email address, then trigger any email: Mailpit shows it From "SmartStock NWU" at that address. Clear the address and trigger one again: it falls back to the `MAIL_FROM` default.

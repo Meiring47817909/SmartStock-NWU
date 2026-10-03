@@ -13,6 +13,9 @@ export interface MailMessage {
   subject: string
   html: string
   text: string
+  // Overrides MAIL_FROM for this message (the system address saved on the
+  // Settings -> Notifications page).
+  from?: string
 }
 
 export interface SmtpConfig {
@@ -69,7 +72,7 @@ export async function sendMail(msg: MailMessage, env: NodeJS.ProcessEnv = proces
     greetingTimeout: 4000,
   })
   try {
-    await transport.sendMail({ from, to: msg.to, subject: msg.subject, html: msg.html, text: msg.text })
+    await transport.sendMail({ from: msg.from ?? from, to: msg.to, subject: msg.subject, html: msg.html, text: msg.text })
     return true
   } catch (err) {
     const code = (err as { code?: string }).code

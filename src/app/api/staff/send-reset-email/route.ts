@@ -6,6 +6,7 @@ import { sendPasswordResetEmail } from 'firebase/auth'
 import { ApiError, requireAdmin, findStaffDocOwningUid } from '@/lib/server/staffAdmin'
 import { isMailEnabled, sendMail, MailUnreachableError, MailConfigError } from '@/lib/server/mailer'
 import { loginEmail } from '@/lib/server/emailTemplates'
+import { systemFromAddress } from '@/lib/server/notificationDelivery'
 
 // Sends the "set your password" email. With the mailer on (local emulator
 // testing, MAIL_TRANSPORT=smtp) we build the reset link ourselves and send our
@@ -19,7 +20,7 @@ async function deliverLoginEmail(email: string, name: string): Promise<void> {
   try {
     const link = await adminAuth.generatePasswordResetLink(email)
     const { subject, html, text } = loginEmail({ name, link })
-    await sendMail({ to: email, subject, html, text })
+    await sendMail({ to: email, subject, html, text, from: await systemFromAddress() })
   } catch (err) {
     if (err instanceof MailUnreachableError) {
       throw new ApiError(502, 'Mail server not reachable. Is Mailpit running? (npm run mailpit)')

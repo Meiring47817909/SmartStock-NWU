@@ -144,13 +144,14 @@ export default function NotificationSettingsPage() {
         <>
           <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
             <CardHeader>
-              <CardTitle>Admin notification address</CardTitle>
+              <CardTitle>System email address</CardTitle>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSaveEmail} className="flex flex-col gap-2">
                 <p className="text-sm text-[#5B4F67]">
-                  Where the five &quot;Emails to Administrators&quot; below are actually delivered. Change this if
-                  administration duties move to someone else — nothing here needs the toggles below touched.
+                  This is the address SmartStock NWU uses for email. Emails to administrators are delivered to it,
+                  and every email the system sends comes from it. Change it if administration duties move to
+                  someone else — the toggles below do not need touching.
                 </p>
                 <div className="flex items-end gap-3">
                   <div className="grid flex-1 gap-1.5">
@@ -171,7 +172,7 @@ export default function NotificationSettingsPage() {
                 {emailError && <p className="text-sm text-red-600">{emailError}</p>}
                 {!savedAdminEmail && !emailError && (
                   <p className="text-sm text-[#5B4F67]">
-                    Not set yet — the five emails below have nowhere to go until an address is saved here.
+                    Not set yet — administrator emails have nowhere to go until an address is saved here.
                   </p>
                 )}
               </form>
