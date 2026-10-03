@@ -1,5 +1,6 @@
 import 'server-only'
 import nodemailer from 'nodemailer'
+import { DEFAULT_SYSTEM_EMAIL } from '@/lib/notificationCatalog'
 
 // Env-switched SMTP mailer. Nothing is sent unless MAIL_TRANSPORT=smtp, which
 // only the `dev:emulators` script sets (pointing at a local Mailpit). With it
@@ -29,7 +30,7 @@ export class MailConfigError extends Error {}
 // The SMTP server could not be reached (refused or timed out).
 export class MailUnreachableError extends Error {}
 
-const DEFAULT_FROM = 'SmartStock NWU <no-reply@smartstock.local>'
+const DEFAULT_FROM = `SmartStock NWU <${DEFAULT_SYSTEM_EMAIL}>`
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 const UNREACHABLE_CODES = new Set(['ECONNECTION', 'ETIMEDOUT', 'ESOCKET'])
 

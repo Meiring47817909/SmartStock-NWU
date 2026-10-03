@@ -17,6 +17,7 @@ import {
   saveSystemFromEmail,
   type NotificationEmailDefinition,
 } from '@/lib/firebase/notificationSettings'
+import { DEFAULT_SYSTEM_EMAIL } from '@/lib/notificationCatalog'
 import type { NotificationSettingKey } from '@/types/database'
 
 function NotificationRow({
@@ -84,8 +85,9 @@ export default function NotificationSettingsPage() {
         setSettings(toggles)
         setAdminEmail(email)
         setSavedAdminEmail(email)
-        setSystemEmail(systemFrom)
-        setSavedSystemEmail(systemFrom)
+        // Nothing saved -> show the default sender, which is what emails use.
+        setSystemEmail(systemFrom || DEFAULT_SYSTEM_EMAIL)
+        setSavedSystemEmail(systemFrom || DEFAULT_SYSTEM_EMAIL)
       })
       .catch(() => setError('Could not load notification settings.'))
   }, [])
@@ -118,8 +120,9 @@ export default function NotificationSettingsPage() {
         uid: user?.uid,
         name: profile?.full_name ?? user?.email,
       })
-      setSystemEmail(trimmed)
-      setSavedSystemEmail(trimmed)
+      // Clearing the field and saving goes back to the default sender.
+      setSystemEmail(trimmed || DEFAULT_SYSTEM_EMAIL)
+      setSavedSystemEmail(trimmed || DEFAULT_SYSTEM_EMAIL)
     } catch (err) {
       setSystemError(err instanceof Error ? err.message : 'Failed to save that change — try again.')
     }
@@ -178,8 +181,9 @@ export default function NotificationSettingsPage() {
             <CardContent>
               <form onSubmit={handleSaveEmail} className="flex flex-col gap-2">
                 <p className="text-sm text-[#5B4F67]">
-                  Where the five &quot;Emails to Administrators&quot; below are actually delivered. Change this if
-                  administration duties move to someone else — nothing here needs the toggles below touched.
+                  Where the five &quot;Emails to Administrators&quot; below are delivered. Change this if
+                  administration duties move to someone else — the toggles below stay as they are and will send
+                  to the new address.
                 </p>
                 <div className="flex items-end gap-3">
                   <div className="grid flex-1 gap-1.5">
@@ -232,7 +236,7 @@ export default function NotificationSettingsPage() {
               <form onSubmit={handleSaveSystemEmail} className="flex flex-col gap-2">
                 <p className="text-sm text-[#5B4F67]">
                   The address SmartStock NWU sends every email from — loan request emails, Stock Out
-                  confirmations and staff login emails. Leave it blank to use the default sender.
+                  confirmations and staff login emails.
                 </p>
                 <div className="flex items-end gap-3">
                   <div className="grid flex-1 gap-1.5">
@@ -243,7 +247,7 @@ export default function NotificationSettingsPage() {
                       className="border-slate-300 bg-white text-slate-700 focus-visible:border-[#8046B5] focus-visible:ring-[#8046B5]/50"
                       value={systemEmail}
                       onChange={(e) => setSystemEmail(e.target.value)}
-                      placeholder="no-reply@nwu.ac.za"
+                      placeholder={DEFAULT_SYSTEM_EMAIL}
                     />
                   </div>
                   <Button type="submit" disabled={savingSystem || systemEmail.trim() === savedSystemEmail.trim()} className="h-8 rounded-lg bg-primary px-5 text-sm font-medium text-white shadow-sm hover:bg-[#582e78]">
@@ -251,11 +255,6 @@ export default function NotificationSettingsPage() {
                   </Button>
                 </div>
                 {systemError && <p className="text-sm text-red-600">{systemError}</p>}
-                {!savedSystemEmail && !systemError && (
-                  <p className="text-sm text-[#5B4F67]">
-                    Not set yet — emails are sent from the default sender.
-                  </p>
-                )}
               </form>
             </CardContent>
           </Card>

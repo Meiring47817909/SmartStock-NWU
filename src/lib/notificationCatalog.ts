@@ -38,3 +38,8 @@ export const UNIMPLEMENTED_NOTIFICATIONS: ReadonlySet<NotificationSettingKey> = 
 export function isNotificationImplemented(key: NotificationSettingKey): boolean {
   return !UNIMPLEMENTED_NOTIFICATIONS.has(key)
 }
+
+// The sender address used when no system sending address has been saved.
+// The server's default From header and the Settings page both use this, so
+// the field on the page always shows the address emails really come from.
+export const DEFAULT_SYSTEM_EMAIL = 'no-reply@smartstock.local'
