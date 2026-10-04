@@ -390,17 +390,34 @@ describe('updateOwnDetails / syncOwnEmail (My Profile)', () => {
     )
   })
 
-  it('syncOwnEmail updates the caller\'s own row email only; an email another row has is a 409', async () => {
-    const row = await syncOwnEmail(ctxAs(sam), ' New@NWU.test ')
+  // What Firebase Auth says each uid's email really is.
+  let authEmails: Record<string, string> = {}
+  beforeEach(() => {
+    authEmails = { 'sam-uid': 'New@nwu.test', 'admin-uid': 'ada@nwu.test' }
+  })
+  const authEmailOf = async (uid: string) => authEmails[uid] ?? null
+
+  it('syncOwnEmail updates the caller\'s own row with their real Auth email (any letter case); another row\'s email is a 409', async () => {
+    const row = await syncOwnEmail(ctxAs(sam), ' new@NWU.test ', authEmailOf)
     expect(row).toMatchObject({ id: 'staff-1', email: 'new@nwu.test', updated_at: NOW.toISOString() })
-    await expectDataError(syncOwnEmail(ctxAs(sam), 'BO@nwu.test'), 409, 'This email is already used by Bo Rrower.')
+    authEmails['sam-uid'] = 'BO@nwu.test'
+    await expectDataError(syncOwnEmail(ctxAs(sam), 'BO@nwu.test', authEmailOf), 409, 'This email is already used by Bo Rrower.')
     const [other] = await db.select().from(staff).where(eq(staff.id, 'staff-2'))
     expect(other.email).toBe('bo@nwu.test')
   })
 
+  it('syncOwnEmail refuses an email that is not the caller\'s Auth email (403) and leaves the row unchanged', async () => {
+    await expectDataError(syncOwnEmail(ctxAs(sam), 'anything@else.test', authEmailOf), 403, 'You can only sync your own login email.')
+    // Auth knows no email for the caller either: refused.
+    await expectDataError(syncOwnEmail(ctxAs(sam), 'sam@nwu.test', async () => null), 403, 'You can only sync your own login email.')
+    const [row] = await db.select().from(staff).where(eq(staff.id, 'staff-1'))
+    expect(row.email).toBe('sam@nwu.test')
+    expect(row.updated_at.getTime()).not.toBe(NOW.getTime())
+  })
+
   it('syncOwnEmail with no staff row is a no-op (null), like the page when no record was found', async () => {
     await db.delete(staff).where(eq(staff.id, 'staff-1'))
-    expect(await syncOwnEmail(ctxAs(sam), 'x@y.z')).toBeNull()
+    expect(await syncOwnEmail(ctxAs(sam), 'new@nwu.test', authEmailOf)).toBeNull()
   })
 })
 

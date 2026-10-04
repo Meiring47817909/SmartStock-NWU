@@ -3,6 +3,7 @@ import { and, asc, eq, ne, sql } from 'drizzle-orm'
 import { assertAdmin, assertStaffSelf, DataError, type Ctx } from '@/server/context'
 import { toIso, withTx, type Db } from '@/server/db/client'
 import { newId } from '@/server/db/ids'
+import { pgError } from '@/server/db/pgError'
 import { returnWaivers, staff, transactionLines, transactions } from '@/server/db/schema'
 import { writeAudit } from '@/server/data/audit'
 import { setOwnProfileName } from '@/server/data/profiles'
@@ -30,17 +31,6 @@ const NOT_FOUND = 'Staff record not found.'
 /** Run `fn` in a transaction on the caller's connection (a savepoint when `ctx.db` is already a transaction). */
 function inTx<T>(ctx: Ctx, fn: (txCtx: Ctx) => Promise<T>): Promise<T> {
   return withTx(ctx.db as Db, (tx) => fn({ ...ctx, db: tx }))
-}
-
-/** The PostgreSQL error behind a driver/Drizzle error (Drizzle wraps the driver's error in `cause`). */
-function pgError(err: unknown): { code?: string; constraint?: string } | null {
-  let cur: unknown = err
-  for (let i = 0; i < 4 && cur && typeof cur === 'object'; i++) {
-    const e = cur as { code?: unknown; constraint?: string; cause?: unknown }
-    if (typeof e.code === 'string' && /^[0-9A-Z]{5}$/.test(e.code)) return { code: e.code, constraint: e.constraint }
-    cur = e.cause
-  }
-  return null
 }
 
 function mapStaff(row: StaffRow): StaffOut {
@@ -382,14 +372,22 @@ export async function updateOwnDetails(ctx: Ctx, input: OwnDetailsInput): Promis
 }
 
 /**
- * Keep the caller's own staff record's email in step with their Auth account after a confirmed email change.
- * Null (nothing changed) when they have no staff record.
+ * Keep the caller's own staff record's email in step with their Firebase Auth account after a confirmed email change.
+ * `authEmailOf(uid)` returns the account's real, current email (the route looks it up with Firebase Admin: the ID token's
+ * own claim can be stale right after a change); anything other than that email is refused with 403, so a signed-in user
+ * can't point their row at an arbitrary address. Null (nothing changed) when they have no staff record.
  */
-export async function syncOwnEmail(ctx: Ctx, email: string): Promise<StaffOut | null> {
+export async function syncOwnEmail(
+  ctx: Ctx,
+  email: string,
+  authEmailOf: (uid: string) => Promise<string | null | undefined>,
+): Promise<StaffOut | null> {
   const uid = ctx.caller.uid
   if (!uid) throw new DataError(403, 'You can only do this for your own staff record.')
   const normalized = normalizeEmail(email ?? '')
   if (!normalized) throw new DataError(400, 'Email is required.')
+  const authEmail = await authEmailOf(uid)
+  if (!authEmail || normalizeEmail(authEmail) !== normalized) throw new DataError(403, 'You can only sync your own login email.')
   try {
     return await inTx(ctx, async (c) => {
       const [own] = await c.db.select().from(staff).where(eq(staff.uid, uid)).limit(1)

@@ -162,6 +162,13 @@ describe('/api/staff and /api/staff/[id]', () => {
     expect(res.body).toMatchObject({ id: 'staff-1', full_name: 'Samuel Staff', department: 'Art' })
     const [p] = await db.select().from(profiles).where(eq(profiles.uid, 'sam-uid'))
     expect(p.full_name).toBe('Samuel Staff')
+    // The address must be the one Firebase Auth has for the caller.
+    fb.users.set('sam.old@nwu.test', { uid: 'sam-uid', email: 'sam.old@nwu.test' })
+    const refused = await json(await staffPOST(request('POST', '/api/staff', 'sam-uid', { action: 'syncOwnEmail', email: 'evil@nwu.test' })))
+    expect(refused).toEqual({ status: 403, body: { error: 'You can only sync your own login email.' } })
+    expect((await db.select().from(staff).where(eq(staff.id, 'staff-1')))[0].email).toBe('sam@nwu.test')
+    fb.users.clear()
+    fb.users.set('sam.new@nwu.test', { uid: 'sam-uid', email: 'sam.new@nwu.test' })
     const sync = await json(await staffPOST(request('POST', '/api/staff', 'sam-uid', { action: 'syncOwnEmail', email: 'Sam.New@nwu.test' })))
     expect(sync.body).toMatchObject({ id: 'staff-1', email: 'sam.new@nwu.test' })
   })

@@ -17,7 +17,13 @@ import type { OwnDetailsInput, StaffInput } from '@/lib/staffRules'
 //   GET  /api/staff?kind=holdings                                 → { [staffId]: { outstanding, items } }  (admin)
 //   POST /api/staff { action: 'create', ...StaffInput }           → StaffMember                    (admin)
 //   POST /api/staff { action: 'updateOwn', ...OwnDetailsInput }   → StaffMember   (the caller's own row; creates it for an admin)
-//   POST /api/staff { action: 'syncOwnEmail', email }             → StaffMember | null
+//   POST /api/staff { action: 'syncOwnEmail', email }             → StaffMember | null   (403 unless it is the caller's Firebase Auth email)
+// The account's real email from Firebase Auth. Loaded on demand so importing this route never initialises Firebase Admin.
+async function authEmailOf(uid: string): Promise<string | null> {
+  const { adminAuth } = await import('@/lib/firebase/admin')
+  return (await adminAuth.getUser(uid)).email ?? null
+}
+
 type Query = { kind?: string; includeAdminAccount?: string; email?: string; excludeId?: string }
 type Body = { action?: string; email?: string } & Partial<StaffInput> & Partial<OwnDetailsInput>
 
@@ -43,7 +49,7 @@ export const POST = route<Body>('signed-in', async (ctx, body) => {
     case 'updateOwn':
       return updateOwnDetails(ctx, input as OwnDetailsInput)
     case 'syncOwnEmail':
-      return syncOwnEmail(ctx, String(input.email ?? ''))
+      return syncOwnEmail(ctx, String(input.email ?? ''), authEmailOf)
     default:
       throw new DataError(400, 'Unknown action.')
   }

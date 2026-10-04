@@ -3,6 +3,7 @@ import { and, asc, count, eq, inArray, ne, sql } from 'drizzle-orm'
 import { assertAdmin, DataError, type Ctx } from '@/server/context'
 import { toIso, withTx, type Db } from '@/server/db/client'
 import { newId } from '@/server/db/ids'
+import { pgError } from '@/server/db/pgError'
 import {
   categories,
   LENDING_INTERVALS,
@@ -41,17 +42,6 @@ const DEFAULT_LOCATION = 'NWU - Potchefstroom, Building G4, Room 28' // same def
 /** Run `fn` in a transaction on the caller's connection (a savepoint when `ctx.db` is already a transaction). */
 function inTx<T>(ctx: Ctx, fn: (txCtx: Ctx) => Promise<T>): Promise<T> {
   return withTx(ctx.db as Db, (tx) => fn({ ...ctx, db: tx }))
-}
-
-/** The PostgreSQL error behind a driver/Drizzle error (Drizzle wraps the driver's error in `cause`). */
-function pgError(err: unknown): { code?: string; constraint?: string; detail?: string } | null {
-  let cur: unknown = err
-  for (let i = 0; i < 4 && cur && typeof cur === 'object'; i++) {
-    const e = cur as { code?: unknown; constraint?: string; detail?: string; cause?: unknown }
-    if (typeof e.code === 'string' && /^[0-9A-Z]{5}$/.test(e.code)) return { code: e.code, constraint: e.constraint, detail: e.detail }
-    cur = e.cause
-  }
-  return null
 }
 
 // --- Row mapping -------------------------------------------------------------
