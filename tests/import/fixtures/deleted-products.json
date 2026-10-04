@@ -1,0 +1,30 @@
+{
+  "_comment": "Merged onto one-per-collection.json: history of two products that were deleted in Firestore. p-gone has a product delete audit entry (as the old Products page wrote it); p-nolog has none.",
+  "db": {
+    "audit_log": {
+      "a-del-gone": {
+        "user_id": "admin-uid", "user_name": "Ada Admin", "action": "delete", "entity_type": "product", "entity_id": "p-gone",
+        "before": {
+          "name": "Cordless Drill", "barcodes": ["GONE-1", "P1-PRIMARY"], "category_id": "c1", "category_name": "Cables & Adapters",
+          "description": "18V", "quantity_on_hand": 2, "reorder_threshold": 3, "available": true, "location": "Shelf 9"
+        },
+        "after": null,
+        "created_at": "2026-09-28T08:00:00.000Z"
+      }
+    },
+    "transaction_lines": {
+      "l-gone-out": { "transaction_id": "z-out", "product_id": "p-gone", "quantity": 1, "unit_cost": 0, "product_name": "Cordless Drill", "barcode": "GONE-1", "created_at": "2026-09-20T08:00:00.003Z" },
+      "l-nolog": { "transaction_id": "m-in", "product_id": "p-nolog", "quantity": 4, "unit_cost": 0, "product_name": "Mystery Cable", "barcode": "MYST-1", "created_at": "2026-09-10T08:00:00.001Z" }
+    },
+    "loan_request_lines": {
+      "lc": { "request_id": "r1", "product_id": "p-gone", "product_name": "Cordless Drill", "requested_quantity": 1, "offered_quantity": 1, "created_at": "2026-09-18T08:00:00.000Z" },
+      "ld": { "request_id": "r1", "product_id": "p-nolog", "product_name": "Mystery Cable", "requested_quantity": 1, "offered_quantity": 1, "created_at": "2026-09-18T08:00:00.001Z" }
+    },
+    "return_waivers": {
+      "w-gone": {
+        "transaction_id": "z-out", "product_id": "p-gone", "product_name": "Cordless Drill", "staff_id": "s1", "staff_name": "Sam Staff",
+        "quantity": 1, "reason": null, "created_at": "2026-09-27T08:00:00.000Z", "resolved_by_uid": "admin-uid", "resolved_by_name": "Ada Admin"
+      }
+    }
+  }
+}

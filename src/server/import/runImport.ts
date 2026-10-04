@@ -1,6 +1,6 @@
 import 'server-only'
-import { count, getTableName, sql } from 'drizzle-orm'
-import type { PgTable } from 'drizzle-orm/pg-core'
+import { count, getTableName, max, sql } from 'drizzle-orm'
+import type { AnyPgColumn, PgTable } from 'drizzle-orm/pg-core'
 import { withTx, type Db, type Tx } from '@/server/db/client'
 import {
   auditLog,
@@ -24,7 +24,13 @@ import type { ImportPlan, ImportRows, ImportTableName } from '@/server/import/ma
 //   - A plan with any problem is refused before a connection is used.
 //   - Without `replace`, the app tables are locked (EXCLUSIVE: reads go on, writes wait) and must all be empty, or the
 //     import is refused; the lock makes "checked empty" still true when the rows go in.
-//   - With `replace`, the app tables are TRUNCATEd inside the same transaction, so a failure later restores them.
+//   - With `replace`, the app tables are TRUNCATEd inside the same transaction, so a failure later restores them. Two
+//     guards come first, because a target that merely looks local (Cloud SQL through the Auth Proxy on 127.0.0.1) could
+//     otherwise be emptied by a mistyped re-run after go-live:
+//       (a) `confirmDatabase` must equal current_database() on the connection;
+//       (b) no app table may hold a row created after the newest created_at in the plan: such a row exists only in
+//           PostgreSQL (entered after cut-over) and would be lost. Every save in the app writes an audit entry, so an
+//           edit after cut-over is caught by audit_log even when it creates no other row.
 //   - Any failing insert (or a final count that doesn't match the plan) throws, and the whole transaction rolls back:
 //     the database is left exactly as it was.
 //
@@ -97,7 +103,26 @@ async function countAll(tx: Tx | Db): Promise<ImportCounts> {
   return out
 }
 
-export async function runImport(db: Db, plan: ImportPlan, opts: { replace: boolean }): Promise<ImportCounts> {
+/** The newest created_at among the plan's rows (null for an empty plan). */
+export function newestPlannedCreatedAt(plan: ImportPlan): Date | null {
+  let newest: Date | null = null
+  for (const rows of Object.values(plan.rows) as Record<string, unknown>[][]) {
+    for (const row of rows) {
+      const at = row.created_at
+      if (at instanceof Date && (newest === null || at > newest)) newest = at
+    }
+  }
+  return newest
+}
+
+export interface RunImportOptions {
+  /** Empty the app tables first (in the same transaction). */
+  replace: boolean
+  /** Required with `replace`: the name of the database being replaced, which must equal current_database(). */
+  confirmDatabase?: string
+}
+
+export async function runImport(db: Db, plan: ImportPlan, opts: RunImportOptions): Promise<ImportCounts> {
   if (plan.problems.length > 0) {
     throw new ImportRefusedError(`The plan has ${plural(plan.problems.length, 'problem')}: fix them in Firestore and plan again. Nothing was written.`)
   }
@@ -108,6 +133,27 @@ export async function runImport(db: Db, plan: ImportPlan, opts: { replace: boole
 
   return withTx(db, async (tx) => {
     if (opts.replace) {
+      await tx.execute(sql.raw(`lock table ${tableList} in exclusive mode`))
+      const current = ((await tx.execute(sql`select current_database() as name`)).rows[0] as { name: string }).name
+      if (opts.confirmDatabase !== current) {
+        throw new ImportRefusedError(
+          `Refusing to replace: the target database is "${current}", and replacing it needs that name confirmed ` +
+            `(${opts.confirmDatabase === undefined ? 'none was given' : `"${opts.confirmDatabase}" was given`}). Nothing was written.`,
+        )
+      }
+      const newest = newestPlannedCreatedAt(plan)
+      for (const [name, table] of Object.entries(IMPORT_TABLES)) {
+        if (!('created_at' in table)) continue
+        const [row] = await tx.select({ at: max((table as unknown as { created_at: AnyPgColumn }).created_at) }).from(table)
+        const at = row.at as Date | null
+        if (at !== null && (newest === null || at > newest)) {
+          throw new ImportRefusedError(
+            `Refusing to replace: ${name} has a row created ${at.toISOString()}, after the newest record being imported ` +
+              `(${newest?.toISOString() ?? 'none'}). Rows like that exist only in PostgreSQL (entered after cut-over?) ` +
+              'and would be lost. Nothing was written.',
+          )
+        }
+      }
       await tx.execute(sql.raw(`truncate table ${tableList}`))
     } else {
       await tx.execute(sql.raw(`lock table ${tableList} in exclusive mode`))

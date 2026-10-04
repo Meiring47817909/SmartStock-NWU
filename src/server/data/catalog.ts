@@ -37,7 +37,7 @@ export type ProductOut = Omit<Product, 'id'> & { id: string }
 
 const ID_PATTERN = /^[A-Za-z0-9]{20}$/
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
-const DEFAULT_LOCATION = 'NWU - Potchefstroom, Building G4, Room 28' // same default the Products page falls back to
+export const DEFAULT_LOCATION = 'NWU - Potchefstroom, Building G4, Room 28' // same default the Products page falls back to (and the importer)
 
 /** Run `fn` in a transaction on the caller's connection (a savepoint when `ctx.db` is already a transaction). */
 function inTx<T>(ctx: Ctx, fn: (txCtx: Ctx) => Promise<T>): Promise<T> {

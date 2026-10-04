@@ -23,8 +23,9 @@ import {
   transactions,
 } from '@/server/db/schema'
 import {
-  firestoreSource,
+  INT4_MAX,
   memorySource,
+  readFirestoreSnapshot,
   planImport,
   type FirestoreState,
   type ImportPlan,
@@ -48,6 +49,13 @@ const FIXTURES = path.resolve(__dirname, 'fixtures')
 const load = (name: string): FirestoreState => JSON.parse(readFileSync(path.join(FIXTURES, name), 'utf8')).db
 const ONE = load('one-per-collection.json')
 const one = (): FirestoreState => structuredClone(ONE)
+/** one-per-collection plus the history of two products deleted in Firestore (p-gone has a delete audit entry, p-nolog not). */
+const withDeleted = (): FirestoreState => {
+  const state = one()
+  for (const [collection, docs] of Object.entries(load('deleted-products.json'))) Object.assign((state[collection] ??= {}), structuredClone(docs))
+  return state
+}
+const DEFAULT_LOCATION = 'NWU - Potchefstroom, Building G4, Room 28'
 const planOf = (state: FirestoreState) => planImport(memorySource(state), { now: new Date('2026-10-04T12:00:00.000Z') })
 
 let db: Db
@@ -220,9 +228,12 @@ describe('problems block the write', () => {
     const state = one()
     state.transaction_lines['l-x'].product_id = 'deleted-product'
     const plan = await planOf(state)
-    expect(problemTexts(plan)).toEqual(['transaction_lines/l-x: product_id "deleted-product" is not in products'])
+    expect(problemTexts(plan)).toEqual([
+      'products/deleted-product: missing product ("HDMI Cable 2m") is still referenced by 1 transaction line, 0 loan request lines and 0 waivers; ' +
+        'there is no delete entry for it in the audit log, so it cannot be restored automatically',
+    ])
     await expect(runImport(db, plan, { replace: false })).rejects.toThrow(ImportRefusedError)
-    await expect(runImport(db, plan, { replace: true })).rejects.toThrow(/1 problem/)
+    await expect(runImport(db, plan, { replace: true, confirmDatabase: 'smartstock_test' })).rejects.toThrow(/1 problem/)
     expect(await tableCounts()).toEqual(allZero)
     // fixed in Firestore -> imports
     state.transaction_lines['l-x'].product_id = 'p1'
@@ -304,18 +315,78 @@ describe('problems block the write', () => {
     state.transaction_lines['l-i'].quantity = 0
     state.loan_request_lines.lb.requested_quantity = 1.5
     state.categories.c1.name = 42
-    delete state.loan_requests.r1.original_from_date
+    delete state.loan_requests.r1.staff_name
     state.audit_log.a1.after = 'not an object'
+    delete state.staff['s-admin'].updated_at // no old reading: never guessed
+    delete state.transaction_lines['l-x'].unit_cost
     const plan = await planOf(state)
     expect(problemTexts(plan).sort()).toEqual([
       'audit_log/a1: after should be a map or null, found string',
       'categories/c1: name should be text, found number',
       'loan_request_lines/lb: requested_quantity should be a whole number, found 1.5',
-      'loan_requests/r1: original_from_date is missing',
+      'loan_requests/r1: staff_name is missing',
       'products/p1: quantity_on_hand should be at least 0, found -1',
+      'staff/s-admin: updated_at is missing',
       'staff/s1: surname is missing',
       'transaction_lines/l-i: quantity should be at least 1, found 0',
+      'transaction_lines/l-x: unit_cost is missing',
     ])
+  })
+
+  it('a NUL character in any text or JSON value, and a whole number above the int4 range, are problems (not database errors)', async () => {
+    const state = one()
+    state.categories.c1.description = 'USB\u0000HDMI'
+    state.products.p1.quantity_on_hand = INT4_MAX + 1
+    state.products.p1.barcodes = ['P1-PRIMARY', 'P1\u0000X']
+    state.audit_log.a1.after = { note: 'x\u0000y' }
+    state.settings.notifications.admin_notification_email = 'a\u0000@b.c'
+    state.transaction_lines['l-i'].quantity = 2 ** 31
+    state.staff.s1.surname = 'St\u0000aff'
+    const plan = await planOf(state)
+    expect(problemTexts(plan).sort()).toEqual([
+      'audit_log/a1: after.note contains a NUL character, which PostgreSQL cannot store',
+      'categories/c1: description contains a NUL character, which PostgreSQL cannot store',
+      'products/p1: barcodes contains a NUL character, which PostgreSQL cannot store',
+      'products/p1: quantity_on_hand is 2147483648, more than the column can hold (2147483647)',
+      'settings/notifications: value.admin_notification_email contains a NUL character, which PostgreSQL cannot store',
+      'staff/s1: surname contains a NUL character, which PostgreSQL cannot store',
+      'transaction_lines/l-i: quantity is 2147483648, more than the column can hold (2147483647)',
+    ])
+    expect(INT4_MAX).toBe(2 ** 31 - 1)
+  })
+
+  it("legacy documents lacking a NOT NULL field get the old app's reading of it, with a warning", async () => {
+    const state = one()
+    for (const f of ['location', 'available', 'quantity_on_hand', 'reorder_threshold', 'images']) delete state.products.p1[f]
+    delete state.profiles['admin-uid'].role
+    delete state.staff.s1.is_active
+    delete state.loan_requests.r1.original_from_date
+    delete state.loan_request_lines.lb.requested_quantity
+    delete state.loan_request_lines.lb.offered_quantity
+    const plan = await planOf(state)
+    expect(plan.problems).toEqual([])
+    expect(plan.rows.products.find((p) => p.id === 'p1')).toMatchObject({
+      location: DEFAULT_LOCATION, available: true, quantity_on_hand: 0, reorder_threshold: 0, images: [],
+    })
+    expect(plan.rows.profiles[0].role).toBe('staff')
+    expect(plan.rows.staff.find((x) => x.id === 's1')?.is_active).toBe(false)
+    expect(plan.rows.loan_requests[0].original_from_date).toBe('2026-09-20')
+    expect(plan.rows.loan_request_lines.find((l) => l.id === 'lb')).toMatchObject({ requested_quantity: 0, offered_quantity: 0 })
+    const said = (collection: string, id: string, field: string, value: unknown) =>
+      expect(plan.warnings).toContainEqual({ collection, id, problem: `${field} is missing; imported as ${JSON.stringify(value)}, as the old app read it` })
+    said('products', 'p1', 'location', DEFAULT_LOCATION)
+    said('products', 'p1', 'available', true)
+    said('products', 'p1', 'quantity_on_hand', 0)
+    said('products', 'p1', 'reorder_threshold', 0)
+    said('products', 'p1', 'images', [])
+    said('profiles', 'admin-uid', 'role', 'staff')
+    said('staff', 's1', 'is_active', false)
+    said('loan_requests', 'r1', 'original_from_date', '2026-09-20')
+    said('loan_request_lines', 'lb', 'requested_quantity', 0)
+    said('loan_request_lines', 'lb', 'offered_quantity', 0)
+    // and is_admin_account, absent on every ordinary staff record by design, is read as false without a warning
+    expect(plan.rows.staff.find((x) => x.id === 's1')?.is_admin_account).toBe(false)
+    expect(plan.warnings.some((w) => w.problem.includes('is_admin_account'))).toBe(false)
   })
 
   it('a loop of linked transactions is a problem (it can never be inserted)', async () => {
@@ -385,15 +456,21 @@ describe('timestamps and dates', () => {
 })
 
 describe('what is reported but not imported', () => {
-  it('reports collections the app no longer has, and settings documents it does not read', async () => {
+  it('reports collections the app no longer has, and imports every settings document under its own key', async () => {
     const state = one()
     state.old_reports = { x1: { a: 1 }, x2: { a: 2 } }
-    state.settings.branding = { colour: 'purple' }
+    state.settings.branding = { colour: 'purple', updated_at: '2026-09-03T08:00:00.000Z' }
+    state.settings.legacy_flags = { beta: true }
     const plan = await planOf(state)
     expect(plan.problems).toEqual([])
     expect(plan.notImported).toEqual([{ collection: 'old_reports', documents: 2 }])
-    expect(plan.warnings).toContainEqual({ collection: 'settings', id: 'branding', problem: 'settings document "branding" is not read by the app; not imported' })
-    expect(plan.rows.settings.map((s) => s.key)).toEqual(['notifications'])
+    expect(plan.rows.settings.map((x) => x.key)).toEqual(['branding', 'legacy_flags', 'notifications'])
+    expect(plan.rows.settings[0]).toEqual({ key: 'branding', value: { colour: 'purple' }, updated_at: new Date('2026-09-03T08:00:00.000Z') })
+    expect(plan.rows.settings[1]).toEqual({ key: 'legacy_flags', value: { beta: true }, updated_at: new Date('2026-10-04T12:00:00.000Z') })
+    expect(plan.warnings).toContainEqual({ collection: 'settings', id: 'legacy_flags', problem: 'updated_at is missing; set to the time of the import' })
+    db = await resetTestDb()
+    await runImport(db, plan, { replace: false })
+    expect(await getSettingsRow(db, 'branding')).toEqual({ colour: 'purple' })
   })
 
   it('warns once per field the app has no column for, and about the legacy barcode it supersedes', async () => {
@@ -455,7 +532,7 @@ describe('what is reported but not imported', () => {
     const plan = await planOf(state)
     expect(plan.problems).toEqual([])
     expect(plan.rows.profiles[0].uid).toBe('admin-uid')
-    expect(plan.warnings).toEqual([{ collection: 'profiles', id: 'admin-uid', problem: 'id field "someone-else" differs from the document id; the document id is the uid' }])
+    expect(plan.warnings).toContainEqual({ collection: 'profiles', id: 'admin-uid', problem: 'id field "someone-else" differs from the document id; the document id is the uid' })
   })
 
   it('works with a source that cannot list collections (it then only reads the known ones)', async () => {
@@ -467,27 +544,94 @@ describe('what is reported but not imported', () => {
     expect(plan.rows.transactions).toHaveLength(3)
   })
 
-  it('reads the source strictly through list/get: a Firestore stand-in that throws on anything else is enough', async () => {
+  it('reads live Firestore in ONE read-only transaction, through nothing but listCollections, collection() and tx.get()', async () => {
     const calls: string[] = []
-    const forbid = (what: string) => () => { throw new Error(`write-capable call ${what}`) }
-    const fakeFirestore = {
-      listCollections: async () => { calls.push('listCollections'); return Object.keys(ONE).map((id) => ({ id })) },
-      collection: (name: string) =>
-        new Proxy({}, {
-          get: (_t, prop) => {
-            if (prop === 'get') return async () => {
-              calls.push(`get ${name}`)
-              return { docs: Object.entries(ONE[name] ?? {}).map(([id, data]) => ({ id, data: () => structuredClone(data) })) }
-            }
-            return forbid(`${name}.${String(prop)}`)
-          },
-        }),
+    const transactions: unknown[] = []
+    const state: FirestoreState = { ...one(), old_reports: { x1: { a: 1 } } }
+    const forbid = (where: string) => (_t: object, prop: string | symbol) => {
+      throw new Error(`write-capable or unexpected access ${where}.${String(prop)}`)
     }
-    const plan = await planImport(firestoreSource(fakeFirestore as never), { now: new Date() })
+    const allow = <T extends object>(where: string, allowed: T) =>
+      new Proxy(allowed, { get: (t, prop) => (prop in t ? t[prop as keyof T] : forbid(where)(t, prop)) })
+    const fakeFirestore = allow('firestore', {
+      listCollections: async () => {
+        calls.push('listCollections')
+        return Object.keys(state).map((id) => ({ id }))
+      },
+      collection: (name: string) => allow(`collection(${name})`, { name } as never),
+      runTransaction: async (fn: (tx: unknown) => Promise<unknown>, options: unknown) => {
+        transactions.push(options)
+        const tx = allow('tx', {
+          get: async (ref: { name: string }) => {
+            calls.push(`tx.get ${ref.name}`)
+            return { docs: Object.entries(state[ref.name] ?? {}).map(([id, data]) => ({ id, data: () => structuredClone(data) })) }
+          },
+        })
+        return fn(tx)
+      },
+    })
+    const source = await readFirestoreSnapshot(fakeFirestore as never)
+    const plan = await planImport(source, { now: new Date() })
+    expect(transactions).toEqual([{ readOnly: true }])
+    expect(calls[0]).toBe('listCollections')
+    expect(calls.slice(1).every((c) => c.startsWith('tx.get '))).toBe(true)
+    expect(calls).toContain('tx.get transactions')
+    expect(calls).toContain('tx.get old_reports')
     expect(plan.problems).toEqual([])
-    expect(calls.filter((c) => c === 'listCollections')).toHaveLength(1)
-    expect(calls.filter((c) => c !== 'listCollections').every((c) => c.startsWith('get '))).toBe(true)
-    expect(calls).toContain('get transactions')
+    expect(plan.rows.transactions).toHaveLength(3)
+    expect(plan.notImported).toEqual([{ collection: 'old_reports', documents: 1 }])
+  })
+})
+
+describe('deleted products that history still points at', () => {
+  it('are grouped into one problem per product id, naming the frozen names, the counts and the delete entry', async () => {
+    const plan = await planOf(withDeleted())
+    expect(problemTexts(plan)).toEqual([
+      'products/p-gone: missing product ("Cordless Drill") is still referenced by 1 transaction line, 1 loan request line and 1 waiver; ' +
+        'deleted 2026-09-28T08:00:00.000Z by Ada Admin (audit entry a-del-gone); --restore-deleted-products would restore it as an unavailable product with 0 in stock',
+      'products/p-nolog: missing product ("Mystery Cable") is still referenced by 1 transaction line, 1 loan request line and 0 waivers; ' +
+        'there is no delete entry for it in the audit log, so it cannot be restored automatically',
+    ])
+    expect(plan.missingProducts).toEqual([
+      { id: 'p-gone', names: ['Cordless Drill'], transactionLines: 1, requestLines: 1, waivers: 1, deleted: { auditId: 'a-del-gone', at: '2026-09-28T08:00:00.000Z', by: 'Ada Admin' }, restored: false },
+      { id: 'p-nolog', names: ['Mystery Cable'], transactionLines: 1, requestLines: 1, waivers: 0, deleted: null, restored: false },
+    ])
+    expect(plan.restoredProducts).toEqual([])
+  })
+
+  it('--restore-deleted-products rebuilds the one with a delete entry from its snapshot; the one without stays a problem', async () => {
+    const plan = await planImport(memorySource(withDeleted()), { now: new Date(), restoreDeletedProducts: true })
+    expect(problemTexts(plan)).toEqual([expect.stringMatching(/^products\/p-nolog: missing product \("Mystery Cable"\)/)])
+    expect(plan.restoredProducts).toEqual(['p-gone'])
+    expect(plan.missingProducts.find((m) => m.id === 'p-gone')?.restored).toBe(true)
+    expect(plan.rows.products.find((p) => p.id === 'p-gone')).toEqual({
+      id: 'p-gone', category_id: 'c1', category_name: 'Cables & Adapters', name: 'Cordless Drill', description: '18V',
+      quantity_on_hand: 0, reorder_threshold: 3, available: false, location: 'Shelf 9', lend_from: null, lend_to: null,
+      lending_interval: null, images: [], created_at: new Date('2026-09-28T08:00:00.000Z'), updated_at: new Date('2026-09-28T08:00:00.000Z'),
+    })
+    // its own barcode comes back; the one another product now owns does not
+    expect(plan.rows.product_barcodes.filter((b) => b.product_id === 'p-gone')).toEqual([{ barcode: 'GONE-1', product_id: 'p-gone', position: 0 }])
+    expect(plan.warnings).toContainEqual({ collection: 'products', id: 'p-gone', problem: 'barcode "P1-PRIMARY" of the deleted product is now on product p1 (HDMI Cable 2m); not restored' })
+    expect(plan.warnings).toContainEqual({
+      collection: 'products', id: 'p-gone',
+      problem: 'RESTORED from delete audit entry a-del-gone (deleted 2026-09-28T08:00:00.000Z by Ada Admin): "Cordless Drill", unavailable, 0 in stock, no photos',
+    })
+  })
+
+  it('imports the restored product with its history and writes no audit entry of its own (the ledger stays verbatim)', async () => {
+    db = await resetTestDb()
+    const state = withDeleted()
+    // p-nolog cannot be restored: its history is taken out in Firestore first (the user's call)
+    delete state.transaction_lines['l-nolog']
+    delete state.loan_request_lines.ld
+    const plan = await planImport(memorySource(state), { now: new Date(), restoreDeletedProducts: true })
+    expect(plan.problems).toEqual([])
+    const counts = await runImport(db, plan, { replace: false })
+    expect(counts.products).toBe(3)
+    expect(counts.audit_log).toBe(Object.keys(state.audit_log).length)
+    const admin: Caller = { uid: 'admin-uid', name: 'Ada Admin', role: 'admin', staffId: 's-admin' }
+    expect(await getProduct({ db, caller: admin, now: () => new Date() }, 'p-gone')).toMatchObject({ name: 'Cordless Drill', available: false, quantity_on_hand: 0, barcodes: ['GONE-1'] })
+    expect(await db.select({ id: transactionLines.id }).from(transactionLines).where(eq(transactionLines.product_id, 'p-gone'))).toEqual([{ id: 'l-gone-out' }])
   })
 })
 
@@ -523,8 +667,8 @@ describe('runImport: one transaction, never into existing data', () => {
   })
 
   it('with replace it empties the app tables first, in the same transaction, and imports', async () => {
-    await db.insert(categories).values({ id: 'existing', name: 'Already here' })
-    const counts = await runImport(db, plan, { replace: true })
+    await db.insert(categories).values({ id: 'existing', name: 'Already here', created_at: new Date('2026-01-01T00:00:00Z') })
+    const counts = await runImport(db, plan, { replace: true, confirmDatabase: 'smartstock_test' })
     expect(await db.select({ id: categories.id }).from(categories)).toEqual([{ id: 'c1' }])
     expect(counts).toEqual(await tableCounts())
     expect(counts.transactions).toBe(3)
@@ -562,21 +706,47 @@ describe('runImport: one transaction, never into existing data', () => {
   })
 
   it('a failing insert with replace also restores the data that was there before', async () => {
-    await db.insert(categories).values({ id: 'existing', name: 'Already here' })
+    await db.insert(categories).values({ id: 'existing', name: 'Already here', created_at: new Date('2026-01-01T00:00:00Z') })
     const broken: ImportPlan = structuredClone(plan)
     ;(broken.rows.audit_log[0] as { action: string }).action = 'bogus'
-    await expect(runImport(db, broken, { replace: true })).rejects.toThrow()
+    await expect(runImport(db, broken, { replace: true, confirmDatabase: 'smartstock_test' })).rejects.toThrow(/audit_log_action_check|Failed query/)
     expect(await tableCounts()).toEqual({ ...allZero, categories: 1 })
+  })
+
+  it('replace guard (a): it needs the target database named, and refuses any other name, changing nothing', async () => {
+    await runImport(db, plan, { replace: false })
+    const before = await tableCounts()
+    await expect(runImport(db, plan, { replace: true })).rejects.toThrow('Refusing to replace: the target database is "smartstock_test", and replacing it needs that name confirmed (none was given). Nothing was written.')
+    await expect(runImport(db, plan, { replace: true, confirmDatabase: 'smartstock' })).rejects.toThrow(/target database is "smartstock_test".*"smartstock" was given/)
+    expect(await tableCounts()).toEqual(before)
+    await expect(runImport(db, plan, { replace: true, confirmDatabase: 'smartstock_test' })).resolves.toEqual(before)
+  })
+
+  it('replace guard (b): it refuses when the target holds a row created after the newest record being imported', async () => {
+    await runImport(db, plan, { replace: false })
+    // a Stock In saved in PostgreSQL after cut-over (newer than anything in Firestore)
+    await db.insert(transactions).values({ id: 'after-go-live', transaction_type: 'IN', reference_no: 'TXN-NEW00001', created_at: new Date('2026-10-05T09:00:00.000Z') })
+    const before = await tableCounts()
+    await expect(runImport(db, plan, { replace: true, confirmDatabase: 'smartstock_test' })).rejects.toThrow(
+      'Refusing to replace: transactions has a row created 2026-10-05T09:00:00.000Z, after the newest record being imported (2026-09-26T08:00:00.000Z). ' +
+        'Rows like that exist only in PostgreSQL (entered after cut-over?) and would be lost. Nothing was written.',
+    )
+    expect(await tableCounts()).toEqual(before)
+    expect(await db.select({ id: transactions.id }).from(transactions).where(eq(transactions.id, 'after-go-live'))).toHaveLength(1)
   })
 })
 
 describe('the command line', () => {
   it('defaults to a dry run and needs a source', () => {
-    expect(parseCliArgs(['--source', 'live'])).toEqual({ source: 'live', write: false, replace: false, allowNonLocalDb: false })
-    expect(parseCliArgs(['--source=emulator', '--write', '--replace'])).toMatchObject({ source: 'emulator', write: true, replace: true })
+    expect(parseCliArgs(['--source', 'live'])).toEqual({ source: 'live', write: false, replace: null, restoreDeletedProducts: false, allowNonLocalDb: false })
+    expect(parseCliArgs(['--source', 'live', '--dry-run'])).toEqual(parseCliArgs(['--source', 'live']))
+    expect(parseCliArgs(['--source=emulator', '--write', '--replace=smartstock'])).toMatchObject({ source: 'emulator', write: true, replace: { database: 'smartstock' } })
+    expect(parseCliArgs(['--source=live', '--write', '--replace'])).toMatchObject({ replace: { database: null } }) // refused once the target is known
+    expect(parseCliArgs(['--source=live', '--restore-deleted-products'])).toMatchObject({ restoreDeletedProducts: true })
     expect(() => parseCliArgs([])).toThrow(/--source emulator\|live/)
     expect(() => parseCliArgs(['--source', 'prod'])).toThrow(/--source emulator\|live/)
-    expect(() => parseCliArgs(['--source', 'live', '--replace'])).toThrow(/--replace only makes sense with --write/)
+    expect(() => parseCliArgs(['--source', 'live', '--replace=smartstock'])).toThrow(/--replace only makes sense with --write/)
+    expect(() => parseCliArgs(['--source', 'live', '--dry-run', '--write'])).toThrow(/--dry-run and --write contradict each other/)
     expect(() => parseCliArgs(['--source', 'live', '--force'])).toThrow(/Unknown option --force/)
   })
 
@@ -651,8 +821,27 @@ describe('the command, run against the test database with an in-memory Firestore
     expect(await run(['--source', 'live', '--write'], one())).toBe(1)
     expect(output.join('\n')).toContain('The database already has data')
     expect(await tableCounts()).toEqual(after)
-    expect(await run(['--source', 'live', '--write', '--replace'], one())).toBe(0)
+    // a bare --replace is refused, naming the target database
+    expect(await run(['--source', 'live', '--write', '--replace'], one())).toBe(1)
+    expect(output.join('\n')).toContain("--replace needs the target database's name, to show you mean this one: --replace=smartstock_test. Nothing was written.")
+    expect(await run(['--source', 'live', '--write', '--replace=smartstock'], one())).toBe(1)
+    expect(output.join('\n')).toContain('Refusing to replace: the target database is "smartstock_test"')
     expect(await tableCounts()).toEqual(after)
+    expect(await run(['--source', 'live', '--write', '--replace=smartstock_test'], one())).toBe(0)
+    expect(await tableCounts()).toEqual(after)
+  })
+
+  it('points at --restore-deleted-products next to the grouped problems, and lists what it restored', async () => {
+    const state = withDeleted()
+    delete state.transaction_lines['l-nolog']
+    delete state.loan_request_lines.ld
+    expect(await run(['--source', 'live'], state)).toBe(1)
+    expect(output.join('\n')).toContain('1 of the missing products above have a delete entry in the audit log. Run again with --restore-deleted-products')
+    expect(await run(['--source', 'live', '--write', '--restore-deleted-products'], state)).toBe(0)
+    const text = output.join('\n')
+    expect(text).toMatch(/products\s+3 {2}\(incl\. 1 RESTORED deleted product\(s\)\)/)
+    expect(text).toContain('p-gone  Cordless Drill  deleted 2026-09-28T08:00:00.000Z by Ada Admin')
+    expect(text).toContain('Restored deleted products (no audit entry written): p-gone')
   })
 })
 

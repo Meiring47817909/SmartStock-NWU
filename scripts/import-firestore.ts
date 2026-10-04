@@ -1,4 +1,5 @@
-// npm run db:import-firestore -- --source emulator|live [--write [--replace]] [--allow-non-local-db]
+// npm run db:import-firestore -- --source emulator|live [--dry-run | --write [--replace=<database>]]
+//                                 [--restore-deleted-products] [--allow-non-local-db]
 //
 // Copies the app's Firestore data into PostgreSQL (spec section 7), keeping every document id.
 //
@@ -6,14 +7,18 @@
 //                       this machine), project demo-smartstock-nwu.
 //   --source live       reads the live project with the Admin credentials in .env.local (FIREBASE_ADMIN_PROJECT_ID,
 //                       FIREBASE_ADMIN_CLIENT_EMAIL, FIREBASE_ADMIN_PRIVATE_KEY), loaded the way
-//                       src/lib/firebase/admin.ts reads them. READ-ONLY: the source only ever lists collections and
-//                       get()s them (see ReadOnlyFirestore in src/server/import/mapFirestore.ts); nothing in this
-//                       script can write to Firestore.
-//   (default)           dry run: prints the documents read, the rows that would be written, every problem and warning.
+//                       src/lib/firebase/admin.ts reads them. READ-ONLY: every collection is read inside ONE read-only
+//                       Firestore transaction (one consistent snapshot); the source can only list and get (see
+//                       ReadOnlyFirestore in src/server/import/mapFirestore.ts). Nothing here can write to Firestore.
+//   (default) --dry-run dry run: prints the documents read, the rows that would be written, every problem and warning.
 //                       Writes nothing anywhere. Exits 1 when there are problems.
 //   --write             imports into DATABASE_URL in one transaction. Refused if the plan has any problem, or if the
 //                       database already has data.
-//   --replace           with --write: empties the app tables first, inside the same transaction.
+//   --replace=<database>  with --write: empties the app tables first, inside the same transaction. <database> must be
+//                       the target's own name (current_database()), and it is refused if the target holds a row created
+//                       after the newest record in Firestore (data entered after cut-over).
+//   --restore-deleted-products  rebuilds products that history still points at but that were deleted in Firestore,
+//                       from their product `delete` audit entry (unavailable, 0 in stock); listed in the output.
 //   --allow-non-local-db  needed to write anywhere but this machine (e.g. Cloud SQL at cut-over). The target host and
 //                       database are printed before anything is written.
 //
@@ -26,7 +31,7 @@ import { parseEnv } from 'node:util'
 import { sql } from 'drizzle-orm'
 import { parse as parseConnectionString } from 'pg-connection-string'
 import { closeDb, getDb } from '@/server/db/client'
-import { firestoreSource, planImport, type FirestoreSource, type ImportPlan } from '@/server/import/mapFirestore'
+import { planImport, readFirestoreSnapshot, type FirestoreSource, type ImportPlan } from '@/server/import/mapFirestore'
 import { ImportRefusedError, runImport } from '@/server/import/runImport'
 import { databaseHosts, isLocalHost } from './seed/context'
 
@@ -37,25 +42,39 @@ export const DEFAULT_DATABASE_URL = 'postgres://postgres:postgres@127.0.0.1:5432
 export interface CliArgs {
   source: 'emulator' | 'live'
   write: boolean
-  replace: boolean
+  /** null: no --replace. database null: a bare --replace, refused once the target's name is known. */
+  replace: { database: string | null } | null
+  restoreDeletedProducts: boolean
   allowNonLocalDb: boolean
 }
 
-const USAGE = 'Usage: npm run db:import-firestore -- --source emulator|live [--write [--replace]] [--allow-non-local-db]'
+const USAGE =
+  'Usage: npm run db:import-firestore -- --source emulator|live [--dry-run | --write [--replace=<database>]] ' +
+  '[--restore-deleted-products] [--allow-non-local-db]'
 
 export function parseCliArgs(argv: string[]): CliArgs {
   let source: string | undefined
+  let replace: CliArgs['replace'] = null
   const flags = new Set<string>()
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--source') source = argv[++i]
     else if (arg.startsWith('--source=')) source = arg.slice('--source='.length)
-    else if (arg === '--write' || arg === '--replace' || arg === '--allow-non-local-db') flags.add(arg)
+    else if (arg === '--replace') replace = { database: null }
+    else if (arg.startsWith('--replace=')) replace = { database: arg.slice('--replace='.length) || null }
+    else if (['--write', '--dry-run', '--allow-non-local-db', '--restore-deleted-products'].includes(arg)) flags.add(arg)
     else throw new Error(`Unknown option ${arg}. ${USAGE}`)
   }
   if (source !== 'emulator' && source !== 'live') throw new Error(`Say where to read from: --source emulator|live. ${USAGE}`)
-  if (flags.has('--replace') && !flags.has('--write')) throw new Error('--replace only makes sense with --write.')
-  return { source, write: flags.has('--write'), replace: flags.has('--replace'), allowNonLocalDb: flags.has('--allow-non-local-db') }
+  if (flags.has('--dry-run') && flags.has('--write')) throw new Error('--dry-run and --write contradict each other: pick one.')
+  if (replace && !flags.has('--write')) throw new Error('--replace only makes sense with --write.')
+  return {
+    source,
+    write: flags.has('--write'),
+    replace,
+    restoreDeletedProducts: flags.has('--restore-deleted-products'),
+    allowNonLocalDb: flags.has('--allow-non-local-db'),
+  }
 }
 
 /** "host X, database Y" for the target (no password); throws for a non-local host unless explicitly allowed. */
@@ -135,13 +154,13 @@ async function openSource(kind: CliArgs['source']): Promise<{ source: FirestoreS
     if (problem) throw new Error(problem)
     if (!(await reachable(host))) throw new Error(`The Firestore emulator (${host}) is not reachable. Start it first with "npm run emulators".`)
     const app = initializeApp({ projectId: EMULATOR_PROJECT_ID }, 'firestore-import')
-    return { source: firestoreSource(getFirestore(app)), label: `Firestore emulator ${host}, project ${EMULATOR_PROJECT_ID}` }
+    return { source: await readFirestoreSnapshot(getFirestore(app)), label: `Firestore emulator ${host}, project ${EMULATOR_PROJECT_ID}` }
   }
   const problem = liveEnvProblem(process.env)
   if (problem) throw new Error(problem)
   const creds = adminCredentials()
   const app = initializeApp({ credential: cert(creds) }, 'firestore-import')
-  return { source: firestoreSource(getFirestore(app)), label: `LIVE Firestore, project ${creds.projectId} (read-only)` }
+  return { source: await readFirestoreSnapshot(getFirestore(app)), label: `LIVE Firestore, project ${creds.projectId} (read-only)` }
 }
 
 function printPlan(plan: ImportPlan): void {
@@ -153,11 +172,27 @@ function printPlan(plan: ImportPlan): void {
     for (const c of plan.notImported) console.log(`  ${pad(c.collection)}${c.documents}`)
   }
   console.log('\nRows to write to PostgreSQL:')
-  for (const [t, rows] of Object.entries(plan.rows)) console.log(`  ${pad(t)}${rows.length}`)
+  for (const [t, rows] of Object.entries(plan.rows)) {
+    const restored = t === 'products' && plan.restoredProducts.length > 0 ? `  (incl. ${plan.restoredProducts.length} RESTORED deleted product(s))` : ''
+    console.log(`  ${pad(t)}${rows.length}${restored}`)
+  }
+  if (plan.restoredProducts.length > 0) {
+    console.log('\nDeleted products restored from their delete audit entry (unavailable, 0 in stock, no photos):')
+    for (const m of plan.missingProducts.filter((x) => x.restored)) {
+      console.log(`  ${m.id}  ${m.names.join(' / ') || '(no name)'}  deleted ${m.deleted?.at ?? '?'} by ${m.deleted?.by ?? '?'}`)
+    }
+  }
   console.log(`\nWarnings (${plan.warnings.length}; reported, not blocking):`)
   for (const w of plan.warnings) console.log(`  ${w.collection}/${w.id}: ${w.problem}`)
   console.log(`\nProblems (${plan.problems.length}; each must be fixed in Firestore before --write):`)
   for (const p of plan.problems) console.log(`  ${p.collection}/${p.id}: ${p.problem}`)
+  const restorable = plan.missingProducts.filter((m) => !m.restored && m.deleted)
+  if (restorable.length > 0) {
+    console.log(
+      `\n${restorable.length} of the missing products above have a delete entry in the audit log. Run again with ` +
+        '--restore-deleted-products to rebuild them from it (unavailable, 0 in stock, no photos; listed in the output).',
+    )
+  }
 }
 
 /** The command. `open` is the Firestore opener (tests pass an in-memory one); returns the process exit code. */
@@ -165,7 +200,7 @@ export async function main(argv: string[], open: typeof openSource = openSource)
   const args = parseCliArgs(argv)
   const { source, label } = await open(args.source)
   console.log(`Reading ${label}\n`)
-  const plan = await planImport(source)
+  const plan = await planImport(source, { restoreDeletedProducts: args.restoreDeletedProducts })
   printPlan(plan)
 
   if (!args.write) {
@@ -180,7 +215,7 @@ export async function main(argv: string[], open: typeof openSource = openSource)
   const url = process.env.DATABASE_URL ?? DEFAULT_DATABASE_URL
   const target = checkTarget(url, args.allowNonLocalDb)
   console.log(`\nWriting to PostgreSQL: ${target}`)
-  if (args.replace) console.log('--replace: the app tables there will be emptied first (in the same transaction).')
+  if (args.replace) console.log('--replace: the app tables there will be emptied first (in the same transaction), if the guards allow it.')
   const db = getDb(url)
   try {
     const info = (await db.execute(sql`select current_database() as db, host(inet_server_addr()) as addr, current_setting('server_version') as version`)).rows[0] as {
@@ -189,9 +224,14 @@ export async function main(argv: string[], open: typeof openSource = openSource)
       version: string
     }
     console.log(`Connected: database ${info.db} on server ${info.addr ?? '(local socket)'}, PostgreSQL ${info.version}`)
-    const counts = await runImport(db, plan, { replace: args.replace })
+    if (args.replace && args.replace.database === null) {
+      console.error(`\n--replace needs the target database's name, to show you mean this one: --replace=${info.db}. Nothing was written.`)
+      return 1
+    }
+    const counts = await runImport(db, plan, args.replace ? { replace: true, confirmDatabase: args.replace.database as string } : { replace: false })
     console.log('\nImported (one transaction, committed):')
     for (const [t, n] of Object.entries(counts)) console.log(`  ${t.padEnd(22)}${n}`)
+    if (plan.restoredProducts.length > 0) console.log(`\nRestored deleted products (no audit entry written): ${plan.restoredProducts.join(', ')}`)
     return 0
   } catch (err) {
     if (err instanceof ImportRefusedError) {
