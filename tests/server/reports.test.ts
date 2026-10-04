@@ -177,6 +177,16 @@ describe('issued-per-staff', () => {
     expect(t2).toMatchObject({ id: 't2', created_at: '2026-10-01T23:30:00.000Z', lend_from: null, lend_to: null })
   })
 
+  it('orders staff by name with localeCompare, whatever collation the database was created with', async () => {
+    await db.insert(staff).values([
+      { id: 'staff-5', name: 'ann', surname: 'lower', full_name: 'ann lower', email: 'ann@nwu.test' },
+      { id: 'staff-6', name: 'bo', surname: 'rrower', full_name: 'bo rrower', email: 'bo2@nwu.test' },
+    ])
+    const { staff: rows } = await loadReport(ctxFor(), { report: 'issued-per-staff' })
+    // A C-collating database would put every capitalised name before the lower-case ones.
+    expect(rows.map((s) => s.full_name)).toEqual(['ann lower', 'bo rrower', 'Bo Rrower', 'Sam Staff', 'Zed Zero'])
+  })
+
   it('returns lines in scan order, and the page groups a multi-barcode product as before', async () => {
     await seedIssued()
     const { staff: rows } = await loadReport(ctxFor(), { report: 'issued-per-staff' })

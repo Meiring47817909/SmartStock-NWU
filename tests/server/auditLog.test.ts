@@ -1,5 +1,6 @@
+import { sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { listAuditLog } from '@/server/data/auditLog'
+import { AUDIT_PAGE_SIZE, listAuditLog } from '@/server/data/auditLog'
 import { auditLog, loanRequestLines, loanRequests, products, profiles, staff, transactionLines, transactions } from '@/server/db/schema'
 import type { Db } from '@/server/db/client'
 import { DataError, type Caller, type Ctx } from '@/server/context'
@@ -190,6 +191,110 @@ describe('listAuditLog', () => {
   })
 
   it('is empty with no entries', async () => {
-    expect(await listAuditLog(ctxFor())).toEqual({ entries: [], transactionLines: {}, loanRequestLines: {} })
+    expect(await listAuditLog(ctxFor())).toEqual({ entries: [], transactionLines: {}, loanRequestLines: {}, nextCursor: null })
+  })
+})
+
+describe('listAuditLog paging', () => {
+  type Params = Parameters<typeof listAuditLog>[1]
+
+  /** Every page of the log, following the cursor: the ids per page, plus the pages themselves. */
+  async function walk(params: Params, limit: number) {
+    const pages = []
+    let cursor: string | undefined = params?.cursor
+    do {
+      const page = await listAuditLog(ctxFor(), { ...params, cursor }, limit)
+      pages.push(page)
+      cursor = page.nextCursor ?? undefined
+    } while (cursor)
+    return pages
+  }
+
+  it('pages 500 entries at a time', () => {
+    expect(AUDIT_PAGE_SIZE).toBe(500)
+  })
+
+  it('returns pages in order with no entry repeated or skipped, and null on the last page', async () => {
+    await seed()
+    const all = (await listAuditLog(ctxFor())).entries.map((e) => e.id)
+    expect(all).toHaveLength(7)
+    for (const limit of [1, 2, 3, 6, 7, 8]) {
+      const pages = await walk({}, limit)
+      expect(pages.flatMap((p) => p.entries.map((e) => e.id))).toEqual(all)
+      expect(pages.every((p, i) => (i < pages.length - 1 ? p.entries.length === limit && p.nextCursor !== null : p.nextCursor === null))).toBe(true)
+    }
+    // Exactly one page of entries: no cursor, no empty trailing page.
+    expect((await listAuditLog(ctxFor(), {}, 7)).nextCursor).toBeNull()
+    expect((await listAuditLog(ctxFor(), {}, 6)).nextCursor).not.toBeNull()
+  })
+
+  it('does not repeat or skip entries that share a created_at across a page boundary', async () => {
+    // Four entries at the very same instant, with one newer and one older around them.
+    await entry('n1', '2026-10-03T10:00:00.000Z', 'product', 'create', 'p1')
+    for (const id of ['t1', 't2', 't3', 't4']) await entry(id, '2026-10-02T10:00:00.000Z', 'product', 'update', 'p1')
+    await entry('o1', '2026-10-01T10:00:00.000Z', 'product', 'delete', 'p1')
+    const expected = ['n1', 't4', 't3', 't2', 't1', 'o1']
+    expect((await listAuditLog(ctxFor())).entries.map((e) => e.id)).toEqual(expected)
+    for (const limit of [1, 2, 3, 4, 5]) {
+      const pages = await walk({}, limit)
+      expect(pages.flatMap((p) => p.entries.map((e) => e.id))).toEqual(expected)
+    }
+    // The boundary falls inside the tie: page 1 = n1, t4; page 2 = t3, t2; page 3 = t1, o1.
+    const pages = await walk({}, 2)
+    expect(pages.map((p) => p.entries.map((e) => e.id))).toEqual([['n1', 't4'], ['t3', 't2'], ['t1', 'o1']])
+  })
+
+  it('keeps the microseconds the database holds, so two entries within one millisecond are neither repeated nor skipped', async () => {
+    for (const [id, ts] of [['m1', '2026-10-01T10:00:00.000900Z'], ['m2', '2026-10-01T10:00:00.000500Z'], ['m3', '2026-10-01T10:00:00.000100Z']]) {
+      await db.insert(auditLog).values({
+        id, user_id: 'admin-uid', user_name: 'Ada Admin', action: 'create', entity_type: 'product', entity_id: 'p1',
+        created_at: sql`${ts}::timestamptz` as unknown as Date,
+      })
+    }
+    const pages = await walk({}, 1)
+    expect(pages.flatMap((p) => p.entries.map((e) => e.id))).toEqual(['m1', 'm2', 'm3'])
+  })
+
+  it('applies the filters in every page', async () => {
+    await seed()
+    const filtered = (await listAuditLog(ctxFor(), { entityType: 'transaction', from: '2026-09-28', to: '2026-10-02' })).entries.map((e) => e.id)
+    expect(filtered).toEqual(['a2', 'a5', 'a6'])
+    const pages = await walk({ entityType: 'transaction', from: '2026-09-28', to: '2026-10-02' }, 1)
+    expect(pages.map((p) => p.entries.map((e) => e.id))).toEqual([['a2'], ['a5'], ['a6']])
+    const byUser = await walk({ userId: 'admin-uid' }, 2)
+    expect(byUser.flatMap((p) => p.entries.map((e) => e.id))).not.toContain('a3') // Sam's entry
+    expect(byUser.flatMap((p) => p.entries)).toHaveLength(6)
+  })
+
+  it("gives each page the line lookups of that page's entries only", async () => {
+    await seed()
+    const at = new Date('2026-09-30T10:00:00.000Z')
+    await db.insert(transactions).values({ id: 't1', transaction_type: 'OUT', reference_no: 'TXN-T1', staff_id: 'staff-1', created_at: at })
+    await db.insert(transactionLines).values({ id: 'x-a', transaction_id: 't1', product_id: 'p1', product_name: 'Projector', line_no: 0, quantity: 1, created_at: at })
+    await db.insert(loanRequests).values({
+      id: 'lr1', reference_no: 'LR-LR100000', staff_id: 'staff-1', staff_name: 'Sam Staff', status: 'accepted',
+      from_date: '2026-10-10', to_date: '2026-10-14', original_from_date: '2026-10-10', original_to_date: '2026-10-14', created_at: at, updated_at: at,
+    })
+    await db.insert(loanRequestLines).values({ id: 'q1', request_id: 'lr1', product_id: 'p1', product_name: 'Projector', line_no: 0, requested_quantity: 1, offered_quantity: 1, created_at: at })
+    // Order: a3, a2 (t1 lookup), a1, a4 (lr1 lookup), a5, a6, a7. Pages of 2: [a3,a2] [a1,a4] [a5,a6] [a7].
+    const pages = await walk({}, 2)
+    expect(pages.map((p) => Object.keys(p.transactionLines))).toEqual([['t1'], [], [], []])
+    expect(pages.map((p) => Object.keys(p.loanRequestLines))).toEqual([[], ['lr1'], [], []])
+    expect(pages[0].transactionLines.t1.map((l) => l.id)).toEqual(['x-a'])
+    expect(pages[1].loanRequestLines.lr1.map((l) => l.id)).toEqual(['q1'])
+  })
+
+  it('an entry written between two requests neither repeats nor skips older entries', async () => {
+    await seed()
+    const first = await listAuditLog(ctxFor(), {}, 3)
+    await entry('zz', '2026-10-04T08:00:00.000Z', 'product', 'create', 'p2') // newer than everything
+    const rest = await walk({ cursor: first.nextCursor as string }, 3)
+    expect([...first.entries, ...rest.flatMap((p) => p.entries)].map((e) => e.id)).toEqual(['a3', 'a2', 'a1', 'a4', 'a5', 'a6', 'a7'])
+  })
+
+  it('rejects a cursor that is not one of ours', async () => {
+    await expectDataError(listAuditLog(ctxFor(), { cursor: 'not-a-cursor' }), 400, 'Invalid cursor.')
+    await expectDataError(listAuditLog(ctxFor(), { cursor: Buffer.from(JSON.stringify(['yesterday', 'a1'])).toString('base64url') }), 400, 'Invalid cursor.')
+    await expectDataError(listAuditLog(ctxFor(), { cursor: Buffer.from(JSON.stringify(['2026-10-01T10:00:00.000000Z'])).toString('base64url') }), 400, 'Invalid cursor.')
   })
 })

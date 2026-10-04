@@ -92,11 +92,20 @@ describe('/api/audit-log', () => {
     const all = await call(getAuditLog, '/api/audit-log', 'admin-uid')
     expect(all.status).toBe(200)
     expect(all.body.entries.map((e: { id: string }) => e.id)).toEqual(['a1'])
-    expect(all.body).toMatchObject({ transactionLines: {}, loanRequestLines: {} })
+    expect(all.body).toMatchObject({ transactionLines: {}, loanRequestLines: {}, nextCursor: null })
     // 22:30 UTC on the 1st is the 2nd in Johannesburg.
     expect((await call(getAuditLog, '/api/audit-log?from=2026-10-02&to=2026-10-02', 'admin-uid')).body.entries).toHaveLength(1)
     expect((await call(getAuditLog, '/api/audit-log?to=2026-10-01', 'admin-uid')).body.entries).toHaveLength(0)
     expect((await call(getAuditLog, '/api/audit-log?entityType=staff,category', 'admin-uid')).body.entries).toHaveLength(0)
     expect(await call(getAuditLog, '/api/audit-log?entityType=nope', 'admin-uid')).toEqual({ status: 400, body: { error: 'Unknown entity type.' } })
+  })
+
+  it('takes a cursor, and a bad one is a 400', async () => {
+    // A cursor at the only entry's own key leaves nothing older; one just after it still lists it.
+    const cursor = Buffer.from(JSON.stringify(['2026-10-01T22:30:00.000000Z', 'a1'])).toString('base64url')
+    expect(await call(getAuditLog, `/api/audit-log?cursor=${cursor}`, 'admin-uid')).toMatchObject({ status: 200, body: { entries: [], nextCursor: null } })
+    const before = Buffer.from(JSON.stringify(['2026-10-01T22:30:00.000001Z', 'a0'])).toString('base64url')
+    expect((await call(getAuditLog, `/api/audit-log?cursor=${before}`, 'admin-uid')).body.entries.map((e: { id: string }) => e.id)).toEqual(['a1'])
+    expect(await call(getAuditLog, '/api/audit-log?cursor=junk', 'admin-uid')).toEqual({ status: 400, body: { error: 'Invalid cursor.' } })
   })
 })

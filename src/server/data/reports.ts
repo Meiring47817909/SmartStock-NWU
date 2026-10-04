@@ -123,11 +123,13 @@ async function lowStock(ctx: Ctx): Promise<LowStockReportRow[]> {
  * member is listed, zeroes included.
  */
 async function issuedPerStaff(ctx: Ctx, from: string | undefined, to: string | undefined, includeUndated: boolean): Promise<IssuedPerStaffReport> {
-  const people = await ctx.db
+  const found = await ctx.db
     .select({ id: staff.id, name: staff.name, surname: staff.surname, full_name: staff.full_name, department: staff.department })
     .from(staff)
     .where(eq(staff.is_active, true))
-    .orderBy(asc(staff.full_name), asc(staff.id))
+    .orderBy(asc(staff.id))
+  // By name the way Stock Levels is, whatever collation the database was created with.
+  const people = found.sort((a, b) => a.full_name.localeCompare(b.full_name, 'en') || a.id.localeCompare(b.id))
 
   const outs = await ctx.db
     .select({

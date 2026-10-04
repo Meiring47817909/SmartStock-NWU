@@ -88,7 +88,7 @@ export function SortableHead({
 // the same place in the row either way, and a disabled state says why more
 // plainly than the button just vanishing would.
 export function ExportCsvButton<T>({
-  filename, columns, rows, className,
+  filename, columns, rows, className, disabled,
 }: {
   filename: string
   columns: { header: string; value: (row: T) => string | number | null | undefined }[]
@@ -98,12 +98,15 @@ export function ExportCsvButton<T>({
   // only one passing something here (its NWU-Stitch restyle), so this never
   // touches how the button looks on any other tab.
   className?: string
+  // Opt-in: held off while the rows on screen don't match the filters yet
+  // (a refetch is pending). Left unset everywhere else.
+  disabled?: boolean
 }) {
   return (
     <Button
       variant="outline"
       className={cn('ml-auto', className)}
-      disabled={rows.length === 0}
+      disabled={rows.length === 0 || disabled}
       onClick={() => downloadCsv(filename, columns, rows)}
     >
       <Download className="size-3.5" />
@@ -115,7 +118,7 @@ export function ExportCsvButton<T>({
 // PDF twin of ExportCsvButton: same disabled-when-empty behaviour, and the
 // same row/column shape, plus a title printed at the top of the document.
 export function ExportPdfButton<T>({
-  filename, title, subtitle, columns, rows, className,
+  filename, title, subtitle, columns, rows, className, disabled,
 }: {
   filename: string
   title: string
@@ -123,13 +126,15 @@ export function ExportPdfButton<T>({
   columns: PdfColumn<T>[]
   rows: T[]
   className?: string
+  // Same opt-in as ExportCsvButton's.
+  disabled?: boolean
 }) {
   const [busy, setBusy] = useState(false)
   return (
     <Button
       variant="outline"
       className={className}
-      disabled={rows.length === 0 || busy}
+      disabled={rows.length === 0 || busy || disabled}
       onClick={async () => {
         setBusy(true)
         try {

@@ -4,6 +4,7 @@
 // The rows are the ones the pages built in the browser when they read Firestore directly, so the table, CSV and PDF code
 // reads the same fields. What changed is who does the work: the dates (calendar days in Africa/Johannesburg), the
 // outstanding balances and the status of each row are decided on the server.
+import { appCalendarDay } from '@/lib/utils'
 import type { AuditLogEntry, LoanRequestLine, TransactionLine } from '@/types/database'
 
 export type ReportKind = 'stock-levels' | 'low-stock' | 'issued-per-staff' | 'returns'
@@ -102,6 +103,24 @@ export interface ReturnRow {
   transaction_lines: ReportLine[]
 }
 
+export type ReturnStatus = 'Partial' | 'Late' | 'On time' | 'Early'
+
+/**
+ * The status of a completed return, or null when there is nothing to judge it against. Partial takes priority (the
+ * originating Stock Out still has a balance owed, possibly across more than one return visit); otherwise Early / On time /
+ * Late compares the calendar day in Africa/Johannesburg the return was made against the Stock Out's Lend To date: a
+ * historical judgement, not a live "today" one. A return at 23:30 UTC on the day before the due date was made at 01:30 on
+ * the due date in Johannesburg: On time.
+ */
+export function returnStatusOf(r: { partial: boolean; expected_date: string | null; created_at: string | null }): ReturnStatus | null {
+  if (r.partial) return 'Partial'
+  if (!r.expected_date) return null
+  const returnedOn = r.created_at ? appCalendarDay(r.created_at) : ''
+  if (returnedOn < r.expected_date) return 'Early'
+  if (returnedOn === r.expected_date) return 'On time'
+  return 'Late'
+}
+
 export interface ReturnsReport {
   /** Newest first. With a date set, those whose Stock Out was expected back in range. */
   returns: ReturnRow[]
@@ -134,6 +153,8 @@ export interface AuditLogParams {
   /** One or several raw actions (the log's `action` field, not the Activity the page derives). */
   action?: string | string[]
   userId?: string
+  /** The previous page's `nextCursor`: the page that follows it. */
+  cursor?: string
 }
 
 export interface AuditLogResult {
@@ -146,4 +167,10 @@ export interface AuditLogResult {
   transactionLines: Record<string, TransactionLine[]>
   /** The same for the 'create' entry of a loan request, by request id. */
   loanRequestLines: Record<string, LoanRequestLine[]>
+}
+
+/** One page of the log, as the API answers it: up to AUDIT_PAGE_SIZE entries and the lookups for those entries only. */
+export interface AuditLogPage extends AuditLogResult {
+  /** Pass as `cursor` for the next (older) page; null on the last page. */
+  nextCursor: string | null
 }

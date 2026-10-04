@@ -2,9 +2,11 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
-import { appCalendarDay, cn, formatDate, formatDateOnly, sentenceCase, todayDateStr } from '@/lib/utils'
+import { toast } from 'sonner'
+import { cn, formatDate, formatDateOnly, sentenceCase, todayDateStr } from '@/lib/utils'
 import { listCategories } from '@/lib/api/catalog'
 import { loadReport } from '@/lib/api/reports'
+import { returnStatusOf, type ReturnStatus } from '@/lib/reportRules'
 import { useTable, type SortingState } from '@tanstack/react-table'
 import {
   SORTABLE_TABLE_FEATURES as REPORT_TABLE_FEATURES,
@@ -639,9 +641,9 @@ const ISSUED_PER_STAFF_COLUMNS = columnHelper.columns([
 ])
 
 function IssuedPerStaffReport() {
-  const [data, setData] = useState<any[]>([])
-  const [undatedCount, setUndatedCount] = useState(0)
-  const [loading, setLoading] = useState(true)
+  // The rows the server last answered with, and the filters (key) they answer.
+  // Until that key matches the current filters a refetch is pending.
+  const [loaded, setLoaded] = useState<{ key: string; rows: any[]; undatedCount: number } | null>(null)
   const { isExpanded: rowExpanded, toggle: toggleRow } = useExpandedRows()
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
@@ -650,6 +652,11 @@ function IssuedPerStaffReport() {
   const [sorting, setSorting] = useState<SortingState>([])
   const [pageIndex, setPageIndex] = useState(0)
   const [pageSize, setPageSize] = useState<PageSize>(10)
+  const filterKey = JSON.stringify([fromDate, toDate, includeUndated])
+  const loading = loaded === null
+  const pending = loaded?.key !== filterKey
+  const data = loaded?.rows ?? []
+  const undatedCount = loaded?.undatedCount ?? 0
 
   // The server sends each active staff member with their OUT transactions
   // narrowed to the selected dates, newest first, and the totals computed over
@@ -657,19 +664,23 @@ function IssuedPerStaffReport() {
   // it. With either date set a staff member with nothing matching is left out
   // (the question is who took stock out); unfiltered, the report stays a roster
   // of every active staff member, zeroes included. The previous rows stay on
-  // screen while a new date range loads.
+  // screen while a new date range loads, but Export is held off until the rows
+  // match the filters; if the load fails the rows are cleared (and a toast
+  // says why) rather than left under a filter they don't answer.
   useEffect(() => {
     let cancelled = false
     loadReport('issued-per-staff', { from: fromDate, to: toDate, includeUndated })
       .then(report => {
-        if (cancelled) return
-        setData(report.staff)
-        setUndatedCount(report.undatedCount)
+        if (!cancelled) setLoaded({ key: filterKey, rows: report.staff, undatedCount: report.undatedCount })
       })
-      .catch(err => console.error('Failed to load the issued per staff report', err))
-      .finally(() => { if (!cancelled) setLoading(false) })
+      .catch(err => {
+        if (cancelled) return
+        console.error('Failed to load the issued per staff report', err)
+        setLoaded({ key: filterKey, rows: [], undatedCount: 0 })
+        toast.error(err instanceof Error ? err.message : 'Something went wrong.')
+      })
     return () => { cancelled = true }
-  }, [fromDate, toDate, includeUndated])
+  }, [fromDate, toDate, includeUndated, filterKey])
 
   const staff = data
 
@@ -804,6 +815,7 @@ function IssuedPerStaffReport() {
         <ExportCsvButton
           className="border-[#D5CBE0] text-[#322342] hover:border-[#6C3D91] hover:bg-[#F8F5FA]"
           filename={`issued-per-staff-${todayDateStr()}.csv`}
+          disabled={pending}
           rows={staffCsvRows}
           columns={[
             { header: 'Staff Member', value: (s: any) => s.full_name },
@@ -821,6 +833,7 @@ function IssuedPerStaffReport() {
         <ExportPdfButton
           className="border-[#D5CBE0] text-[#322342] hover:border-[#6C3D91] hover:bg-[#F8F5FA]"
           filename={`issued-per-staff-${todayDateStr()}.pdf`}
+          disabled={pending}
           title="Issued per Staff Report"
           subtitle={[
             `Compiled ${formatDateOnly(todayDateStr())}  ·  ${sortedStaff.length} staff  ·  ${rangeTxns} transactions  ·  ${rangeItems} items`,
@@ -947,31 +960,20 @@ function IssuedPerStaffReport() {
 }
 
 // Mirrors lineStatus() in returns/page.tsx, adapted for a completed return
-// record rather than a still-outstanding line: Partial takes priority (the
-// originating Stock Out still has a balance owed, possibly settled across
-// more than one return visit), otherwise Early/On time/Late compares the
-// date this return was actually made against the originating Lend To date
-// — a historical judgement, not a live "today" one.
-function returnRowStatus(t: any): { label: string; className: string } | null {
-  if (t.partial) return { label: 'Partial', className: 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold' }
-  if (!t.expected_date) return null
-  const returnedOn = t.created_at ? appCalendarDay(t.created_at) : ''
-  if (returnedOn < t.expected_date) return { label: 'Early', className: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold' }
-  if (returnedOn === t.expected_date) return { label: 'On time', className: 'bg-sky-100 text-sky-800 border-sky-200/60 px-2.5 font-semibold' }
-  return { label: 'Late', className: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold' }
+// record rather than a still-outstanding line. Which status a row has is
+// decided by returnStatusOf (src/lib/reportRules.ts, tested there); this only
+// adds the badge colours.
+const RETURN_STATUS_CLASS: Record<ReturnStatus, string> = {
+  Partial: 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold',
+  Early: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold',
+  'On time': 'bg-sky-100 text-sky-800 border-sky-200/60 px-2.5 font-semibold',
+  Late: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold',
 }
 
-// Both ends bound t.expected_date — the lend_to copied off the Stock Out this
-// return settles. That is already a plain YYYY-MM-DD string, so the server
-// compares it directly (see returns in src/server/data/reports.ts).
-//
-// A return whose expected date is unknown — its Stock Out set no return date,
-// or it is not linked to one at all — has nothing for either end to test. With
-// both ends on this one field there is no other bound left, so such a row would
-// otherwise appear under every window Selouna picks. Dropping it silently is
-// worse: those are the loosest records in the store and are exactly what an
-// audit is looking for. So the choice is hers, made in the filter row rather
-// than decided here; `includeUndated` carries it. Defaults to including them.
+function returnRowStatus(t: any): { label: ReturnStatus; className: string } | null {
+  const label = returnStatusOf(t)
+  return label ? { label, className: RETURN_STATUS_CLASS[label] } : null
+}
 
 // Ranked so the rows worth a second look surface first: an unsettled balance,
 // then a late return, then on time, then early. A row with no status at all
@@ -1081,9 +1083,9 @@ const RETURNS_COLUMNS = columnHelper.columns([
 ])
 
 function ReturnsReport() {
-  const [data, setData] = useState<any[]>([])
-  const [undatedCount, setUndatedCount] = useState(0)
-  const [loading, setLoading] = useState(true)
+  // The rows the server last answered with, and the filters (key) they answer.
+  // Until that key matches the current filters a refetch is pending.
+  const [loaded, setLoaded] = useState<{ key: string; rows: any[]; undatedCount: number } | null>(null)
   const { isExpanded: rowExpanded, toggle: toggleRow } = useExpandedRows()
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
@@ -1096,25 +1098,35 @@ function ReturnsReport() {
   const [statusFilter, setStatusFilter] = useState<Set<ReturnStatusValue>>(new Set(RETURN_STATUS_VALUES))
   const [pageIndex, setPageIndex] = useState(0)
   const [pageSize, setPageSize] = useState<PageSize>(10)
+  const filterKey = JSON.stringify([fromDate, toDate, includeUndated])
+  const loading = loaded === null
+  const pending = loaded?.key !== filterKey
+  const data = loaded?.rows ?? []
+  const undatedCount = loaded?.undatedCount ?? 0
 
   // Each return comes with the Stock Out it settles (reference and Lend To)
   // and what is still owed on that Stock Out, per product: issued minus every
   // return on record minus what was written off, with the barcodes the rest
   // went out under. Written-off lines are no longer outstanding, so a Partial
   // row never keeps claiming a balance Selouna has already resolved away. The
-  // previous rows stay on screen while a new date range loads.
+  // previous rows stay on screen while a new date range loads, but Export is
+  // held off until the rows match the filters; if the load fails the rows are
+  // cleared (and a toast says why) rather than left under a filter they don't
+  // answer.
   useEffect(() => {
     let cancelled = false
     loadReport('returns', { from: fromDate, to: toDate, includeUndated })
       .then(report => {
-        if (cancelled) return
-        setData(report.returns)
-        setUndatedCount(report.undatedCount)
+        if (!cancelled) setLoaded({ key: filterKey, rows: report.returns, undatedCount: report.undatedCount })
       })
-      .catch(err => console.error('Failed to load the returns report', err))
-      .finally(() => { if (!cancelled) setLoading(false) })
+      .catch(err => {
+        if (cancelled) return
+        console.error('Failed to load the returns report', err)
+        setLoaded({ key: filterKey, rows: [], undatedCount: 0 })
+        toast.error(err instanceof Error ? err.message : 'Something went wrong.')
+      })
     return () => { cancelled = true }
-  }, [fromDate, toDate, includeUndated])
+  }, [fromDate, toDate, includeUndated, filterKey])
 
   // A true range this time, both ends on ONE field: the date the item was due
   // back. "Expected from 21 Sep, Expected to 26 Sep" is everything that was
@@ -1236,6 +1248,7 @@ function ReturnsReport() {
         <ExportCsvButton
           className="border-[#D5CBE0] text-[#322342] hover:border-[#6C3D91] hover:bg-[#F8F5FA]"
           filename={`returns-${todayDateStr()}.csv`}
+          disabled={pending}
           rows={returnsCsvRows}
           columns={[
             { header: 'Reference', value: (t: any) => t.reference_no },
@@ -1270,6 +1283,7 @@ function ReturnsReport() {
         <ExportPdfButton
           className="border-[#D5CBE0] text-[#322342] hover:border-[#6C3D91] hover:bg-[#F8F5FA]"
           filename={`returns-${todayDateStr()}.pdf`}
+          disabled={pending}
           title="Returns Report"
           subtitle={[
             `Compiled ${formatDateOnly(todayDateStr())}  ·  ${sortedReturns.length} ${sortedReturns.length === 1 ? 'return' : 'returns'}`,
