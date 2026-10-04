@@ -133,6 +133,10 @@ DATABASE_URL='postgres://<user>:<password>@127.0.0.1:5433/smartstock' \
 ```
 A bare `--replace` is refused and prints the name of the target database. `--replace` is also refused once the target holds anything the import plan does not account for: a row whose id is not in the plan, or a row created or updated after the newest record in Firestore (data entered after go-live), so a re-run cannot wipe live work. If a write fails, the transaction rolls back and the database is left as it was.
 
+The id check also refuses when a record was deleted in Firestore after the rehearsal (for example to clear a dry-run problem), because the rehearsal's copy of it is no longer in the plan. In that case start from an empty database instead: drop and recreate the Cloud SQL database (Cloud SQL console, Databases), run step 5a again, then import without `--replace`. Do not use `db:reset` through the proxy (see the warning in step 5).
+
+Tip: naming the production database something other than `smartstock` (for example `smartstock_prod`) makes `db:reset` and the seeds' `--reset` refuse it outright. If you do, use that name in every `DATABASE_URL` above and in `--replace=<database>`.
+
 **7. Notes on the imported data**
 - Timestamps are imported at millisecond precision (what the app wrote); a microsecond or nanosecond Firestore value would be cut to milliseconds. Day-only fields (loan dates, expected return dates) are copied as the same `YYYY-MM-DD` text, never through a date object, so they do not shift.
 - Firestore document ids are kept as the primary keys.

@@ -17,7 +17,7 @@ export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
 // Query-string keys through which a connection string configures TLS. pg reads them in pg-connection-string and the
 // result REPLACES an explicit `ssl` pool option (connection-parameters.js: Object.assign(config, parse(url))), so with
 // DATABASE_SSL_CA set they are removed from the URL and the CA-pinned `ssl` option below is what applies.
-const URL_SSL_KEYS = ['ssl', 'sslmode', 'sslrootcert', 'sslcert', 'sslkey', 'uselibpqcompat']
+const URL_SSL_KEYS = ['ssl', 'sslmode', 'sslrootcert', 'sslcert', 'sslkey', 'sslnegotiation', 'uselibpqcompat']
 
 /** Drop the TLS query parameters (URL_SSL_KEYS) from a connection string; everything else is kept verbatim. */
 export function stripUrlSsl(url: string): string {

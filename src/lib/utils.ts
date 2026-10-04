@@ -89,7 +89,7 @@ export function formatDateShort(iso: string): string {
   })
 }
 
-// Shared by todayDateStr()/isoToLocalDateStr() below — formats a Date using
+// Used by todayDateStr() below — formats a Date using
 // its LOCAL getFullYear()/getMonth()/getDate(), never UTC ones.
 function dateStrFromDate(d: Date): string {
   const mm = String(d.getMonth() + 1).padStart(2, '0')
