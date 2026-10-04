@@ -6,9 +6,9 @@ import {
   EmailAuthProvider,
   reauthenticateWithCredential,
   updatePassword,
-  validatePassword,
 } from 'firebase/auth'
 import { auth } from '@/lib/firebase/config'
+import { newPasswordProblem } from '@/lib/firebase/passwordRules'
 import { requestPasswordReset } from '@/lib/firebase/accountEmails'
 import { useStaffPortal } from '@/context/StaffPortalContext'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -42,21 +42,11 @@ function ChangePasswordCard({ email }: { email: string }) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-    // Checks the new password against the live Firebase Auth password
-    // policy (Console: Authentication -> Settings -> Password policy) so
-    // this form always matches whatever's actually enforced server-side,
-    // rather than hard-coding the rules a second time here.
-    const status = await validatePassword(auth, newPassword)
-    if (!status.isValid) {
-      const missing: string[] = []
-      const opts = status.passwordPolicy.customStrengthOptions
-      if (status.meetsMinPasswordLength === false) missing.push(`at least ${opts.minPasswordLength} characters`)
-      if (status.meetsMaxPasswordLength === false) missing.push(`at most ${opts.maxPasswordLength} characters`)
-      if (status.containsUppercaseLetter === false) missing.push('an uppercase letter')
-      if (status.containsLowercaseLetter === false) missing.push('a lowercase letter')
-      if (status.containsNumericCharacter === false) missing.push('a number')
-      if (status.containsNonAlphanumericCharacter === false) missing.push('a special character')
-      setError(`New password needs ${missing.join(', ')}.`)
+    // Live password policy, or the same 6-20 rule when running against
+    // the Auth emulator (see passwordRules.ts).
+    const problem = await newPasswordProblem(auth, newPassword)
+    if (problem) {
+      setError(problem)
       return
     }
     if (newPassword !== confirmPassword) {
