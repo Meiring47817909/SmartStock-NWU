@@ -189,7 +189,7 @@ export function summaryLines(s: SeedSummary): string[] {
     '  uploaded to the Storage emulator -- check Browse or the Products page.',
     '',
     'AUDIT LOG: filter by entity to see product/category/staff/transaction/',
-    '  loan_request coverage -- including the decline-of-a-counter rich',
+    '  loan_request coverage -- including the new decline-of-a-counter rich',
     '  snapshot on "' + s.declinedCounterRich + '".',
     '',
     'Run this seed on an empty database: a second run is refused. For a clean slate run',
@@ -260,6 +260,11 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   let admin: Caller = adminCaller(ADMIN_UID, ADMIN_NAME, null)
   const asAdmin = (dayOffset: number, minutes = 0) => seedCtx(db, clock.at(dayOffset, minutes), admin)
   const asStaff = (member: SeedStaff, dayOffset: number, minutes = 0) => seedCtx(db, clock.at(dayOffset, minutes), staffCaller(member))
+  // The catalogue, roster and settings are set up one row after another (the old seed stamped each with the clock as it went),
+  // so created_at ordering on the Staff, Products and Categories pages follows the creation order, not random ids.
+  let setupTick = 0
+  const setupAt = () => new Date(clock.at(SETUP).getTime() + setupTick++ * 1000)
+  const asSetup = () => seedCtx(db, setupAt(), admin)
   const asSystem = (dayOffset: number) => seedCtx(db, clock.at(dayOffset), SYSTEM_CALLER)
 
   // =====================================================================
@@ -269,13 +274,13 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // =====================================================================
   const adminUser = await upsertSeedUser(auth, ADMIN_EMAIL, SEED_PASSWORD, ADMIN_UID)
   // RAW INSERT 1: the administrator's profile (role) row -- the app has no save path that creates it.
-  await db.insert(profiles).values({ uid: adminUser.uid, full_name: ADMIN_NAME, role: 'admin', created_at: clock.at(SETUP) })
+  await db.insert(profiles).values({ uid: adminUser.uid, full_name: ADMIN_NAME, role: 'admin', created_at: setupAt() })
   admin = adminCaller(adminUser.uid, ADMIN_NAME, null)
 
   // My Profile -> My details (name, surname, department) reads this record: the same save My Profile makes the first
   // time the administrator opens it (it creates her own borrower record, hidden from the Staff page).
   const [adminFirstName, ...adminRest] = ADMIN_NAME.split(' ')
-  const adminStaff = await updateOwnDetails(asAdmin(SETUP), {
+  const adminStaff = await updateOwnDetails(asSetup(), {
     name: adminFirstName,
     surname: adminRest.join(' '),
     department: DEPARTMENT,
@@ -286,8 +291,8 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
 
   // Settings -> Notifications addresses: administrator emails are delivered to the administrator's own login address,
   // and every email is sent From the system address. The toggles are left untouched.
-  await saveAddress(asAdmin(SETUP), 'admin_notification_email', ADMIN_EMAIL)
-  await saveAddress(asAdmin(SETUP), 'system_from_email', SYSTEM_FROM_EMAIL)
+  await saveAddress(asSetup(), 'admin_notification_email', ADMIN_EMAIL)
+  await saveAddress(asSetup(), 'system_from_email', SYSTEM_FROM_EMAIL)
 
   // A portal-borrower login, linked to the Portal Linked staff record created in section 2 below.
   const portalBorrowerUser = await upsertSeedUser(auth, 'jessica.moore@gmail.com', SEED_PASSWORD, PORTAL_BORROWER_UID)
@@ -306,7 +311,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
     { name: 'Storage', description: 'SSDs, HDDs, USB drives' },
   ]
   const categoryId: Record<string, string> = {}
-  for (const c of CATEGORY_SPECS) categoryId[c.name] = (await createCategory(asAdmin(SETUP), c)).id
+  for (const c of CATEGORY_SPECS) categoryId[c.name] = (await createCategory(asSetup(), c)).id
 
   const demoCategory = await createCategory(asAdmin(-14), { name: 'Office Accessories', description: 'Desk organisers, monitor stands and cable trays.' })
   await updateCategory(asAdmin(-13), demoCategory.id, {
@@ -381,7 +386,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
     // entry below, so it is a real before/after.
     const startDepartment = key === 'PendingFresh' ? D.math : department
     const card_uid = hasCard ? cardUidFor(i) : null
-    const created = await createStaff(asAdmin(SETUP), { name, surname, email, department: startDepartment, card_uid })
+    const created = await createStaff(asSetup(), { name, surname, email, department: startDepartment, card_uid })
     S[key] = { id: created.id, name, surname, full_name: `${name} ${surname}`, email, department, card_uid, uid: null }
   }
 
@@ -432,7 +437,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
       lending_interval: spec.lending_interval ?? 'week_1',
       images,
     }
-    await createProduct(asAdmin(SETUP), input)
+    await createProduct(asSetup(), input)
     return { id, name: spec.name, barcodes, input }
   }
   // Edit one product the way the Products page does (every field is re-sent, one changes), recording an audit entry.
@@ -592,6 +597,8 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
     notes?: string | null
     linkedTxnId?: string
     linkedRequestId?: string
+    /** The staff member was picked from a list although they have a card (an explicit choice in the scenario). */
+    manualOverride?: boolean
     dayOffset: number
   }
   // One stock movement through the data layer, stamped at the scenario's moment. Items name barcodes only where the
@@ -601,8 +608,9 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
     const items: StockItemInput[] = a.items.map((i) => ({ productId: i.product.id, quantity: i.quantity, ...(i.barcodes ? { barcodes: i.barcodes } : {}) }))
     const ctx = asAdmin(a.dayOffset)
     // A staff member with no card on file can only ever have been picked from the list, so their Stock Outs / Returns
-    // are manual entries by definition. Stock In and ADJUST have no staff step to bypass.
-    const manualOverride = !!a.staff && !a.staff.card_uid
+    // are manual entries by definition; a scenario can also ask for it explicitly. Stock In and ADJUST have no staff step
+    // to bypass.
+    const manualOverride = a.manualOverride === true || (!!a.staff && !a.staff.card_uid)
     switch (a.type) {
       case 'IN':
         return recordStockIn(ctx, { items, notes: a.notes ?? null })
@@ -668,7 +676,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // 4. OUTSTANDING RETURNS (Dashboard tab) -- walk-in Stock Out activity, not tied to any loan request. Every badge
   //    variant, plus a Mixed holder with three at once.
   // =====================================================================
-  await movement({ type: 'OUT', staff: S.ReturnNoDate, items: [{ product: P.returnNoDate, quantity: 1 }], lendFrom: addDays(-5), lendTo: null, notes: 'Staff selected manually (no card scan)', dayOffset: -5 })
+  await movement({ type: 'OUT', staff: S.ReturnNoDate, items: [{ product: P.returnNoDate, quantity: 1 }], lendFrom: addDays(-5), lendTo: null, manualOverride: true, notes: 'Staff selected manually (no card scan)', dayOffset: -5 })
   await movement({ type: 'OUT', staff: S.ReturnOverdue, items: [{ product: P.returnOverdue, quantity: 2 }], lendFrom: addDays(-15), lendTo: addDays(-3), dayOffset: -15 })
   await movement({ type: 'OUT', staff: S.ReturnDueToday, items: [{ product: P.returnDueToday, quantity: 1 }], lendFrom: addDays(-7), lendTo: TODAY, dayOffset: -7 })
   await movement({ type: 'OUT', staff: S.ReturnNotDueYet, items: [{ product: P.returnNotDueYet, quantity: 3 }], lendFrom: addDays(-1), lendTo: addDays(14), dayOffset: -1 })

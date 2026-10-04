@@ -12,9 +12,11 @@
 //
 // Server modules import 'server-only': run these scripts with `tsx --conditions=react-server` (see package.json).
 import { readFileSync, existsSync } from 'node:fs'
+import net from 'node:net'
 import path from 'node:path'
 import { count, getTableName, is, sql } from 'drizzle-orm'
 import { PgTable } from 'drizzle-orm/pg-core'
+import { parse as parseConnectionString } from 'pg-connection-string'
 import { SYSTEM_CALLER, type Caller, type Ctx } from '@/server/context'
 import type { Db } from '@/server/db/client'
 import * as schema from '@/server/db/schema'
@@ -99,56 +101,104 @@ export function cardUidFor(index: number): string {
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
 
 export function isLocalHost(host: string): boolean {
-  return LOCAL_HOSTS.has(host.toLowerCase())
+  // A path is a unix-socket directory: the same machine by definition.
+  return LOCAL_HOSTS.has(host.toLowerCase()) || host.startsWith('/')
 }
 
-/** Throws unless `url` points at this machine (or `allowNonLocal` was given explicitly). */
+/**
+ * Every host the pg driver would actually try for a connection string plus any explicit options: the parsed `host`
+ * (which a `?host=` query parameter overrides, and which may be a comma-separated list) and `hostaddr` (a numeric
+ * address that wins over the name). Reading `new URL().hostname` instead would miss both. No host at all means the
+ * driver's own default (PGHOST, else localhost).
+ */
+export function databaseHosts(connectionString: string | undefined, explicit: { host?: unknown; hostaddr?: unknown } = {}): string[] {
+  const hosts: string[] = []
+  const add = (value: unknown) => {
+    if (typeof value === 'string') for (const h of value.split(',')) if (h.trim()) hosts.push(h.trim())
+  }
+  if (connectionString) {
+    try {
+      const parsed = parseConnectionString(connectionString) as { host?: unknown; hostaddr?: unknown }
+      add(parsed.host)
+      add(parsed.hostaddr)
+    } catch {
+      hosts.push('(unparseable connection string)')
+    }
+  }
+  add(explicit.host)
+  add(explicit.hostaddr)
+  if (hosts.length === 0) add(process.env.PGHOST ?? 'localhost')
+  return hosts
+}
+
+function refuseNonLocalDatabase(hosts: string[]): never {
+  const bad = hosts.filter((h) => !isLocalHost(h))
+  throw new Error(
+    `Refusing to seed a database on "${bad.join(', ')}": the seeds only run against a local PostgreSQL ` +
+      '(127.0.0.1, localhost or a unix socket). Pass --allow-non-local-db only if you really mean it.',
+  )
+}
+
+/** Throws unless every host in `url` is this machine (or `allowNonLocal` was given explicitly). */
 export function assertLocalDatabaseUrl(url: string, allowNonLocal = false): void {
-  let host = ''
-  try {
-    host = new URL(url).hostname
-  } catch {
-    // An unparseable URL is treated as "not known to be local".
-  }
-  if (!allowNonLocal && !isLocalHost(host)) {
-    throw new Error(
-      `Refusing to seed a database on "${host || 'an unknown host'}": the seeds only run against a local PostgreSQL ` +
-        '(127.0.0.1 or localhost). Pass --allow-non-local-db only if you really mean it.',
-    )
-  }
+  const hosts = databaseHosts(url)
+  if (!allowNonLocal && !hosts.every(isLocalHost)) refuseNonLocalDatabase(hosts)
 }
 
 /** The same check on an open connection (what the seed function itself uses, so no caller can skip it). */
 export function assertLocalDatabase(db: Db, allowNonLocal = false): void {
-  const options = db.$client.options
-  const host = options.connectionString ? safeHost(options.connectionString) : (options.host ?? '')
-  if (!allowNonLocal && !isLocalHost(host)) {
-    throw new Error(
-      `Refusing to seed a database on "${host || 'an unknown host'}": the seeds only run against a local PostgreSQL ` +
-        '(127.0.0.1 or localhost). Pass --allow-non-local-db only if you really mean it.',
-    )
-  }
-}
-
-function safeHost(url: string): string {
-  try {
-    return new URL(url).hostname
-  } catch {
-    return ''
-  }
+  const options = db.$client.options as { connectionString?: string; host?: unknown; hostaddr?: unknown }
+  const hosts = databaseHosts(options.connectionString, options)
+  if (!allowNonLocal && !hosts.every(isLocalHost)) refuseNonLocalDatabase(hosts)
 }
 
 /**
  * The Auth and Storage helpers below only ever talk to the emulators: both hosts must be set and local, or this throws
- * before anything is created. (firebase-admin reads these variables and then never contacts the live project.)
+ * before anything is created. firebase-admin (via @google-cloud/storage) prefers STORAGE_EMULATOR_HOST over
+ * FIREBASE_STORAGE_EMULATOR_HOST, so that one must not point anywhere else either. (With these set, firebase-admin never
+ * contacts the live project.)
  */
 export function assertEmulatorEnv(env: Record<string, string | undefined> = process.env): void {
   for (const name of ['FIREBASE_AUTH_EMULATOR_HOST', 'FIREBASE_STORAGE_EMULATOR_HOST'] as const) {
+    if (!env[name]) throw new Error(`${name} is not set: the seed only talks to the Firebase emulators. Start them with "npm run emulators".`)
+  }
+  for (const name of ['FIREBASE_AUTH_EMULATOR_HOST', 'FIREBASE_STORAGE_EMULATOR_HOST', 'STORAGE_EMULATOR_HOST'] as const) {
     const value = env[name]
-    if (!value) throw new Error(`${name} is not set: the seed only talks to the Firebase emulators. Start them with "npm run emulators".`)
-    const host = value.replace(/^\w+:\/\//, '').replace(/:\d+$/, '')
+    if (!value) continue
+    const host = value.replace(/^\w+:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '').replace(/^\[(.*)\]$/, '$1')
     if (!isLocalHost(host)) throw new Error(`${name} is "${value}": the seed only talks to emulators on this machine.`)
   }
+}
+
+function emulatorEndpoint(value: string): { host: string; port: number } {
+  const hostPort = value.replace(/^\w+:\/\//, '').replace(/\/.*$/, '')
+  const m = /^(?:\[(.*)\]|([^:]*))(?::(\d+))?$/.exec(hostPort)
+  return { host: (m?.[1] ?? m?.[2] ?? '127.0.0.1') || '127.0.0.1', port: Number(m?.[3] ?? 80) }
+}
+
+/** Opens (and closes) a TCP connection to one emulator; rejects with a readable message when nothing is listening. */
+function probe(name: string, value: string, timeoutMs: number): Promise<void> {
+  const { host, port } = emulatorEndpoint(value)
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ host, port })
+    const fail = () => {
+      socket.destroy()
+      reject(new Error(`${name} (${value}) is not reachable. Start the emulators first with "npm run emulators"; nothing was written.`))
+    }
+    socket.setTimeout(timeoutMs, fail)
+    socket.once('error', fail)
+    socket.once('connect', () => {
+      socket.destroy()
+      resolve()
+    })
+  })
+}
+
+/** Both emulators must be accepting connections, checked before the first database write so a down emulator can't leave a half-seeded database. */
+export async function assertEmulatorsReachable(env: Record<string, string | undefined> = process.env, timeoutMs = 3000): Promise<void> {
+  assertEmulatorEnv(env)
+  await probe('FIREBASE_AUTH_EMULATOR_HOST', env.FIREBASE_AUTH_EMULATOR_HOST as string, timeoutMs)
+  await probe('FIREBASE_STORAGE_EMULATOR_HOST', env.FIREBASE_STORAGE_EMULATOR_HOST as string, timeoutMs)
 }
 
 function appTables(): PgTable[] {
@@ -276,9 +326,9 @@ export function createProductImageSeeder(bucket: SeedBucket, imagesDir: string =
 
 // --- Emulator wiring (CLI only) -------------------------------------------------------------------------------------------
 
-/** firebase-admin loads on demand, so tests that pass fakes never initialise it. Checks the emulator hosts first. */
+/** firebase-admin loads on demand, so tests that pass fakes never initialise it. Checks the emulator hosts and that both answer first. */
 export async function createEmulatorAuthAndBucket(): Promise<{ auth: SeedAuth; bucket: SeedBucket }> {
-  assertEmulatorEnv()
+  await assertEmulatorsReachable()
   const { initializeApp } = await import('firebase-admin/app')
   const { getAuth } = await import('firebase-admin/auth')
   const { getStorage } = await import('firebase-admin/storage')

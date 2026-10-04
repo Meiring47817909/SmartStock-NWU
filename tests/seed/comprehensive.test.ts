@@ -1,12 +1,15 @@
 import { count, eq, sql } from 'drizzle-orm'
 import type { PgTable } from 'drizzle-orm/pg-core'
+import net from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   assertEmulatorEnv,
+  assertEmulatorsReachable,
   assertLocalDatabase,
   adminCaller,
   assertLocalDatabaseUrl,
   createFakeAuthAndBucket,
+  databaseHosts,
   seedClock,
   seedCtx,
 } from '../../scripts/seed/context'
@@ -81,6 +84,47 @@ import { closeTestDb, resetTestDb } from '../helpers/db'
 //     -3 (was -1) and Samuel Prescott's on day -18 (was -15 -- see the seed for the dates).
 
 const NOW = new Date()
+
+// Stock Outs / Returns entered by picking the staff member from the list: all 17 of those made by the 15 staff without a
+// card (Amelia Hayes 1, Henry Caldwell 4, Hannah Wells 1, Nathan Brooks 1, Natalie Pierce 3, Ethan Marshall 2 (OUT + RETURN),
+// Megan Holloway 2 (OUT + RETURN), Ryan Fletcher 1, Jessica Moore 2) plus Lucas Hamilton's explicit one.
+const MANUAL_OVERRIDES = 18
+
+// The cast the user records their video with: it must never change. [full name, email, department, has a card, has a login]
+// (the departments, emails and the card / login mix are the Firestore seed's, one row per scenario staff member).
+const ROSTER: [string, string, string, boolean, boolean][] = [
+  ['Emma Richardson', 'emma.richardson@gmail.com', 'Computer Science and Information Systems', true, true],
+  ['Oliver Bennett', 'oliver.bennett92@gmail.com', 'Physical and Chemical Sciences', true, false],
+  ['Sophie Hartley', 'sophie.hartley@gmail.com', 'Biological Sciences', false, true],
+  ['James Whitfield', 'james.whitfield@gmail.com', 'Geo- and Spatial Sciences', false, false],
+  ['Charlotte Ellis', 'charlotte.ellis88@gmail.com', 'Agricultural Sciences', true, true],
+  ['Daniel Mercer', 'daniel.mercer@gmail.com', 'Mathematical and Statistical Sciences', true, false],
+  ['Amelia Hayes', 'amelia.hayes@gmail.com', 'Business Mathematics and Informatics', false, true],
+  ['Benjamin Carter', 'ben.carter.work@gmail.com', 'Computer Science and Information Systems', false, false],
+  ['Grace Thornton', 'grace.thornton@gmail.com', 'Physical and Chemical Sciences', true, true],
+  ['Samuel Prescott', 'samuel.prescott@gmail.com', 'Biological Sciences', true, false],
+  ['Olivia Sinclair', 'olivia.sinclair@gmail.com', 'Geo- and Spatial Sciences', false, true],
+  ['Henry Caldwell', 'henry.caldwell@gmail.com', 'Agricultural Sciences', false, false],
+  ['Lily Fraser', 'lily.fraser@gmail.com', 'Mathematical and Statistical Sciences', true, true],
+  ['William Ashford', 'william.ashford@gmail.com', 'Business Mathematics and Informatics', true, false],
+  ['Chloe Winters', 'chloe.winters@gmail.com', 'Computer Science and Information Systems', false, true],
+  ['Thomas Reeves', 'thomas.reeves@gmail.com', 'Physical and Chemical Sciences', false, false],
+  ['Isabella Crawford', 'isabella.crawford@gmail.com', 'Biological Sciences', true, true],
+  ['Lucas Hamilton', 'lucas.hamilton@gmail.com', 'Geo- and Spatial Sciences', true, false],
+  ['Hannah Wells', 'hannah.wells@gmail.com', 'Agricultural Sciences', false, true],
+  ['Nathan Brooks', 'nathan.brooks@gmail.com', 'Mathematical and Statistical Sciences', false, false],
+  ['Victoria Lang', 'victoria.lang@gmail.com', 'Business Mathematics and Informatics', true, true],
+  ['Joshua Kerr', 'joshua.kerr@gmail.com', 'Computer Science and Information Systems', true, false],
+  ['Natalie Pierce', 'natalie.pierce@gmail.com', 'Physical and Chemical Sciences', false, true],
+  ['Ethan Marshall', 'ethan.marshall@gmail.com', 'Biological Sciences', false, false],
+  ['Rachel Dawson', 'rachel.dawson@gmail.com', 'Geo- and Spatial Sciences', true, true],
+  ['Adam Sutton', 'adam.sutton@gmail.com', 'Agricultural Sciences', true, false],
+  ['Megan Holloway', 'megan.holloway@gmail.com', 'Mathematical and Statistical Sciences', false, true],
+  ['Ryan Fletcher', 'ryan.fletcher@gmail.com', 'Business Mathematics and Informatics', false, false],
+  ['Zoe Mitchell', 'zoe.mitchell@gmail.com', 'Computer Science and Information Systems', true, true],
+  ['Callum Rhodes', 'callum.rhodes@gmail.com', 'Physical and Chemical Sciences', true, false],
+  ['Jessica Moore', 'jessica.moore@gmail.com', 'Biological Sciences', false, true],
+]
 
 let db: Db
 let summary: SeedSummary
@@ -161,14 +205,36 @@ describe('safety rails', () => {
     expect(() => assertLocalDatabaseUrl('postgres://u:p@10.0.0.5:5432/smartstock')).toThrow(/Refusing/)
     expect(() => assertLocalDatabaseUrl('postgres://u:p@127.0.0.1:5432/smartstock')).not.toThrow()
     expect(() => assertLocalDatabaseUrl('postgres://u:p@localhost/smartstock')).not.toThrow()
+    expect(() => assertLocalDatabaseUrl('postgres://u:p@[::1]:5432/smartstock')).not.toThrow()
     expect(() => assertLocalDatabaseUrl('postgres://u:p@db.example.com/smartstock', true)).not.toThrow()
     expect(() => assertLocalDatabaseUrl('not a url')).toThrow(/Refusing/)
   })
 
+  it('checks the host the pg driver will really use: ?host= and ?hostaddr= override the URL host, lists are checked whole', () => {
+    expect(() => assertLocalDatabaseUrl('postgres://u:p@localhost/db?host=db.example.com')).toThrow(/db\.example\.com/)
+    expect(() => assertLocalDatabaseUrl('postgres://u:p@localhost/db?hostaddr=10.0.0.5')).toThrow(/10\.0\.0\.5/)
+    expect(() => assertLocalDatabaseUrl('postgres://u:p@127.0.0.1/db?hostaddr=10.0.0.5&host=localhost')).toThrow(/10\.0\.0\.5/)
+    expect(() => assertLocalDatabaseUrl('postgres://u:p@localhost,db.example.com/db')).toThrow(/db\.example\.com/)
+    expect(() => assertLocalDatabaseUrl('postgres://u:p@localhost/db?host=db.example.com', true)).not.toThrow()
+    // both local: fine
+    expect(() => assertLocalDatabaseUrl('postgres://u:p@localhost/db?hostaddr=127.0.0.1')).not.toThrow()
+  })
+
+  it('treats a unix-socket path as local', () => {
+    expect(() => assertLocalDatabaseUrl('postgres:///smartstock?host=/var/run/postgresql')).not.toThrow()
+    expect(() => assertLocalDatabaseUrl('postgres://u:p@%2Fvar%2Frun%2Fpostgresql/smartstock')).not.toThrow()
+    expect(() => assertLocalDatabaseUrl('postgres://u:p@localhost/smartstock?host=/tmp')).not.toThrow()
+    expect(databaseHosts('postgres:///smartstock?host=/var/run/postgresql')).toEqual(['/var/run/postgresql'])
+  })
+
   it('checks the open connection too, so the seed function itself cannot be pointed at a remote database', () => {
-    const remote = { $client: { options: { connectionString: 'postgres://u:p@db.example.com/x' } } } as unknown as Db
-    expect(() => assertLocalDatabase(remote)).toThrow(/db\.example\.com/)
-    expect(() => assertLocalDatabase(remote, true)).not.toThrow()
+    const open = (options: Record<string, unknown>) => ({ $client: { options } }) as unknown as Db
+    expect(() => assertLocalDatabase(open({ connectionString: 'postgres://u:p@db.example.com/x' }))).toThrow(/db\.example\.com/)
+    expect(() => assertLocalDatabase(open({ connectionString: 'postgres://u:p@db.example.com/x' }), true)).not.toThrow()
+    expect(() => assertLocalDatabase(open({ connectionString: 'postgres://u:p@localhost/x?host=db.example.com' }))).toThrow(/db\.example\.com/)
+    expect(() => assertLocalDatabase(open({ connectionString: 'postgres://u:p@localhost/x?hostaddr=10.0.0.5' }))).toThrow(/10\.0\.0\.5/)
+    expect(() => assertLocalDatabase(open({ host: 'db.example.com', database: 'x' }))).toThrow(/db\.example\.com/)
+    expect(() => assertLocalDatabase(open({ host: '/var/run/postgresql', database: 'x' }))).not.toThrow()
     expect(() => assertLocalDatabase(db)).not.toThrow()
   })
 
@@ -177,6 +243,33 @@ describe('safety rails', () => {
     expect(() => assertEmulatorEnv({ FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099' })).toThrow(/FIREBASE_STORAGE_EMULATOR_HOST is not set/)
     expect(() => assertEmulatorEnv({ FIREBASE_AUTH_EMULATOR_HOST: 'auth.example.com:9099', FIREBASE_STORAGE_EMULATOR_HOST: '127.0.0.1:9199' })).toThrow(/this machine/)
     expect(() => assertEmulatorEnv({ FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099', FIREBASE_STORAGE_EMULATOR_HOST: 'localhost:9199' })).not.toThrow()
+  })
+
+  it('also rejects a non-local STORAGE_EMULATOR_HOST, which firebase-admin prefers over FIREBASE_STORAGE_EMULATOR_HOST', () => {
+    const local = { FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099', FIREBASE_STORAGE_EMULATOR_HOST: '127.0.0.1:9199' }
+    expect(() => assertEmulatorEnv({ ...local, STORAGE_EMULATOR_HOST: 'https://storage.googleapis.com' })).toThrow(/STORAGE_EMULATOR_HOST is "https:\/\/storage\.googleapis\.com"/)
+    expect(() => assertEmulatorEnv({ ...local, STORAGE_EMULATOR_HOST: 'storage.example.com:9199' })).toThrow(/this machine/)
+    expect(() => assertEmulatorEnv({ ...local, STORAGE_EMULATOR_HOST: 'http://127.0.0.1:9199' })).not.toThrow()
+    expect(() => assertEmulatorEnv({ ...local, STORAGE_EMULATOR_HOST: 'localhost:9199' })).not.toThrow()
+  })
+
+  it('checks that both emulators answer before anything is written, so a down Storage emulator cannot leave a half-seeded database', async () => {
+    const listen = (): Promise<net.Server> => new Promise((resolve) => { const srv = net.createServer((c) => c.destroy()); srv.listen(0, '127.0.0.1', () => resolve(srv)) })
+    const portOf = (srv: net.Server) => (srv.address() as net.AddressInfo).port
+    const authUp = await listen()
+    const storageUp = await listen()
+    const down = await listen()
+    const downPort = portOf(down)
+    await new Promise((r) => down.close(r))
+    try {
+      const env = (storagePort: number) => ({ FIREBASE_AUTH_EMULATOR_HOST: `127.0.0.1:${portOf(authUp)}`, FIREBASE_STORAGE_EMULATOR_HOST: `127.0.0.1:${storagePort}` })
+      await expect(assertEmulatorsReachable(env(portOf(storageUp)))).resolves.toBeUndefined()
+      await expect(assertEmulatorsReachable(env(downPort))).rejects.toThrow(/FIREBASE_STORAGE_EMULATOR_HOST .* is not reachable.*nothing was written/)
+      await expect(assertEmulatorsReachable({ ...env(portOf(storageUp)), FIREBASE_AUTH_EMULATOR_HOST: `127.0.0.1:${downPort}` })).rejects.toThrow(/FIREBASE_AUTH_EMULATOR_HOST .* is not reachable/)
+    } finally {
+      await new Promise((r) => authUp.close(r))
+      await new Promise((r) => storageUp.close(r))
+    }
   })
 
   it('refuses to run again on a database that already has data (the ledger is append-only)', async () => {
@@ -219,29 +312,37 @@ describe('logins', () => {
 })
 
 describe('staff', () => {
-  it('has the 31 scenario staff plus the administrator\'s own borrower record', async () => {
-    const rows = await db.select().from(staff)
-    const scenario = rows.filter((r) => !r.is_admin_account)
-    expect(scenario).toHaveLength(31)
-    expect(rows).toHaveLength(32)
-    expect(summary.staff).toHaveLength(31)
-    const names = new Set(scenario.map((r) => r.full_name))
-    for (const name of ['Emma Richardson', 'Oliver Bennett', 'Sophie Hartley', 'Jessica Moore', 'Callum Rhodes', 'Zoe Mitchell', 'Ryan Fletcher']) {
-      expect(names.has(name), name).toBe(true)
-    }
-    const admin = rows.find((r) => r.is_admin_account)
-    expect(admin).toMatchObject({ full_name: 'Jonathan Pritchard', email: 'jonathan.pritchard@nwu.ac.za', uid: 'seed-admin', department: 'Computer Science and Information Systems' })
+  it('has exactly the 31 scenario staff of the Firestore seed: names, emails, departments, cards and logins', async () => {
+    const rows = await db.select().from(staff).where(eq(staff.is_admin_account, false))
+    expect(rows).toHaveLength(31)
+    expect(ROSTER).toHaveLength(31)
+    const actual = rows
+      .map((r): [string, string, string | null, boolean, boolean] => [r.full_name, r.email as string, r.department, r.card_uid !== null, r.uid !== null])
+      .sort((x, y) => x[0].localeCompare(y[0]))
+    expect(actual).toEqual([...ROSTER].sort((x, y) => x[0].localeCompare(y[0])))
+    expect(summary.staff.map((m) => m.fullName)).toEqual(ROSTER.map((r) => r[0]))
+    // Everyone is active except Callum Rhodes (his badge was switched off).
+    expect(rows.filter((r) => !r.is_active).map((r) => r.full_name)).toEqual(['Callum Rhodes'])
   })
 
-  it('spreads cards and portal access evenly (index mod 4) and keeps the departments', async () => {
-    const rows = (await db.select().from(staff).where(eq(staff.is_admin_account, false))).sort((a, b) => a.created_at.getTime() - b.created_at.getTime() || a.id.localeCompare(b.id))
-    expect(rows.filter((r) => r.card_uid).length).toBe(16)
-    expect(rows.filter((r) => r.uid).length).toBe(16)
-    const emma = rows.find((r) => r.full_name === 'Emma Richardson')
-    expect(emma).toMatchObject({ department: 'Computer Science and Information Systems', email: 'emma.richardson@gmail.com', is_active: true })
-    expect(rows.find((r) => r.full_name === 'Callum Rhodes')?.is_active).toBe(false)
-    expect(rows.find((r) => r.full_name === 'Zoe Mitchell')?.is_active).toBe(true)
-    expect(rows.filter((r) => !r.is_active)).toHaveLength(1)
+  it("has the administrator's own hidden borrower record, and Jessica Moore's login linked to her record", async () => {
+    const rows = await db.select().from(staff)
+    expect(rows).toHaveLength(32)
+    expect(rows.find((r) => r.is_admin_account)).toMatchObject({
+      full_name: 'Jonathan Pritchard', email: 'jonathan.pritchard@nwu.ac.za', uid: 'seed-admin', department: 'Computer Science and Information Systems', card_uid: null,
+    })
+    expect(rows.find((r) => r.full_name === 'Jessica Moore')).toMatchObject({ uid: 'seed-demo-portallinked-uid', card_uid: null })
+  })
+
+  it('creates the staff and the catalogue one row after another, so created_at follows the order they were set up in', async () => {
+    const rows = await db.select().from(staff).where(eq(staff.is_admin_account, false))
+    const inCreationOrder = [...rows].sort((a, b) => a.created_at.getTime() - b.created_at.getTime()).map((r) => r.full_name)
+    expect(inCreationOrder).toEqual(ROSTER.map((r) => r[0]))
+    expect(new Set(rows.map((r) => r.created_at.getTime())).size).toBe(31)
+    const cats = await db.select().from(categories)
+    expect(new Set(cats.filter((c) => c.name !== 'Office Accessories').map((c) => c.created_at.getTime())).size).toBe(7)
+    const prods = await db.select().from(products)
+    expect(new Set(prods.map((p) => p.created_at.getTime())).size).toBe(25)
   })
 })
 
@@ -294,6 +395,29 @@ describe('tables and audit log', () => {
   it('has the transaction mix of the Firestore seed', async () => {
     const rows = await db.select({ type: transactions.transaction_type, n: count() }).from(transactions).groupBy(transactions.transaction_type)
     expect(Object.fromEntries(rows.map((r) => [r.type, r.n]))).toEqual({ OUT: 23, IN: 3, ADJUST: 1, RETURN: 4 })
+  })
+
+  it("records the manual overrides of the Firestore seed: every Stock Out / Return of a staff member without a card, plus Lucas Hamilton's explicit one", async () => {
+    const rows = await db
+      .select({ type: transactions.transaction_type, manual: transactions.manual_override, who: transactions.staff_name, card: staff.card_uid, notes: transactions.notes })
+      .from(transactions)
+      .leftJoin(staff, eq(staff.id, transactions.staff_id))
+    const withStaff = rows.filter((r) => r.type === 'OUT' || r.type === 'RETURN')
+    // The rule: no card on file -> picked from the list; otherwise only when the scenario says so.
+    for (const r of withStaff) {
+      if (r.card === null) expect(r.manual, `${r.type} for ${r.who}`).toBe(true)
+    }
+    const manual = withStaff.filter((r) => r.manual)
+    // Lucas Hamilton has a card; his "No Return Date" walk-in was still entered manually, as the old seed said.
+    const lucas = withStaff.filter((r) => r.who === 'Lucas Hamilton')
+    expect(lucas).toHaveLength(1)
+    expect(lucas[0]).toMatchObject({ type: 'OUT', manual: true, notes: 'Staff selected manually (no card scan)' })
+    expect(lucas[0].card).not.toBeNull()
+    // Pinned: the only manual entry by someone with a card is Lucas's; the rest are staff without one.
+    expect(manual.filter((r) => r.card !== null).map((r) => r.who)).toEqual(['Lucas Hamilton'])
+    expect(manual).toHaveLength(MANUAL_OVERRIDES)
+    // Stock In and ADJUST have no staff step to bypass.
+    expect(rows.filter((r) => r.type === 'IN' || r.type === 'ADJUST').every((r) => !r.manual)).toBe(true)
   })
 
   it('has the audit counts per entity and action (differences from the Firestore seed are explained in the header)', () => {
