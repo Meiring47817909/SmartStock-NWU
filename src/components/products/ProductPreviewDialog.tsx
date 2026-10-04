@@ -63,26 +63,40 @@ export default function ProductPreviewDialog({
     return () => clearInterval(timer)
   }, [product?.id, product?.images])
 
+  // A single photo has no thumbnail strip. Rather than leave that strip's
+  // width as dead space, the card is made 88px narrower (strip w-20 + gap-2)
+  // and the photo column shrinks by the same 88px relative to an equal 2-col
+  // split, so the photo is exactly the size it has on a 2-3 photo product
+  // (and the details column keeps its width too).
+  const singlePhoto = product?.images?.length === 1
+
   return (
     <Dialog open={!!product} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[1080px]">
+      <DialogContent
+        mobileFullScreen
+        className={`flex flex-col overflow-hidden dlg:max-h-[90vh] ${
+          singlePhoto ? 'dlg:max-w-[992px] sm:max-w-[992px]' : 'dlg:max-w-[1080px] sm:max-w-[1080px]'
+        }`}
+      >
         {product && (
           <>
-            <div className="grid gap-6 sm:grid-cols-2">
-              <div>
+            <div className={`-mx-1 grid min-h-0 flex-1 gap-6 overflow-y-auto px-1 pt-8 sm:-my-1 sm:py-1 ${
+              singlePhoto ? 'sm:grid-cols-[calc(50%-56px)_1fr]' : 'sm:grid-cols-2'
+            }`}>
+              <div className="min-w-0">
                 {product.images && product.images.length > 0 ? (
-                  <div className="flex gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row">
                     {/* Thumbnail strip — only shown for 2+ photos, to the
                         left of the main photo. Clicking a thumbnail jumps
                         the main photo to it. */}
                     {product.images.length > 1 && (
-                      <div className="flex shrink-0 flex-col justify-evenly">
+                      <div className="order-2 flex shrink-0 flex-row flex-nowrap justify-center gap-2 overflow-x-auto sm:order-1 sm:flex-col sm:justify-evenly sm:gap-0 sm:overflow-visible">
                         {product.images.map((path, i) => (
                           <button
                             key={path}
                             type="button"
                             onClick={() => setActiveImage(i)}
-                            className={`block size-20 shrink-0 overflow-hidden rounded-md ring-2 transition-colors ${
+                            className={`block size-16 shrink-0 overflow-hidden rounded-md ring-2 transition-colors sm:size-20 ${
                               i === activeImage ? 'ring-primary' : 'ring-transparent hover:ring-border'
                             }`}
                           >
@@ -96,7 +110,7 @@ export default function ProductPreviewDialog({
                     {/* Main photo — a plain <img>. Which photo shows is
                         driven by activeImage, set either by the auto-cycle
                         timer or by clicking a thumbnail to its left. */}
-                    <div className="flex aspect-square min-w-0 flex-1 items-center justify-center overflow-hidden rounded-lg bg-muted">
+                    <div className="order-1 flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg bg-muted sm:order-2 sm:w-auto sm:min-w-0 sm:flex-1">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={storageDownloadUrl(product.images[activeImage] ?? product.images[0])}
@@ -113,8 +127,8 @@ export default function ProductPreviewDialog({
                 )}
               </div>
 
-              <div className="flex flex-col gap-3">
-                <DialogTitle className="font-heading pr-8 text-2xl font-bold">{product.name}</DialogTitle>
+              <div className="flex min-w-0 flex-col gap-3">
+                <DialogTitle className="font-heading pr-8 text-2xl font-bold break-words">{product.name}</DialogTitle>
 
                 {/* `product.available` is the admin's own on/off toggle for
                     whether this item is offered for lending at all — it does
@@ -157,15 +171,30 @@ export default function ProductPreviewDialog({
                   </div>
                 )}
 
-                <div className="grid grid-cols-[3fr_2fr] gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-[3fr_2fr]">
                   {(product.lend_from || product.lend_to) && (
                     <div>
                       <div className="mb-1 text-sm font-semibold">Availability</div>
                       <div className="flex items-center gap-1.5 text-sm">
                         <Calendar className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="whitespace-nowrap">
-                          Lendable from {formatLendWindow(product.lend_from, product.lend_to)}
-                        </span>
+                        {(() => {
+                          // formatLendWindow always joins its two halves
+                          // with " – " (see lib/utils.ts) — split on that
+                          // so "– no end date"/"– 31 Oct 2026" can drop to
+                          // its own line under ~350px instead of the whole
+                          // thing staying glued to one nowrap line and
+                          // overflowing the card at that width.
+                          const window = formatLendWindow(product.lend_from, product.lend_to)
+                          const sep = window.indexOf(' – ')
+                          const from = sep === -1 ? window : window.slice(0, sep)
+                          const to = sep === -1 ? null : window.slice(sep + 3)
+                          return (
+                            <span className="whitespace-nowrap">
+                              Lendable from {from}
+                              {to && <span className="max-[349px]:block"> – {to}</span>}
+                            </span>
+                          )
+                        })()}
                       </div>
                     </div>
                   )}
@@ -185,14 +214,14 @@ export default function ProductPreviewDialog({
 
                 {product.description && (
                   <div>
-                    <div className="mb-1 text-sm font-semibold">Long description</div>
-                    <p className="text-sm whitespace-pre-wrap">{product.description}</p>
+                    <div className="mb-1 text-sm font-semibold">Description</div>
+                    <p className="text-sm whitespace-pre-wrap break-words">{product.description}</p>
                   </div>
                 )}
               </div>
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="dlg:flex-row dlg:justify-end">
               {cart && (product.available ?? true) && product.quantity_on_hand > 0 ? (
                 <div className="flex w-full items-center gap-1.5 sm:w-auto sm:justify-end">
                   <Button variant="ghost" size="icon-sm" onClick={cart.onDecrement}>−</Button>

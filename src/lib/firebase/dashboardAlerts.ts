@@ -18,10 +18,12 @@
 // Sidebar's total always agrees with what the Dashboard tabs show. If the
 // Dashboard's counting logic changes, mirror the change here too.
 import { db } from './config'
-import { collection, query, where, getDocs } from 'firebase/firestore'
+import { collection, query, where } from 'firebase/firestore'
+import { getDocsFresh } from './freshDocs'
 import { loadWaivedByTxn, waivedQty } from './waivers'
 import { expireIfNeeded } from './loanRequests'
 import type { LoanRequest } from '@/types/database'
+import { collapseLinesByProduct } from '@/lib/transactionLines'
 
 export interface DashboardAlertCounts {
   outstandingReturns: number
@@ -34,12 +36,12 @@ export async function loadDashboardAlertCounts(): Promise<DashboardAlertCounts> 
   const transactionsRef = collection(db, 'transactions')
 
   const [productsSnap, outSnap, returnSnap, linesSnap, waivedByTxn, loanReqSnap] = await Promise.all([
-    getDocs(collection(db, 'products')),
-    getDocs(query(transactionsRef, where('transaction_type', '==', 'OUT'))),
-    getDocs(query(transactionsRef, where('transaction_type', '==', 'RETURN'))),
-    getDocs(collection(db, 'transaction_lines')),
+    getDocsFresh(collection(db, 'products')),
+    getDocsFresh(query(transactionsRef, where('transaction_type', '==', 'OUT'))),
+    getDocsFresh(query(transactionsRef, where('transaction_type', '==', 'RETURN'))),
+    getDocsFresh(collection(db, 'transaction_lines')),
     loadWaivedByTxn(),
-    getDocs(collection(db, 'loan_requests')),
+    getDocsFresh(collection(db, 'loan_requests')),
   ])
 
   let lowStock = 0
@@ -65,7 +67,7 @@ export async function loadDashboardAlertCounts(): Promise<DashboardAlertCounts> 
   })
   let outstandingReturns = 0
   outTxns.forEach(t => {
-    ;(linesByTxn[t.id] || []).forEach((l: any) => {
+    collapseLinesByProduct(linesByTxn[t.id] || []).forEach((l: any) => {
       const issued = l.quantity || 0
       const returned = returnedByTxn[t.id]?.[l.product_id] ?? 0
       const waived = waivedQty(waivedByTxn, t.id, l.product_id)

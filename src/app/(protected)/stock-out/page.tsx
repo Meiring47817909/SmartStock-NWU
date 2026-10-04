@@ -4,17 +4,19 @@ import { Fragment, useEffect, useState, useRef, useCallback } from 'react'
 import { genRef, cn, todayDateStr, formatDateOnly, formatLendWindow } from '@/lib/utils'
 import { CreditCard, Barcode, CheckCircle, X, Plus, Minus, Users, Search, Info } from 'lucide-react'
 import { db } from '@/lib/firebase/config'
+import { notifyAlertsChanged } from '@/lib/alertsBus'
 import { collection, query, where, getDocs, getDoc, addDoc, updateDoc, doc, orderBy } from 'firebase/firestore'
 import { logAudit } from '@/lib/firebase/audit'
 import { findProductByBarcode } from '@/lib/firebase/products'
-import { getReservationHolders, reservationStatusLabel, resolutionInstruction, requestAuditSnapshot, OPEN_ENDED_TO, type ReservationHolder } from '@/lib/firebase/loanRequests'
 import { postStaffAdmin } from '@/lib/firebase/staff'
 import { toast } from 'sonner'
+import { getReservationHolders, reservationStatusLabel, resolutionInstruction, requestAuditSnapshot, OPEN_ENDED_TO, type ReservationHolder } from '@/lib/firebase/loanRequests'
 import { useAuth } from '@/context/AuthContext'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { AvailabilityDatePicker } from '@/components/portal/AvailabilityDatePicker'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -23,17 +25,22 @@ import {
 } from '@/components/ui/dialog'
 import { ClipboardList } from 'lucide-react'
 import type { StaffMember, Product, CartItem, LoanRequest, LoanRequestLine } from '@/types/database'
+import { totalForProduct, groupRowsByProduct } from '@/lib/scanCart'
 
-// A cart line sourced from an accepted loan request carries the id of the
-// request it fulfils, so handleConfirm knows which request(s) to mark
-// fulfilled. Walk-in barcode-scanned lines have no sourceRequestId.
-type StockOutCartItem = CartItem & { sourceRequestId?: string }
+// One row per (product, barcode) -- scanning a product via two different
+// barcodes gives two rows, each with its own quantity, and each becomes one
+// transaction_lines document. A row sourced from an accepted loan request
+// carries the id of the request it fulfils, so handleConfirm knows which
+// request to mark fulfilled. Those rows start with barcode null ("awaiting
+// scan") holding the offered quantity: every unit still has to be scanned, and
+// each scan moves one unit from that placeholder onto a real (product,
+// barcode) row that inherits the sourceRequestId. Confirm stays blocked until
+// no placeholder is left, so every persisted line carries the exact barcode
+// that Returns will later have to match.
+type StockOutCartItem = CartItem & { sourceRequestId?: string; barcode: string | null }
 
-// Falls back to the pre-multi-barcode singular `barcode` field for products
-// that haven't been edited since (see productBarcodes() in products/page.tsx
-// for the same logic — kept local here to avoid a cross-page import).
-function primaryBarcode(p: { barcodes?: string[]; barcode?: string }): string {
-  return p.barcodes?.[0] ?? p.barcode ?? '—'
+function rowKey(i: StockOutCartItem): string {
+  return `${i.product.id}|${i.barcode ?? ''}|${i.sourceRequestId ?? ''}`
 }
 
 type Step = 'staff' | 'items' | 'confirm' | 'done'
@@ -127,8 +134,10 @@ export default function StockOutPage() {
     async function checkConflicts() {
       const blocking: { product: string; holders: ReservationHolder[] }[] = []
       const fyi: { product: string; holders: ReservationHolder[] }[] = []
-      for (const item of cart) {
-        if (item.sourceRequestId) continue
+      // Walk-in units only, summed per product: a product scanned via two
+      // barcodes is two cart rows but one reservation question.
+      const walkIn = groupRowsByProduct(cart.filter((i) => !i.sourceRequestId))
+      for (const item of walkIn) {
         // An open-ended loan (no Lend To) has no upper bound, so it
         // overlaps every future reservation — check it against an effective
         // infinity rather than skipping the check entirely, which would let
@@ -192,7 +201,7 @@ export default function StockOutPage() {
       const productSnap = await getDoc(doc(db, 'products', line.product_id))
       if (!productSnap.exists()) { missing.push(line.product_name); continue }
       const product = { id: productSnap.id, ...productSnap.data() } as unknown as Product
-      items.push({ product, quantity: Math.min(line.offered_quantity, product.quantity_on_hand), sourceRequestId: r.id })
+      items.push({ product, quantity: Math.min(line.offered_quantity, product.quantity_on_hand), sourceRequestId: r.id, barcode: null })
     }
     if (missing.length > 0) setError(`Some items on this request no longer exist: ${missing.join(', ')}.`)
 
@@ -252,6 +261,7 @@ export default function StockOutPage() {
 
   async function lookupBarcode(barcode: string) {
     setError(''); setLoading(true)
+    const trimmedBarcode = barcode.trim()
     const product = await findProductByBarcode(barcode) as unknown as Product | null
     if (!product) { setError(`Barcode "${barcode}" not found.`); setLoading(false); return }
     if (product.quantity_on_hand <= 0) {
@@ -262,12 +272,24 @@ export default function StockOutPage() {
     }
     let capped = false
     setCart(prev => {
-      const existing = prev.find(i => i.product.id === product.id)
-      if (existing) {
-        if (existing.quantity >= product.quantity_on_hand) { capped = true; return prev }
-        return prev.map(i => i.product.id === product.id ? { ...i, quantity: i.quantity + 1 } : i)
+      // A loan-request row still awaiting scan for this product takes the
+      // scan first: one unit moves from the placeholder onto a real
+      // (product, barcode) row that keeps the request link.
+      const placeholder = prev.find(i => i.product.id === product.id && i.barcode === null && i.sourceRequestId)
+      if (placeholder) {
+        const sourceRequestId = placeholder.sourceRequestId
+        const next = prev
+          .map(i => i === placeholder ? { ...i, quantity: i.quantity - 1 } : i)
+          .filter(i => i.quantity > 0)
+        const existing = next.find(i => i.product.id === product.id && i.barcode === trimmedBarcode && i.sourceRequestId === sourceRequestId)
+        if (existing) return next.map(i => i === existing ? { ...i, quantity: i.quantity + 1 } : i)
+        return [...next, { product, quantity: 1, barcode: trimmedBarcode, sourceRequestId }]
       }
-      return [...prev, { product, quantity: 1 }]
+      // Walk-in scan: capped by stock across every row for the product.
+      if (totalForProduct(prev, product.id) >= product.quantity_on_hand) { capped = true; return prev }
+      const existing = prev.find(i => i.product.id === product.id && i.barcode === trimmedBarcode && !i.sourceRequestId)
+      if (existing) return prev.map(i => i === existing ? { ...i, quantity: i.quantity + 1 } : i)
+      return [...prev, { product, quantity: 1, barcode: trimmedBarcode }]
     })
     if (capped) setError(`Only ${product.quantity_on_hand} of "${product.name}" in stock — already at the max in the cart.`)
     setBarcodeInput('')
@@ -276,6 +298,7 @@ export default function StockOutPage() {
 
   async function handleConfirm() {
     if (!staff || cart.length === 0) return
+    if (cart.some(i => i.barcode === null)) { setError('Scan every item on the request before confirming.'); return }
     // Lend To is optional — blank means "no return date agreed", which is a
     // deliberate choice Selouna makes, not a missing field. Every date
     // comparison below has to be guarded, because '' sorts BEFORE any real
@@ -321,16 +344,21 @@ export default function StockOutPage() {
         // quantities as they were at the time.
         after: {
           ...txnPayload,
-          line_count: cart.length,
+          line_count: groupRowsByProduct(cart).length,
           total_qty: cart.reduce((s, i) => s + i.quantity, 0),
-          lines: cart.map((i) => ({
-            product_id: i.product.id,
-            product_name: i.product.name,
-            quantity: i.quantity,
+          // One entry per product; barcodes is always an array (every
+          // distinct barcode scanned for it, one entry when only one was).
+          lines: groupRowsByProduct(cart).map((g) => ({
+            product_id: g.product.id,
+            product_name: g.product.name,
+            quantity: g.quantity,
+            barcodes: g.barcodes,
+            barcode_quantities: g.barcodeQuantities,
           })),
         },
       })
 
+      // One transaction_lines document per (product, barcode) row.
       for (const item of cart) {
         await addDoc(collection(db, 'transaction_lines'), {
           transaction_id: txnRef.id,
@@ -338,10 +366,16 @@ export default function StockOutPage() {
           quantity: item.quantity,
           unit_cost: 0,
           product_name: item.product.name,
+          barcode: item.barcode,
           created_at: new Date().toISOString()
         })
-        await updateDoc(doc(db, 'products', item.product.id.toString()), {
-          quantity_on_hand: item.product.quantity_on_hand - item.quantity,
+      }
+      // Stock is decremented once per PRODUCT: several rows for the same
+      // product would each start from the same stale quantity_on_hand and
+      // the last write would win.
+      for (const g of groupRowsByProduct(cart)) {
+        await updateDoc(doc(db, 'products', g.product.id.toString()), {
+          quantity_on_hand: g.product.quantity_on_hand - g.quantity,
           updated_at: new Date().toISOString()
         })
       }
@@ -378,6 +412,7 @@ export default function StockOutPage() {
       }
 
       setReference(ref)
+      notifyAlertsChanged()
       setStep('done')
     } catch (err: any) {
       setError('Failed to create transaction. ' + err.message)
@@ -435,8 +470,13 @@ export default function StockOutPage() {
                 onClick={() => goToStep(i)}
                 aria-current={active ? 'step' : undefined}
                 className={cn(
-                  'flex shrink-0 items-center gap-2 rounded-full',
-                  clickable ? 'cursor-pointer' : 'cursor-default',
+                  // Every step keeps the same padding + (transparent) border so
+                  // nothing shifts when a step becomes clickable; a clickable
+                  // one gets a visible rectangular outline so it reads as a button.
+                  'flex shrink-0 items-center gap-2 rounded-lg border-2 px-3 py-1.5 transition-colors',
+                  clickable
+                    ? 'cursor-pointer border-primary/50 bg-white/60 hover:border-primary hover:bg-primary/10'
+                    : 'cursor-default border-transparent',
                 )}
               >
                 <span className={cn(
@@ -565,43 +605,71 @@ export default function StockOutPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {cart.map(item => (
-                      <TableRow key={item.product.id}>
+                    {cart.map(item => {
+                      const key = rowKey(item)
+                      const atMax = totalForProduct(cart, item.product.id) >= item.product.quantity_on_hand
+                      // Loan-request rows are fixed to what was offered and
+                      // moved along by scanning, so only walk-in rows get +/-.
+                      const adjustable = !item.sourceRequestId
+                      return (
+                      <TableRow key={key}>
                         <TableCell className="max-w-xs font-medium whitespace-normal break-words">{item.product.name}</TableCell>
-                        <TableCell className="max-w-xs font-mono text-xs whitespace-normal break-all text-muted-foreground">{primaryBarcode(item.product)}</TableCell>
+                        <TableCell className="max-w-xs font-mono text-xs whitespace-normal break-all text-muted-foreground">
+                          {item.barcode ?? <span className="font-sans italic text-amber-700">Awaiting scan</span>}
+                        </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-1.5">
-                            <Button variant="ghost" size="icon-sm"
-                              onClick={() => setCart(c => c.map(i => i.product.id === item.product.id ? { ...i, quantity: Math.max(1, i.quantity - 1) } : i))}>
-                              <Minus className="size-3" />
-                            </Button>
-                            <span className="min-w-6 text-center font-semibold">{item.quantity}</span>
-                            <Button variant="ghost" size="icon-sm"
-                              disabled={item.quantity >= item.product.quantity_on_hand}
-                              title={item.quantity >= item.product.quantity_on_hand ? `Only ${item.product.quantity_on_hand} in stock` : undefined}
-                              onClick={() => setCart(c => c.map(i => i.product.id === item.product.id ? { ...i, quantity: Math.min(i.product.quantity_on_hand, i.quantity + 1) } : i))}>
-                              <Plus className="size-3" />
-                            </Button>
-                          </div>
-                          {item.quantity >= item.product.quantity_on_hand && (
-                            <p className="mt-0.5 text-[0.7rem] text-muted-foreground">Max in stock</p>
+                          {adjustable ? (
+                            <>
+                              <div className="flex items-center gap-1.5">
+                                <Button variant="ghost" size="icon-sm"
+                                  onClick={() => setCart(c => c.map(i => rowKey(i) === key ? { ...i, quantity: Math.max(1, i.quantity - 1) } : i))}>
+                                  <Minus className="size-3" />
+                                </Button>
+                                <span className="min-w-6 text-center font-semibold">{item.quantity}</span>
+                                <Button variant="ghost" size="icon-sm"
+                                  disabled={atMax}
+                                  title={atMax ? `Only ${item.product.quantity_on_hand} in stock` : undefined}
+                                  onClick={() => setCart(c => totalForProduct(c, item.product.id) >= item.product.quantity_on_hand ? c : c.map(i => rowKey(i) === key ? { ...i, quantity: i.quantity + 1 } : i))}>
+                                  <Plus className="size-3" />
+                                </Button>
+                              </div>
+                              {atMax && (
+                                <p className="mt-0.5 text-[0.7rem] text-muted-foreground">Max in stock</p>
+                              )}
+                            </>
+                          ) : (
+                            <span className="font-semibold">{item.quantity}</span>
                           )}
                         </TableCell>
                         <TableCell>
                           <Button variant="outline" size="icon-sm" className="border-[#D5C6E0] bg-[#F0EBF5] text-red-600 hover:bg-[#E4D9EE] hover:text-red-700"
-                            onClick={() => setCart(c => c.filter(i => i.product.id !== item.product.id))}>
+                            onClick={() => setCart(c => {
+                              const rest = c.filter(i => rowKey(i) !== key)
+                              // Removing a scanned loan-request row puts its
+                              // units back on the request's awaiting-scan row.
+                              if (!item.sourceRequestId || item.barcode === null) return rest
+                              const back = rest.find(i => i.product.id === item.product.id && i.barcode === null && i.sourceRequestId === item.sourceRequestId)
+                              if (back) return rest.map(i => i === back ? { ...i, quantity: i.quantity + item.quantity } : i)
+                              return [...rest, { product: item.product, quantity: item.quantity, barcode: null, sourceRequestId: item.sourceRequestId }]
+                            })}>
                             <X className="size-3.5" />
                           </Button>
                         </TableCell>
                       </TableRow>
-                    ))}
+                      )
+                    })}
                   </TableBody>
                 </Table>
                 </div>
               )}
               {cart.length > 0 && (
-                <div className="mt-4 flex justify-end">
-                  <Button onClick={() => setStep('confirm')}>Review &amp; Confirm →</Button>
+                <div className="mt-4 flex items-center justify-end gap-3">
+                  {cart.some(i => i.barcode === null) && (
+                    <p className="text-xs text-amber-700">
+                      Scan the {cart.filter(i => i.barcode === null).reduce((s, i) => s + i.quantity, 0)} remaining item(s) on the request to continue.
+                    </p>
+                  )}
+                  <Button disabled={cart.some(i => i.barcode === null)} onClick={() => setStep('confirm')}>Review &amp; Confirm →</Button>
                 </div>
               )}
             </CardContent>
@@ -627,16 +695,18 @@ export default function StockOutPage() {
               <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
                 <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
                   <TableHead className="text-base font-bold text-[#2D203A]">Product</TableHead>
+                  <TableHead className="text-base font-bold text-[#2D203A]">Barcode</TableHead>
                   <TableHead className="text-base font-bold text-[#2D203A]">Qty</TableHead>
                   <TableHead className="text-base font-bold text-[#2D203A]">Available</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {cart.map(item => {
-                  const insufficient = item.product.quantity_on_hand < item.quantity
+                  const insufficient = item.product.quantity_on_hand < totalForProduct(cart, item.product.id)
                   return (
-                    <TableRow key={item.product.id} className={insufficient ? 'text-red-600' : ''}>
+                    <TableRow key={rowKey(item)} className={insufficient ? 'text-red-600' : ''}>
                       <TableCell className="max-w-xs whitespace-normal break-words">{item.product.name}</TableCell>
+                      <TableCell className="max-w-xs font-mono text-xs whitespace-normal break-all text-muted-foreground">{item.barcode}</TableCell>
                       <TableCell className="font-semibold">{item.quantity}</TableCell>
                       <TableCell className={cn('font-semibold', insufficient ? 'text-red-600' : 'text-emerald-600')}>
                         {item.product.quantity_on_hand}
@@ -698,13 +768,13 @@ export default function StockOutPage() {
             <div className="mb-4 grid grid-cols-2 items-start gap-3">
               <div className="grid gap-1.5">
                 <Label htmlFor="lend-from">Lend From</Label>
-                <Input id="lend-from" type="date" value={lendFrom} min={todayDateStr()}
-                  onChange={e => setLendFrom(e.target.value)} />
+                <AvailabilityDatePicker id="lend-from" className="w-full" value={lendFrom} min={todayDateStr()}
+                  onChange={setLendFrom} />
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="lend-to">Lend To</Label>
-                <Input id="lend-to" type="date" value={lendTo} min={lendFrom || todayDateStr()}
-                  onChange={e => setLendTo(e.target.value)} />
+                <AvailabilityDatePicker id="lend-to" className="w-full" value={lendTo} min={lendFrom || todayDateStr()}
+                  onChange={setLendTo} />
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">
                     {lendTo
@@ -723,7 +793,7 @@ export default function StockOutPage() {
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => goToStep(1)}>← Back</Button>
               <Button
-                disabled={loading || blockingConflicts.length > 0 || (!!lendTo && lendTo < lendFrom) || cart.some(i => i.product.quantity_on_hand < i.quantity)}
+                disabled={loading || blockingConflicts.length > 0 || (!!lendTo && lendTo < lendFrom) || cart.some(i => i.product.quantity_on_hand < totalForProduct(cart, i.product.id))}
                 onClick={handleConfirm}
               >
                 {loading ? 'Processing…' : 'Confirm Issue'}

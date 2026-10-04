@@ -26,6 +26,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import type { LoanRequest } from '@/types/database'
+import { collapseLinesByProduct } from '@/lib/transactionLines'
 
 // Every row here is still outstanding — nothing has been returned yet — so
 // the label needs to describe urgency going forward, not judge a completed
@@ -230,7 +231,7 @@ export default function DashboardPage() {
 
         const outstandingList: any[] = []
         outTxns.forEach(t => {
-          ;(linesByTxn[t.id] || []).forEach((l: any) => {
+          collapseLinesByProduct(linesByTxn[t.id] || []).forEach((l: any) => {
             const issued = l.quantity || 0
             const returned = returnedByTxn[t.id]?.[l.product_id] ?? 0
             const waived = waivedQty(waivedByTxn, t.id, l.product_id)

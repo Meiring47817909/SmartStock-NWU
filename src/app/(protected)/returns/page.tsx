@@ -2,27 +2,35 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { genRef, formatDateOnly, sentenceCase, todayDateStr } from '@/lib/utils'
-import { CreditCard, CheckCircle, Users, Search, RotateCcw } from 'lucide-react'
+import { CreditCard, CheckCircle, Users, Search, RotateCcw, Barcode, Minus, Plus, AlertTriangle } from 'lucide-react'
 import { db } from '@/lib/firebase/config'
+import { notifyAlertsChanged } from '@/lib/alertsBus'
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, getDoc, orderBy } from 'firebase/firestore'
 import { logAudit } from '@/lib/firebase/audit'
+import { findProductByBarcode } from '@/lib/firebase/products'
 import { useAuth } from '@/context/AuthContext'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import type { StaffMember } from '@/types/database'
 
+// One row per (Stock Out transaction, product, barcode) -- the same product
+// issued under two different barcodes is two rows. A return must be scanned
+// with exactly the barcode the item left with, so this is the unit the scanner
+// matches against. `returning` is how many units of THIS barcode have been
+// scanned back so far in this session.
 interface OpenLine {
   txn_id: string
   txn_ref: string
   txn_date: string
-  line_id: string
+  line_id: string // `${txn_id}|${product_id}|${barcode}`
   product_id: string
   product_name: string
   barcode: string
@@ -30,6 +38,12 @@ interface OpenLine {
   already_returned: number
   returnable: number
   returning: number
+  // One entry per returning unit whose barcode was lost: the registered
+  // barcode now on it instead (the same code may repeat -- barcodes identify
+  // the product, not the unit). Each must already be registered to this
+  // product (added under Products → Edit beforehand); Returns never creates
+  // barcodes. Every entry counts toward `returning`.
+  relabels: string[]
   // The originating Stock Out transaction's Lend To date (Stage A) — null
   // for transactions created before that field existed.
   expected_date: string | null
@@ -59,7 +73,57 @@ function lineStatus(l: OpenLine): { label: string; className: string } | null {
   return { label: 'Not Due Yet', className: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold' }
 }
 
+// Units issued with no recorded barcode (legacy Stock Outs). Nothing to match
+// a scan against, so they can't be returned through this screen.
+interface UnscannableLine {
+  txn_ref: string
+  product_name: string
+  quantity: number
+}
+
 type Step = 'staff' | 'items' | 'done'
+
+// What actually gets written: one entry per (product, barcode) that comes back.
+// A unit with a replacement barcode is its own entry (barcode = the new one,
+// issued_barcode = the one it left with); the rest of the row keeps the
+// issued barcode.
+interface ReturnEntry {
+  product_id: string
+  product_name: string
+  barcode: string
+  issued_barcode: string | null
+  quantity: number
+}
+
+function entriesOf(rows: OpenLine[]): ReturnEntry[] {
+  const out: ReturnEntry[] = []
+  for (const r of rows) {
+    const normal = r.returning - r.relabels.length
+    if (normal > 0) out.push({ product_id: r.product_id, product_name: r.product_name, barcode: r.barcode, issued_barcode: null, quantity: normal })
+    // One entry per distinct replacement barcode, with how many units carry it.
+    const counts = new Map<string, number>()
+    r.relabels.forEach(code => counts.set(code, (counts.get(code) ?? 0) + 1))
+    counts.forEach((qty, code) => out.push({ product_id: r.product_id, product_name: r.product_name, barcode: code, issued_barcode: r.barcode, quantity: qty }))
+  }
+  return out
+}
+
+// Collapses entries to one per product: total units plus every distinct
+// barcode in first-seen order, and any barcode replacements.
+function groupByProduct(entries: ReturnEntry[]): { product_id: string; product_name: string; quantity: number; barcodes: string[]; barcodeQuantities: { barcode: string; quantity: number }[]; relabelled: { from: string; to: string; quantity: number }[] }[] {
+  const m = new Map<string, { product_id: string; product_name: string; quantity: number; barcodes: string[]; barcodeQuantities: { barcode: string; quantity: number }[]; relabelled: { from: string; to: string; quantity: number }[] }>()
+  for (const e of entries) {
+    const g = m.get(e.product_id) ?? { product_id: e.product_id, product_name: e.product_name, quantity: 0, barcodes: [], barcodeQuantities: [], relabelled: [] }
+    g.quantity += e.quantity
+    if (e.barcode && !g.barcodes.includes(e.barcode)) g.barcodes.push(e.barcode)
+    const bq = g.barcodeQuantities.find(b => b.barcode === e.barcode)
+    if (bq) bq.quantity += e.quantity
+    else g.barcodeQuantities.push({ barcode: e.barcode, quantity: e.quantity })
+    if (e.issued_barcode) g.relabelled.push({ from: e.issued_barcode, to: e.barcode, quantity: e.quantity })
+    m.set(e.product_id, g)
+  }
+  return [...m.values()]
+}
 
 export default function ReturnsPage() {
   const { user, profile } = useAuth()
@@ -68,6 +132,19 @@ export default function ReturnsPage() {
   const [manualOverride, setManualOverride] = useState(false)
   const [uidInput, setUidInput] = useState('')
   const [lines, setLines] = useState<OpenLine[]>([])
+  const [unscannable, setUnscannable] = useState<UnscannableLine[]>([])
+  const [barcodeInput, setBarcodeInput] = useState('')
+  // Mirrors `lines` so scans that arrive from the HID handler (a stale
+  // closure) or in rapid succession always see the latest rows.
+  const linesRef = useRef<OpenLine[]>([])
+  const barcodeRef = useRef<HTMLInputElement>(null)
+
+  // "Lost barcode" flow: the + on a row that has nothing scanned yet.
+  const [relabelTarget, setRelabelTarget] = useState<OpenLine | null>(null)
+  const [relabelInput, setRelabelInput] = useState('')
+  const [relabelError, setRelabelError] = useState('')
+  const [relabelChecking, setRelabelChecking] = useState(false)
+  const [confirmRestart, setConfirmRestart] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [references, setReferences] = useState<string[]>([])
@@ -82,6 +159,8 @@ export default function ReturnsPage() {
   const hidBuf = useRef({ buf: '', t: 0 })
   const handleHID = useCallback((raw: string) => {
     if (step === 'staff') lookupUID(raw)
+    else if (step === 'items') lookupBarcode(raw)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step])
 
   useEffect(() => {
@@ -126,7 +205,8 @@ export default function ReturnsPage() {
     ))
 
     if (outTxnsSnap.empty) {
-      setLines([])
+      setLines([]); linesRef.current = []
+      setUnscannable([])
       setStep('items')
       setLoading(false)
       return
@@ -153,25 +233,33 @@ export default function ReturnsPage() {
       }
     })
 
-    // Keyed by [originating OUT transaction id][product_id] — NOT a flat
-    // per-product total. A RETURN transaction always records which OUT
-    // transaction it was returning against, via linked_txn_id (see
-    // handleConfirm below). Scoping it this way matters: a staff member can
-    // have more than one OUT transaction for the same product over time, and
-    // a return against one of them must not reduce the returnable quantity
-    // on an unrelated, later OUT transaction for that same product — a flat
-    // per-product map here previously caused exactly that, incorrectly
-    // shrinking (or entirely hiding, once it hit zero) products on a fresh
-    // Stock Out because of an unrelated return from a past transaction.
-    const returnedByTxn: Record<string, Record<string, number>> = {}
+    // Keyed by [originating OUT transaction id][product_id][barcode]. Scoped to
+    // the OUT transaction because a staff member can hold the same product from
+    // several Stock Outs, and a return against one must not shrink another.
+    // Scoped to the barcode because a Return line now carries the exact barcode
+    // that was scanned back, so units come off the matching barcode only.
+    // Returns recorded before barcodes existed carry none; those go in
+    // `legacyReturned` and are applied to the earliest slots below.
+    const returnedExact: Record<string, Record<string, Record<string, number>>> = {}
+    const legacyReturned: Record<string, Record<string, number>> = {}
     returnTxnsSnap.forEach(doc => {
       const txn = doc.data()
       const linkedTxnId = txn.linked_txn_id as string | undefined
       if (!linkedTxnId) return
-      const lines = linesByTxn[doc.id] || []
-      lines.forEach((l: any) => {
-        const bucket = (returnedByTxn[linkedTxnId] ??= {})
-        bucket[l.product_id] = (bucket[l.product_id] ?? 0) + (l.quantity || 0)
+      const rlines = linesByTxn[doc.id] || []
+      rlines.forEach((l: any) => {
+        const q = l.quantity || 0
+        // A relabelled unit comes back under its NEW barcode but relieves the
+        // barcode it was ISSUED under, recorded as issued_barcode.
+        const relieves = (typeof l.issued_barcode === 'string' && l.issued_barcode) ? l.issued_barcode : l.barcode
+        if (typeof relieves === 'string' && relieves) {
+          const byProduct = (returnedExact[linkedTxnId] ??= {})
+          const byBarcode = (byProduct[l.product_id] ??= {})
+          byBarcode[relieves] = (byBarcode[relieves] ?? 0) + q
+        } else {
+          const bucket = (legacyReturned[linkedTxnId] ??= {})
+          bucket[l.product_id] = (bucket[l.product_id] ?? 0) + q
+        }
       })
     })
 
@@ -183,36 +271,64 @@ export default function ReturnsPage() {
     // return, so this page deliberately ignores waived quantity and bases
     // returnable purely on what hasn't actually been returned yet.
     const openLines: OpenLine[] = []
+    const noBarcode: UnscannableLine[] = []
     outTxnsSnap.forEach(doc => {
       const txn = doc.data()
-      const lines = linesByTxn[doc.id] || []
+      const olines = linesByTxn[doc.id] || []
 
-      lines.forEach((l: any, idx: number) => {
-        const issued = l.quantity || 0
-        const alreadyReturned = returnedByTxn[doc.id]?.[l.product_id] ?? 0
-        const returnable = issued - alreadyReturned
-        if (returnable <= 0) return
+      // Collapse this transaction's lines to product -> { barcode -> issued },
+      // keeping first-seen order; barcode-less units are tallied separately.
+      const byProduct = new Map<string, { name: string; issued: Map<string, number>; legacyIssued: number }>()
+      olines.forEach((l: any) => {
+        const entry = byProduct.get(l.product_id) ?? { name: l.product_name ?? 'Unknown', issued: new Map<string, number>(), legacyIssued: 0 }
+        const q = l.quantity || 0
+        if (typeof l.barcode === 'string' && l.barcode) entry.issued.set(l.barcode, (entry.issued.get(l.barcode) ?? 0) + q)
+        else entry.legacyIssued += q
+        byProduct.set(l.product_id, entry)
+      })
 
-        openLines.push({
-          txn_id: doc.id,
-          txn_ref: txn.reference_no ?? '',
-          linked_request_id: (txn.linked_request_id as string | null) ?? null,
-          linked_request_ref: (txn.linked_request_ref as string | null) ?? null,
-          txn_date: txn.created_at ?? '',
-          line_id: `${doc.id}_${idx}`,
-          product_id: l.product_id,
-          product_name: l.product_name ?? 'Unknown',
-          barcode: '', // not strictly needed for UI here
-          issued_qty: issued,
-          already_returned: alreadyReturned,
-          returnable,
-          returning: 0,
-          expected_date: txn.lend_to ?? null,
+      byProduct.forEach((entry, productId) => {
+        // Barcode-less returns first cancel barcode-less issues; any surplus
+        // is taken off the barcode slots in issue order.
+        const legacyRet = legacyReturned[doc.id]?.[productId] ?? 0
+        const legacyOpen = Math.max(0, entry.legacyIssued - legacyRet)
+        let surplus = Math.max(0, legacyRet - entry.legacyIssued)
+        if (legacyOpen > 0) noBarcode.push({ txn_ref: txn.reference_no ?? '', product_name: entry.name, quantity: legacyOpen })
+
+        entry.issued.forEach((issued, barcode) => {
+          const exact = returnedExact[doc.id]?.[productId]?.[barcode] ?? 0
+          const fromSurplus = Math.min(surplus, Math.max(0, issued - exact))
+          surplus -= fromSurplus
+          const alreadyReturned = exact + fromSurplus
+          const returnable = issued - alreadyReturned
+          if (returnable <= 0) return
+          openLines.push({
+            txn_id: doc.id,
+            txn_ref: txn.reference_no ?? '',
+            linked_request_id: (txn.linked_request_id as string | null) ?? null,
+            linked_request_ref: (txn.linked_request_ref as string | null) ?? null,
+            txn_date: txn.created_at ?? '',
+            line_id: `${doc.id}|${productId}|${barcode}`,
+            product_id: productId,
+            product_name: entry.name,
+            barcode,
+            issued_qty: issued,
+            already_returned: alreadyReturned,
+            returnable,
+            returning: 0,
+            relabels: [],
+            expected_date: txn.lend_to ?? null,
+          })
         })
       })
     })
 
-    setLines(openLines)
+    // Oldest Stock Out first, so a scan of a barcode held on two transactions
+    // settles the oldest one first.
+    openLines.sort((a, b) => a.txn_date.localeCompare(b.txn_date))
+    setLines(openLines); linesRef.current = openLines
+    setUnscannable(noBarcode)
+    setBarcodeInput('')
     setStep('items')
     setLoading(false)
   }
@@ -249,8 +365,88 @@ export default function ReturnsPage() {
     setShowStaffSearch(true)
   }
 
-  function updateReturning(lineId: string, val: number) {
-    setLines(prev => prev.map(l => l.line_id === lineId ? { ...l, returning: Math.max(0, Math.min(val, l.returnable)) } : l))
+  // A scan returns ONE unit and must match, exactly, a barcode that was
+  // scanned when this staff member's items were issued. Nothing else is
+  // accepted: no quantity typing, no "close enough" product match.
+  async function lookupBarcode(raw: string) {
+    const code = raw.trim()
+    if (!code) return
+    setError('')
+    const current = linesRef.current
+    const target = current.find(l => l.barcode === code && l.returning < l.returnable)
+    if (target) {
+      const next = current.map(l => l.line_id === target.line_id ? { ...l, returning: l.returning + 1 } : l)
+      linesRef.current = next
+      setLines(next)
+      setBarcodeInput('')
+      return
+    }
+    setBarcodeInput('')
+    if (current.some(l => l.barcode === code)) {
+      setError(`Every unit issued under barcode "${code}" has already been scanned for return.`)
+      return
+    }
+    // Not an exact match: say why, so the operator can tell a wrong item from
+    // a right item carrying a different barcode than the one used at Stock Out.
+    const product = await findProductByBarcode(code) as unknown as { id: string; name: string } | null
+    if (!product) { setError(`Barcode "${code}" is not a known product barcode.`); return }
+    const issuedCodes = [...new Set(current.filter(l => l.product_id === product.id).map(l => l.barcode))]
+    if (issuedCodes.length > 0) {
+      setError(`"${code}" is a barcode for ${product.name}, but it was issued under ${issuedCodes.map(b => `"${b}"`).join(', ')}. Scan the exact barcode that was scanned at Stock Out.`)
+    } else {
+      setError(`${product.name} (barcode "${code}") is not currently issued to this staff member.`)
+    }
+  }
+
+  // Scanned units come off first; a replacement-barcode unit is the last to go
+  // (most recently added first).
+  function decrementScanned(lineId: string) {
+    const next = linesRef.current.map(l => {
+      if (l.line_id !== lineId || l.returning === 0) return l
+      const normal = l.returning - l.relabels.length
+      if (normal > 0) return { ...l, returning: l.returning - 1 }
+      return { ...l, returning: l.returning - 1, relabels: l.relabels.slice(0, -1) }
+    })
+    linesRef.current = next
+    setLines(next)
+  }
+
+  function openRelabel(line: OpenLine) {
+    setRelabelTarget(line)
+    setRelabelInput('')
+    setRelabelError('')
+  }
+
+  // The replacement barcode must already be one of THIS product's registered
+  // barcodes. Returns never registers barcodes: a brand-new one has to be added
+  // under Products → Edit first, so the product catalogue stays the only place
+  // barcodes are created.
+  async function submitRelabel() {
+    const code = relabelInput.trim()
+    if (!relabelTarget || !code) return
+    setRelabelError(''); setRelabelChecking(true)
+    try {
+      if (code === relabelTarget.barcode) {
+        setRelabelError(`"${code}" is the barcode this item was issued under. If it is readable, scan it with the scanner instead.`)
+        return
+      }
+      const found = await findProductByBarcode(code) as unknown as { id: string; name: string } | null
+      if (!found) {
+        setRelabelError(`"${code}" is not registered to any product. Add it to ${relabelTarget.product_name} under Products → Edit first, then scan or enter it here again.`)
+        return
+      }
+      if (String(found.id) !== String(relabelTarget.product_id)) {
+        setRelabelError(`"${code}" belongs to ${found.name}, not ${relabelTarget.product_name}. Use a barcode registered to ${relabelTarget.product_name}.`)
+        return
+      }
+      const next = linesRef.current.map(l =>
+        l.line_id === relabelTarget.line_id && l.returning < l.returnable ? { ...l, returning: l.returning + 1, relabels: [...l.relabels, code] } : l)
+      linesRef.current = next
+      setLines(next)
+      setRelabelTarget(null)
+    } finally {
+      setRelabelChecking(false)
+    }
   }
 
   async function handleConfirm() {
@@ -259,6 +455,23 @@ export default function ReturnsPage() {
     setLoading(true); setError('')
 
     // Group by originating transaction
+    // Re-check each replacement barcode is still registered to its product
+    // (it could have been edited off since it was entered).
+    try {
+      for (const l of toReturn) {
+        for (const code of new Set(l.relabels)) {
+          const still = await findProductByBarcode(code) as unknown as { id: string } | null
+          if (!still || String(still.id) !== String(l.product_id)) {
+            setError(`Barcode "${code}" is no longer registered to ${l.product_name}. Remove that unit and enter a registered barcode.`)
+            setLoading(false)
+            return
+          }
+        }
+      }
+    } catch (err: any) {
+      setError('Failed: ' + err.message); setLoading(false); return
+    }
+
     const byTxn = toReturn.reduce<Record<string, OpenLine[]>>((acc, l) => {
       ;(acc[l.txn_id] = acc[l.txn_id] ?? []).push(l); return acc
     }, {})
@@ -287,7 +500,11 @@ export default function ReturnsPage() {
           linked_request_id: items[0]?.linked_request_id ?? null,
           linked_request_ref: items[0]?.linked_request_ref ?? null,
           manual_override: manualOverride,
-          notes: `Return of ${items.map(i => i.product_name).join(', ')}`,
+          notes: `Return of ${[...new Set(items.map(i => i.product_name))].join(', ')}` +
+            (() => {
+              const swaps = entriesOf(items).filter(e => e.issued_barcode).map(e => `${e.issued_barcode} → ${e.barcode} ×${e.quantity}`)
+              return swaps.length > 0 ? `. Barcode lost, returned as: ${swaps.join(', ')}` : ''
+            })(),
           created_at: new Date().toISOString()
         }
         const txnRef = await addDoc(collection(db, 'transactions'), txnPayload)
@@ -304,23 +521,35 @@ export default function ReturnsPage() {
           // quantities as they were at the time.
           after: {
             ...txnPayload,
-            line_count: items.length,
+            line_count: groupByProduct(entriesOf(items)).length,
             total_qty: items.reduce((s, i) => s + i.returning, 0),
-            lines: items.map((i) => ({
-              product_id: i.product_id,
-              product_name: i.product_name,
-              quantity: i.returning,
+            // One entry per product; barcodes is always an array of every
+            // distinct barcode scanned back for it (exactly the ones issued).
+            lines: groupByProduct(entriesOf(items)).map((g) => ({
+              product_id: g.product_id,
+              product_name: g.product_name,
+              quantity: g.quantity,
+              barcodes: g.barcodes,
+              barcode_quantities: g.barcodeQuantities,
+              // Only present when a unit lost its barcode: from = the barcode
+              // it was issued under, to = the replacement now on it.
+              ...(g.relabelled.length > 0 ? { relabelled: g.relabelled } : {}),
             })),
           },
         })
 
-        for (const item of items) {
+        // One transaction_lines document per (product, barcode).
+        for (const e of entriesOf(items)) {
           await addDoc(collection(db, 'transaction_lines'), {
             transaction_id: txnRef.id,
-            product_id: item.product_id,
-            quantity: item.returning,
+            product_id: e.product_id,
+            quantity: e.quantity,
             unit_cost: 0,
-            product_name: item.product_name,
+            product_name: e.product_name,
+            barcode: e.barcode,
+            // Set only for a replacement-barcode unit: the barcode it was
+            // issued under, so the Stock Out line it settles can be found.
+            issued_barcode: e.issued_barcode,
             created_at: new Date().toISOString()
           })
         }
@@ -330,18 +559,20 @@ export default function ReturnsPage() {
 
       // Update stock quantities — fetch each product doc directly by ID
       // rather than scanning the whole products collection per item.
-      for (const item of toReturn) {
-        const pRef = doc(db, 'products', item.product_id)
+      // Once per PRODUCT across every scanned barcode row and transaction.
+      for (const g of groupByProduct(entriesOf(toReturn))) {
+        const pRef = doc(db, 'products', g.product_id)
         const pSnap = await getDoc(pRef)
         if (pSnap.exists()) {
           await updateDoc(pRef, {
-            quantity_on_hand: (pSnap.data().quantity_on_hand || 0) + item.returning,
+            quantity_on_hand: (pSnap.data().quantity_on_hand || 0) + g.quantity,
             updated_at: new Date().toISOString()
           })
         }
       }
 
       setReferences(refs)
+      notifyAlertsChanged()
       setStep('done')
     } catch (err: any) {
       setError('Failed: ' + err.message)
@@ -349,7 +580,7 @@ export default function ReturnsPage() {
     setLoading(false)
   }
 
-  function reset() { setStep('staff'); setStaff(null); setLines([]); setError(''); setUidInput(''); setManualOverride(false) }
+  function reset() { setRelabelTarget(null); setStep('staff'); setStaff(null); setLines([]); linesRef.current = []; setUnscannable([]); setBarcodeInput(''); setError(''); setUidInput(''); setManualOverride(false) }
 
   const toReturn = lines.filter(l => l.returning > 0)
 
@@ -405,39 +636,90 @@ export default function ReturnsPage() {
                 <div className="text-xs text-muted-foreground">{staff.department ?? 'No department'}</div>
               </div>
               {manualOverride && <Badge className="ml-auto bg-amber-100 text-amber-800">Manual</Badge>}
+              {/* Back to "Identify Staff Member" to pick someone else. Anything
+                  already scanned is thrown away, so ask first if there is any. */}
+              <Button type="button" variant="outline" size="sm" className={manualOverride ? '' : 'ml-auto'} disabled={loading}
+                onClick={() => lines.some(l => l.returning > 0) ? setConfirmRestart(true) : reset()}>
+                <RotateCcw className="size-3.5" /> Restart
+              </Button>
             </CardContent>
           </Card>
+
+          <Card className="rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
+            <CardHeader className="border-b pt-4">
+              <CardTitle className="flex items-center gap-2"><Barcode className="size-4" /> Scan Items to Return</CardTitle>
+            </CardHeader>
+            <CardContent className="py-4">
+              <Input ref={barcodeRef} placeholder="Scan or type barcode, then press Enter…"
+                value={barcodeInput} onChange={e => setBarcodeInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); barcodeInput && !loading && lookupBarcode(barcodeInput) } }}
+                autoFocus />
+              <p className="mt-2 text-xs text-muted-foreground">
+                Each scan returns one unit. The barcode must match exactly what was scanned when the item was issued.
+              </p>
+            </CardContent>
+          </Card>
+
+          {unscannable.length > 0 && (
+            <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+              <AlertDescription>
+                <div className="font-semibold">Issued without a recorded barcode — cannot be returned by scan</div>
+                <ul className="mt-1 list-disc pl-5 text-sm">
+                  {unscannable.map((u, i) => (
+                    <li key={i}>{u.quantity} × {u.product_name} <span className="font-mono text-xs">({u.txn_ref})</span></li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          )}
 
           <Card className="flex min-h-0 flex-1 flex-col rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
             <CardHeader className="flex-row items-center justify-between border-b pt-4">
               <CardTitle>Items Currently Issued</CardTitle>
-              <span className="text-sm text-muted-foreground">Set quantity to return (0 = keep)</span>
+              <span className="text-sm text-muted-foreground">One row per barcode issued</span>
             </CardHeader>
-            <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto">
+            {/* The table sits inside the card with its own padded, rounded border
+                (same look as the Loan Requests expanded-row table) instead of
+                running edge to edge. */}
+            <div className="flex min-h-0 flex-1 flex-col p-4">
+            <div className="min-h-0 overflow-auto rounded-lg border border-[#E5DBEC] bg-white shadow-xs">
               {lines.length === 0 ? (
                 <div className="p-8 text-center text-sm text-muted-foreground">
                   No outstanding items found for this staff member.
                 </div>
               ) : (
                 <Table>
-                  <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
-                    <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+                  <TableHeader className="sticky top-0 z-10 bg-[#F6F2F9]">
+                    <TableRow className="border-b border-[#E5DBEC] hover:bg-[#F6F2F9]">
                       <TableHead className="text-base font-bold text-[#2D203A]">Product</TableHead>
+                      <TableHead className="text-base font-bold text-[#2D203A]">Barcode</TableHead>
                       <TableHead className="text-base font-bold text-[#2D203A]">Ref</TableHead>
                       <TableHead className="text-base font-bold text-[#2D203A]">Issued</TableHead>
                       <TableHead className="text-base font-bold text-[#2D203A]">Returnable</TableHead>
                       <TableHead className="text-base font-bold text-[#2D203A]">Expected</TableHead>
                       <TableHead className="text-base font-bold text-[#2D203A]">Status</TableHead>
-                      <TableHead className="text-base font-bold text-[#2D203A]">Returning</TableHead>
+                      <TableHead className="text-base font-bold text-[#2D203A]">Returns<br />Scanned</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {lines.map(l => {
                       const status = lineStatus(l)
                       return (
-                        <TableRow key={l.line_id}>
+                        <TableRow key={l.line_id} className="border-slate-100 hover:bg-[#FDFCFE]">
                           <TableCell className="max-w-xs whitespace-normal">
                             <div className="break-words font-medium">{l.product_name}</div>
+                          </TableCell>
+                          <TableCell className="max-w-xs font-mono text-xs whitespace-normal break-all text-muted-foreground">
+                            {l.barcode}
+                            {l.relabels.length > 0 && (
+                              <div className="mt-0.5 font-sans font-semibold text-amber-700">
+                                Label lost, returned as:
+                                {[...new Set(l.relabels)].map(code => {
+                                  const n = l.relabels.filter(r => r === code).length
+                                  return <div key={code} className="font-mono">{code} ×{n}</div>
+                                })}
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell className="max-w-xs font-mono text-xs whitespace-normal break-all text-muted-foreground">{l.txn_ref}</TableCell>
                           <TableCell className="text-muted-foreground">{l.issued_qty}</TableCell>
@@ -448,9 +730,21 @@ export default function ReturnsPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1.5">
-                              <Button variant="ghost" size="icon-sm" onClick={() => updateReturning(l.line_id, l.returning - 1)}>−</Button>
+                              {/* − only once something on this row has been scanned. */}
+                              {l.returning > 0 && (
+                                <Button type="button" variant="ghost" size="icon-sm" aria-label={`Reduce scanned ${l.product_name}`} onClick={() => decrementScanned(l.line_id)}>
+                                  <Minus className="size-3.5" />
+                                </Button>
+                              )}
                               <span className={`min-w-6 text-center font-bold ${l.returning > 0 ? 'text-primary' : 'text-muted-foreground'}`}>{l.returning}</span>
-                              <Button variant="ghost" size="icon-sm" onClick={() => updateReturning(l.line_id, l.returning + 1)}>+</Button>
+                              <span className="text-xs text-muted-foreground">/ {l.returnable}</span>
+                              {/* + while units on this row are still unscanned: the
+                                  lost-barcode route, gated by a registered replacement barcode. */}
+                              {l.returning < l.returnable && (
+                                <Button type="button" variant="ghost" size="icon-sm" title="Barcode lost? Return this item under another registered barcode" aria-label={`Return ${l.product_name} under another registered barcode`} onClick={() => openRelabel(l)}>
+                                  <Plus className="size-3.5" />
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -460,10 +754,11 @@ export default function ReturnsPage() {
                 </Table>
               )}
             </div>
+            </div>
             {toReturn.length > 0 && (
               <div className="flex items-center justify-between border-t p-4">
                 <span className="text-sm text-muted-foreground">
-                  {toReturn.reduce((s, l) => s + l.returning, 0)} units · {toReturn.length} product{toReturn.length !== 1 ? 's' : ''}
+                  {toReturn.reduce((s, l) => s + l.returning, 0)} units · {groupByProduct(entriesOf(toReturn)).length} product{groupByProduct(entriesOf(toReturn)).length !== 1 ? 's' : ''}
                 </span>
                 <Button disabled={loading} onClick={handleConfirm}>
                   {loading ? 'Processing…' : 'Confirm Return'}
@@ -487,6 +782,48 @@ export default function ReturnsPage() {
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={confirmRestart} onOpenChange={setConfirmRestart}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>Restart and choose another staff member?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Items already scanned for <strong className="text-foreground">{staff?.full_name}</strong> have not been confirmed and will be discarded.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setConfirmRestart(false)}>Keep scanning</Button>
+            <Button type="button" onClick={() => { setConfirmRestart(false); reset() }}>Restart</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Lost-barcode dialog: a registered barcode is mandatory before the unit counts. */}
+      <Dialog open={relabelTarget !== null} onOpenChange={open => { if (!open) setRelabelTarget(null) }}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><AlertTriangle className="size-4 text-amber-600" /> Barcode lost</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This indicates that <strong className="text-foreground">{relabelTarget?.product_name}</strong> being returned has lost its barcode.
+            Please apply one of this product&apos;s registered barcodes to it, then provide that barcode below by scanning or entering its value manually.
+          </p>
+          <div className="grid gap-1.5">
+            <Label htmlFor="relabel-barcode">Barcode now on the product</Label>
+            <Input id="relabel-barcode" autoFocus placeholder="Scan or type the barcode now on the product, then press Enter…"
+              value={relabelInput} onChange={e => { setRelabelInput(e.target.value); setRelabelError('') }}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submitRelabel() } }} />
+            {relabelError && <p className="text-sm text-red-600">{relabelError}</p>}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setRelabelTarget(null)}>Cancel</Button>
+            <Button type="button" disabled={!relabelInput.trim() || relabelChecking} onClick={submitRelabel}>
+              {relabelChecking ? 'Checking…' : 'Use this barcode'}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">Only barcodes already registered to this product are accepted. To use a brand-new barcode, add it under Products → Edit first.</p>
+        </DialogContent>
+      </Dialog>
 
       {/* Manual staff search modal */}
       <Dialog open={showStaffSearch} onOpenChange={setShowStaffSearch}>

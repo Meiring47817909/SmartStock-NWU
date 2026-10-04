@@ -7,13 +7,15 @@ import { storageDownloadUrl } from '@/lib/firebase/storage'
 import { formatLendWindow, formatDateOnly } from '@/lib/utils'
 import { lendingIntervalLabel } from '@/lib/firebase/loanRequests'
 import { usePortalCart } from '@/context/PortalCartContext'
+import { usePortalMobileSearch } from '@/context/PortalMobileSearchContext'
 import { useStaffPortal } from '@/context/StaffPortalContext'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PortalPagination, paginateList, type PortalPageSize } from '@/components/portal-pagination'
 import ProductPreviewDialog from '@/components/products/ProductPreviewDialog'
-import { Package, Clock, Search, CalendarRange, Check } from 'lucide-react'
+import { AvailabilityDatePicker } from '@/components/portal/AvailabilityDatePicker'
+import { Package, Clock, Search, CalendarRange, Check, LayoutGrid } from 'lucide-react'
 import { toast } from 'sonner'
 import { ContactEmailLink } from '@/components/ContactEmailLink'
 import type { Product } from '@/types/database'
@@ -25,6 +27,7 @@ export default function LendBrowsePage() {
   const [previewProduct, setPreviewProduct] = useState<Product | null>(null)
   const [expectedReturn, setExpectedReturn] = useState<Record<string, string | null>>({})
   const { addToCart } = usePortalCart()
+  const { mobileSearchOpen } = usePortalMobileSearch()
   const { user } = useStaffPortal()
 
   // Filters
@@ -163,7 +166,11 @@ export default function LendBrowsePage() {
           same hex values used in that mockup). Material Symbols icons in
           the mockup are swapped for their lucide-react equivalents, since
           that's the icon set already used everywhere else in this app. */}
-      <div className="mb-4 flex flex-col gap-4 rounded-xl border border-border bg-card p-4 shadow-sm">
+      <div
+        className={`mb-4 flex-col gap-4 rounded-xl border border-border bg-card p-4 shadow-sm md:flex ${
+          mobileSearchOpen ? 'flex' : 'hidden'
+        }`}
+      >
         {/* Search field */}
         <div className="relative">
           <Search className="absolute top-1/2 left-3.5 size-5 -translate-y-1/2 text-muted-foreground" />
@@ -182,8 +189,15 @@ export default function LendBrowsePage() {
             long category list scrolls sideways rather than wrapping to a
             second line. Counts are the whole catalog's per-category totals,
             not narrowed by the other filters below. */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs whitespace-nowrap">
-          <span className="mr-1 shrink-0 text-sm font-medium text-muted-foreground">Categories:</span>
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs whitespace-nowrap max-dlg:flex-col max-dlg:items-start max-dlg:gap-1.5 max-dlg:overflow-visible max-dlg:pb-0">
+          <span className="mr-1 flex shrink-0 items-center gap-2 max-dlg:mr-0">
+            <LayoutGrid className="size-[18px] text-muted-foreground" />
+            <span className="text-sm font-medium text-muted-foreground">Categories:</span>
+          </span>
+          {/* Pills get their own row (and their own sideways scroll) so that
+              below 500px the label sits above them instead of scrolling
+              away with them. */}
+          <div className="flex shrink-0 items-center gap-2 max-dlg:w-full max-dlg:overflow-x-auto max-dlg:pb-1">
           <button
             type="button"
             onClick={() => setCatFilter('')}
@@ -209,11 +223,12 @@ export default function LendBrowsePage() {
               {c.name} ({categoryCounts.get(c.id) ?? 0})
             </button>
           ))}
+          </div>
         </div>
 
         {/* Secondary filter row: In-Stock Only + Lend Window dates */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border/60 pt-3 text-xs">
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3 max-dlg:w-full max-dlg:min-w-0">
             {/* Solid purple checkmark badge instead of a native checkbox —
                 matches the reference image exactly (a filled circle rather
                 than lucide's outline CheckCircle2), built from a plain
@@ -240,29 +255,36 @@ export default function LendBrowsePage() {
             {/* Loan window — named "Lend Window" rather than "From/To" so it
                 doesn't read as filtering by the PRODUCT's own listed window
                 (that's what "Lendable ..." on each card already shows). */}
-            <div className="flex items-center gap-2">
-              <CalendarRange className="size-[18px] text-muted-foreground" />
-              <span className="text-sm font-medium text-muted-foreground">Lend Window:</span>
-              <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2.5 py-1">
-                <label htmlFor="browse-from-date" className="text-[11px] font-medium text-muted-foreground">From</label>
-                <Input
-                  id="browse-from-date"
-                  type="date"
-                  className="h-auto w-24 border-0 bg-transparent p-0 text-xs font-medium shadow-none focus-visible:ring-0"
-                  value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                />
-              </div>
-              <span className="text-xs text-muted-foreground">–</span>
-              <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2.5 py-1">
-                <label htmlFor="browse-to-date" className="text-[11px] font-medium text-muted-foreground">To</label>
-                <Input
-                  id="browse-to-date"
-                  type="date"
-                  className="h-auto w-24 border-0 bg-transparent p-0 text-xs font-medium shadow-none focus-visible:ring-0"
-                  value={toDate}
-                  onChange={(e) => setToDate(e.target.value)}
-                />
+            <div className="flex flex-wrap items-center gap-2 max-dlg:w-full max-dlg:min-w-0">
+              <span className="flex items-center gap-2 max-dlg:w-full">
+                <CalendarRange className="size-[18px] text-muted-foreground" />
+                <span className="text-sm font-medium text-muted-foreground">Lend Window:</span>
+              </span>
+              <div className="flex items-center gap-1.5 max-dlg:w-full max-dlg:min-w-0 max-dlg:overflow-x-auto max-dlg:pb-1">
+                {/* Same calendar-popover picker as the cart's pickup dates,
+                    rather than a native date input. */}
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <label htmlFor="browse-from-date" className="text-[11px] font-medium text-muted-foreground">From</label>
+                  <AvailabilityDatePicker
+                    id="browse-from-date"
+                    clearable
+                    className="w-40"
+                    value={fromDate}
+                    onChange={(next) => { setFromDate(next); if (toDate && toDate < next) setToDate('') }}
+                  />
+                </div>
+                <span className="shrink-0 text-xs text-muted-foreground">–</span>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <label htmlFor="browse-to-date" className="text-[11px] font-medium text-muted-foreground">To</label>
+                  <AvailabilityDatePicker
+                    id="browse-to-date"
+                    clearable
+                    className="w-40"
+                    value={toDate}
+                    min={fromDate || undefined}
+                    onChange={setToDate}
+                  />
+                </div>
               </div>
             </div>
           </div>

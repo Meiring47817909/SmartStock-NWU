@@ -15,6 +15,9 @@ interface AvailabilityDatePickerProps {
   min?: string
   max?: string
   disabled?: boolean
+  // Shows a "Clear date" action in the popover once a date is set, for
+  // optional dates and filters (a native date input had its own clear).
+  clearable?: boolean
   placeholder?: string
   className?: string
   // Returns whether every item in the cart can be satisfied on/through a
@@ -47,7 +50,7 @@ const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 // see, at a glance, which pickup/return dates actually have enough stock
 // for everything in their cart before they even pick one.
 export function AvailabilityDatePicker({
-  id, value, onChange, min, max, disabled, placeholder = 'Select date', className, dayStatus,
+  id, value, onChange, min, max, disabled, clearable, placeholder = 'Select date', className, dayStatus,
 }: AvailabilityDatePickerProps) {
   const [open, setOpen] = useState(false)
   const [viewMonth, setViewMonth] = useState(() => {
@@ -75,7 +78,17 @@ export function AvailabilityDatePicker({
   }
 
   return (
-    <Popover open={open} onOpenChange={(next) => { if (!disabled) setOpen(next) }}>
+    <Popover open={open} onOpenChange={(next) => {
+      if (disabled) return
+      if (next) {
+        // Re-centre on the current value each time it opens, since the
+        // value can change from outside (Clear filters, a new From date).
+        const base = value || min
+        const d = base ? parseDateStr(base) : new Date()
+        setViewMonth(new Date(d.getFullYear(), d.getMonth(), 1))
+      }
+      setOpen(next)
+    }}>
       <PopoverTrigger
         render={
           <Button
@@ -130,6 +143,13 @@ export function AvailabilityDatePicker({
             )
           })}
         </div>
+        {clearable && value && (
+          <div className="mt-2 flex justify-end border-t pt-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => { onChange(''); setOpen(false) }}>
+              Clear date
+            </Button>
+          </div>
+        )}
         {dayStatus && (
           <div className="mt-3 flex items-center gap-3 border-t pt-2 text-[10px] text-muted-foreground">
             <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-emerald-500" /> Available</span>

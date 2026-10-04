@@ -8,18 +8,16 @@ import { LENDING_INTERVALS } from '@/lib/firebase/loanRequests'
 import { collection, query, orderBy, getDocs, where } from 'firebase/firestore'
 import { useTable, type SortingState } from '@tanstack/react-table'
 import {
-  SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead, ExportCsvButton,
+  SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead, ExportCsvButton, ExportPdfButton,
   type PageSize, paginate, TablePagination,
 } from '@/components/data-table-helpers'
 import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { AvailabilityDatePicker } from '@/components/portal/AvailabilityDatePicker'
 import { Badge } from '@/components/ui/badge'
-import {
-  Select, SelectContent, SelectGroup, SelectItem, SelectLabel,
-  SelectTrigger, SelectValue,
-} from '@/components/ui/select'
+import { MultiSelect } from '@/components/ui/multi-select'
+import { collapseLinesByProduct, formatBarcodeQuantities } from '@/lib/transactionLines'
 import type { AuditLogEntry, AuditAction, AuditEntityType, TransactionLine, LoanRequestLine } from '@/types/database'
 
 const ACTION_BADGE_CLASS: Record<AuditAction, string> = {
@@ -81,8 +79,10 @@ function loanRequestStatusLabel(status: string): string {
   return LOAN_REQUEST_STATUS_LABEL[status] ?? status.replace('_', ' ')
 }
 
-const ALL_ENTITIES = '__all__'
-const ALL_ACTIONS = '__all__'
+const ENTITY_OPTIONS: { value: AuditEntityType; label: string }[] = [
+  { value: 'product', label: 'Product' }, { value: 'category', label: 'Category' }, { value: 'staff', label: 'Staff' },
+  { value: 'transaction', label: 'Transaction' }, { value: 'loan_request', label: 'Loan Request' }, { value: 'settings', label: 'Settings' },
+]
 
 /*
  * The "Activity" column and its filter used to disagree, which made the
@@ -152,9 +152,11 @@ const ACTIVITY: Record<string, {
 }
 
 // Activity keys applicable to an entity filter ('' meaning "all entities").
-function activityKeysFor(entity: string): string[] {
+// With several entities ticked, an activity is offered if ANY of them can
+// produce it; with none ticked (= all entities), every activity is.
+function activityKeysFor(entities: string[]): string[] {
   return Object.keys(ACTIVITY).filter(
-    k => !entity || ACTIVITY[k].entities.includes(entity as AuditEntityType),
+    k => entities.length === 0 || entities.some(en => ACTIVITY[k].entities.includes(en as AuditEntityType)),
   )
 }
 
@@ -399,10 +401,10 @@ function TransactionSummary({ after, lines }: { after: Record<string, unknown> |
   // they were, not as they are now. Entries written before this was
   // recorded have no `after.lines`, so they fall back to the join.
   const frozenLines = Array.isArray(after.lines)
-    ? (after.lines as { product_id?: string; product_name?: string; quantity?: number }[])
+    ? (after.lines as { product_id?: string; product_name?: string; quantity?: number; barcodes?: string[] | null; barcode_quantities?: { barcode: string; quantity: number }[] | null }[])
     : null
   const shownLines = frozenLines
-    ?? (lines ?? []).map((l) => ({ product_name: l.product_name, quantity: l.quantity }))
+    ?? collapseLinesByProduct(lines ?? []).map((l) => ({ product_name: l.product_name, quantity: l.quantity, barcodes: l.barcodes, barcode_quantities: l.barcodeQuantities }))
   const linesPending = frozenLines === null && lines === undefined
 
   return (
@@ -446,6 +448,15 @@ function TransactionSummary({ after, lines }: { after: Record<string, unknown> |
           {shownLines.map((l, i) => (
             <li key={i}>
               {l.product_name ?? 'Unknown product'} <span className="text-muted-foreground">× {l.quantity}</span>
+              {/* Every distinct barcode scanned for the line at Stock Out.
+                  Absent on lines picked off a loan request, on other
+                  transaction types, and on entries from before barcode
+                  capture existed. */}
+              {Array.isArray(l.barcode_quantities) && l.barcode_quantities.length > 0 ? (
+                <div className="font-mono text-xs text-muted-foreground">{formatBarcodeQuantities(l.barcode_quantities).join(' · ')}</div>
+              ) : Array.isArray(l.barcodes) && l.barcodes.length > 0 && (
+                <div className="font-mono text-xs text-muted-foreground">{l.barcodes.join(' · ')}</div>
+              )}
             </li>
           ))}
         </ul>
@@ -887,7 +898,7 @@ function LoanRequestSummary({
 // JSON view, so the two need to say the same thing. Field VALUES still go
 // through friendlyValue for the same date/status/boolean formatting the
 // on-screen views use.
-function flattenValueForCsv(key: string, value: unknown): string {
+function flattenValueForCsv(key: string, value: unknown, noPipes = false): string {
   if (Array.isArray(value)) {
     if (value.length === 0) return '—'
     // An array of line items (after.lines, countered_lines, etc.) — show
@@ -898,9 +909,22 @@ function flattenValueForCsv(key: string, value: unknown): string {
       return (value as Record<string, unknown>[]).map((item) => {
         const name = item.product_name ?? item.name
         const qty = item.quantity ?? item.offered_quantity ?? item.requested_quantity
-        if (typeof name === 'string') return qty !== undefined && qty !== null ? `${name} × ${qty}` : name
+        // Barcodes scanned for the line (Stock Out), pipe-separated with a
+        // space either side and wrapped in brackets so they can't be mistaken
+        // for the " |" that separates whole fields in this cell.
+        // With per-barcode quantities (newer entries) each barcode carries its
+        // count -- "A ×2 | B ×1"; older entries only have the plain list.
+        const bqs = item.barcode_quantities
+        const barcodes = Array.isArray(bqs) && bqs.length > 0
+          ? ` [${formatBarcodeQuantities(bqs as { barcode: string; quantity: number }[]).join(noPipes ? ', ' : ' | ')}]`
+          : Array.isArray(item.barcodes) && item.barcodes.length > 0
+            ? ` [${(item.barcodes as unknown[]).join(noPipes ? ', ' : ' | ')}]`
+            : ''
+        if (typeof name === 'string') return (qty !== undefined && qty !== null ? `${name} × ${qty}` : name) + barcodes
         return JSON.stringify(item)
-      }).join(', ')
+      // PDF: one product per line (comma after each but the last); CSV keeps
+      // them on one line.
+      }).join(noPipes ? ',\n' : ', ')
     }
     return friendlyValue(key, value)
   }
@@ -917,6 +941,17 @@ function flattenAfterForCsv(after: Record<string, unknown> | null): string {
   return Object.keys(after)
     .map((key) => `${key}: ${flattenValueForCsv(key, after[key])}`)
     .join(' |\n')
+}
+
+// The same flattened text for the PDF export, minus every pipe: one field per
+// line with no trailing " |", and the barcodes inside a line's brackets joined
+// with commas instead of " | ". (A PDF cell wraps the lines itself, so the
+// pipes that kept fields apart in a one-cell CSV have nothing left to do.)
+function flattenAfterForPdf(after: Record<string, unknown> | null): string {
+  if (!after) return '— (none)'
+  return Object.keys(after)
+    .map((key) => `${key}: ${flattenValueForCsv(key, after[key], true)}`)
+    .join('\n')
 }
 
 // Sortable columns for the table header — same shadcn-data-table pattern
@@ -936,8 +971,8 @@ const AUDIT_LOG_COLUMNS = sortableColumnHelper.columns([
 export default function AuditLogPage() {
   const [entries, setEntries] = useState<AuditLogEntry[]>([])
   const [loading, setLoading] = useState(true)
-  const [entityFilter, setEntityFilter] = useState('')
-  const [actionFilter, setActionFilter] = useState('')
+  const [entityFilter, setEntityFilter] = useState<string[]>([])
+  const [actionFilter, setActionFilter] = useState<string[]>([])
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [sorting, setSorting] = useState<SortingState>([])
@@ -969,8 +1004,8 @@ export default function AuditLogPage() {
   }, [fromDate, toDate])
 
   const filtered = entries.filter(e =>
-    (!entityFilter || e.entity_type === entityFilter) &&
-    (!actionFilter || activityKey(e) === actionFilter)
+    (entityFilter.length === 0 || entityFilter.includes(e.entity_type)) &&
+    (actionFilter.length === 0 || actionFilter.includes(activityKey(e)))
   )
 
   const table = useTable({
@@ -999,11 +1034,10 @@ export default function AuditLogPage() {
   // Changing entity can invalidate the current activity (e.g. Transaction +
   // "Out", then switching to Staff). Clear it in the same update rather
   // than leaving a selection that silently matches nothing.
-  function changeEntity(next: string) {
+  function changeEntity(next: string[]) {
     setEntityFilter(next)
-    if (actionFilter && !activityKeysFor(next).includes(actionFilter)) {
-      setActionFilter('')
-    }
+    const allowed = activityKeysFor(next)
+    setActionFilter(prev => (prev.every(k => allowed.includes(k)) ? prev : prev.filter(k => allowed.includes(k))))
   }
 
   async function toggleExpand(e: AuditLogEntry) {
@@ -1050,48 +1084,26 @@ export default function AuditLogPage() {
         <CardContent className="flex flex-wrap items-end gap-3">
         <div className="grid gap-1.5">
           <span className="text-sm font-semibold text-slate-600">Entities</span>
-          <Select
-            items={{ [ALL_ENTITIES]: 'All entities', product: 'Product', category: 'Category', staff: 'Staff', transaction: 'Transaction', loan_request: 'Loan Request', settings: 'Settings' }}
-            value={entityFilter || ALL_ENTITIES}
-            onValueChange={v => changeEntity(v && v !== ALL_ENTITIES ? v : '')}
-          >
-            <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_ENTITIES}>All entities</SelectItem>
-              <SelectItem value="product">Product</SelectItem>
-              <SelectItem value="category">Category</SelectItem>
-              <SelectItem value="staff">Staff</SelectItem>
-              <SelectItem value="transaction">Transaction</SelectItem>
-              <SelectItem value="loan_request">Loan Request</SelectItem>
-              <SelectItem value="settings">Settings</SelectItem>
-            </SelectContent>
-          </Select>
+          <MultiSelect
+            className="w-44"
+            placeholder="All entities"
+            value={entityFilter}
+            onChange={changeEntity}
+            groups={[{ options: ENTITY_OPTIONS }]}
+          />
         </div>
         <div className="grid gap-1.5">
           <span className="text-sm font-semibold text-slate-600">Activities</span>
-          <Select
-            items={{
-              [ALL_ACTIONS]: 'All activity',
-              ...Object.fromEntries(
-                visibleActivityGroups.flatMap(g => g.keys.map(k => [k, activityLabel(k)]))
-              ),
-            }}
-            value={actionFilter || ALL_ACTIONS}
-            onValueChange={v => setActionFilter(v && v !== ALL_ACTIONS ? v : '')}
-          >
-            <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_ACTIONS}>All activity</SelectItem>
-              {visibleActivityGroups.map(group => (
-                <SelectGroup key={group.label}>
-                  <SelectLabel>{group.label}</SelectLabel>
-                  {group.keys.map(k => (
-                    <SelectItem key={k} value={k}>{activityLabel(k)}</SelectItem>
-                  ))}
-                </SelectGroup>
-              ))}
-            </SelectContent>
-          </Select>
+          <MultiSelect
+            className="w-52"
+            placeholder="All activity"
+            value={actionFilter}
+            onChange={setActionFilter}
+            groups={visibleActivityGroups.map(g => ({
+              label: g.label,
+              options: g.keys.map(k => ({ value: k, label: activityLabel(k) })),
+            }))}
+          />
         </div>
         {/* A date input ignores `placeholder`, so these two were the only
             unlabelled controls on the row — the browser's own dd/mm/yyyy
@@ -1101,18 +1113,18 @@ export default function AuditLogPage() {
           <label htmlFor="audit-from-date" className="text-sm font-semibold text-slate-600">
             From date
           </label>
-          <Input id="audit-from-date" type="date" className="w-40 border-slate-300 bg-white text-slate-700 focus-visible:border-[#8046B5] focus-visible:ring-[#8046B5]/50"
-            value={fromDate} onChange={e => setFromDate(e.target.value)} />
+          <AvailabilityDatePicker id="audit-from-date" clearable className="w-40 border-slate-300 bg-white text-slate-700"
+            value={fromDate} onChange={setFromDate} />
         </div>
         <div className="grid gap-1.5">
           <label htmlFor="audit-to-date" className="text-sm font-semibold text-slate-600">
             To date
           </label>
-          <Input id="audit-to-date" type="date" className="w-40 border-slate-300 bg-white text-slate-700 focus-visible:border-[#8046B5] focus-visible:ring-[#8046B5]/50"
-            value={toDate} onChange={e => setToDate(e.target.value)} />
+          <AvailabilityDatePicker id="audit-to-date" clearable className="w-40 border-slate-300 bg-white text-slate-700"
+            value={toDate} min={fromDate || undefined} onChange={setToDate} />
         </div>
-        {(entityFilter || actionFilter || fromDate || toDate) && (
-          <Button variant="ghost" onClick={() => { setEntityFilter(''); setActionFilter(''); setFromDate(''); setToDate('') }}>Clear filters</Button>
+        {(entityFilter.length > 0 || actionFilter.length > 0 || fromDate || toDate) && (
+          <Button variant="ghost" onClick={() => { setEntityFilter([]); setActionFilter([]); setFromDate(''); setToDate('') }}>Clear filters</Button>
         )}
         <span className="self-end pb-2 text-sm text-muted-foreground">{filtered.length} entries</span>
         {/* Exports every filtered+sorted entry (never just the current
@@ -1134,6 +1146,32 @@ export default function AuditLogPage() {
             { header: 'Entity', value: (e: AuditLogEntry) => ENTITY_LABEL[e.entity_type] ?? e.entity_type },
             { header: 'Entity ID', value: (e: AuditLogEntry) => e.entity_id },
             { header: 'Details', value: (e: AuditLogEntry) => flattenAfterForCsv(reorderForDisplay(e.entity_type, e.action, e.after)) },
+          ]}
+          className="ml-auto"
+        />
+        {/* Same entries and columns as the CSV, as a PDF table under an
+            "Audit Log Report" title, with the Details column free of pipes. */}
+        <ExportPdfButton
+          filename={`audit-log-${todayDateStr()}.pdf`}
+          title="Audit Log Report"
+          subtitle={[
+            `Compiled ${formatDateOnly(todayDateStr())}  ·  ${sorted.length} ${sorted.length === 1 ? 'entry' : 'entries'}`,
+            // Nothing ticked means "everything", so spell every entity and
+            // activity out rather than leaving the line off.
+            `Entities: ${(entityFilter.length ? entityFilter : ENTITY_OPTIONS.map(o => o.value)).map(en => ENTITY_LABEL[en as AuditEntityType] ?? en).join(', ')}`,
+            `Activities: ${(actionFilter.length ? actionFilter : ACTIVITY_GROUPS.flatMap(g => g.keys)).map(activityLabel).join(', ')}`,
+            fromDate || toDate
+              ? `Dates: ${fromDate ? formatDateOnly(fromDate) : 'earliest entry'} to ${toDate ? formatDateOnly(toDate) : 'latest entry'}`
+              : 'Dates: All dates (full system log)',
+          ].filter(Boolean)}
+          rows={sorted}
+          columns={[
+            { header: 'Date', width: 118, value: (e: AuditLogEntry) => formatDate(e.created_at) },
+            { header: 'User', width: 74, value: (e: AuditLogEntry) => e.user_name ?? '—' },
+            { header: 'Activity', width: 88, value: (e: AuditLogEntry) => activityLabel(activityKey(e)) },
+            { header: 'Entity', width: 76, value: (e: AuditLogEntry) => ENTITY_LABEL[e.entity_type] ?? e.entity_type },
+            { header: 'Entity ID', width: 134, value: (e: AuditLogEntry) => e.entity_id },
+            { header: 'Details', value: (e: AuditLogEntry) => flattenAfterForPdf(reorderForDisplay(e.entity_type, e.action, e.after)) },
           ]}
         />
         </CardContent>

@@ -147,6 +147,20 @@ export interface TransactionLine {
   created_at: string
   // denormalized at write-time for cheap rendering (avoids a product lookup per line)
   product_name?: string
+  // The single barcode scanned for this line. A product can carry more than
+  // one barcode (e.g. its manufacturer code plus an NWU-printed one), and
+  // Stock Out / Stock In / Returns write ONE LINE PER (product, barcode):
+  // scanning a product via two different barcodes gives two lines for it,
+  // each with its own quantity. That keeps a Return exactly matchable per
+  // barcode. Anything that needs a per-product view of a transaction (the
+  // outstanding-return maths, the reports, the audit log) collapses lines
+  // with collapseLinesByProduct() in lib/transactionLines.ts first.
+  // Absent on lines written before barcode capture existed.
+  barcode?: string | null
+  // RETURN lines only, and only when the unit lost its barcode: the barcode it
+  // was ISSUED under. `barcode` is then the replacement applied at return time.
+  // The Returns page counts the line against issued_barcode.
+  issued_barcode?: string | null
 }
 
 export interface DashboardStats {

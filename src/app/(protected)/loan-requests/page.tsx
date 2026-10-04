@@ -2,6 +2,8 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
+import { useTable, type SortingState } from '@tanstack/react-table'
+import { SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead } from '@/components/data-table-helpers'
 import { toast } from 'sonner'
 import { notifyLoanRequestEvent } from '@/lib/firebase/notifyEvent'
 import { db } from '@/lib/firebase/config'
@@ -11,13 +13,13 @@ import {
   approveAsIs, sendCounter, declineRequest, expireIfNeeded,
   computeExpiryDate, getReservedQuantity, effectiveToDate,
 } from '@/lib/firebase/loanRequests'
-import { formatDateOnly, formatLendWindow, sentenceCase, todayDateStr } from '@/lib/utils'
+import { formatDateOnly, formatDateShort, formatLendWindow, sentenceCase, todayDateStr } from '@/lib/utils'
 import { notifyAlertsChanged } from '@/lib/alertsBus'
 import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { AvailabilityDatePicker } from '@/components/portal/AvailabilityDatePicker'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -52,16 +54,39 @@ interface Draft {
   toDate: string
 }
 
-// Undated-pushed-to-end comparator — same shape as dashboard/page.tsx's
-// outstandingList.sort.
-function byExpirySoonestFirst(a: LoanRequest, b: LoanRequest) {
-  const ea = computeExpiryDate(a)
-  const eb = computeExpiryDate(b)
-  if (!ea && !eb) return 0
-  if (!ea) return 1
-  if (!eb) return -1
-  return ea.localeCompare(eb)
-}
+// The enriched row shape both outer request tables below actually sort --
+// itemCount isn't a field on LoanRequest itself, see pendingRows/
+// counteredRows below.
+type LoanRequestRow = LoanRequest & { itemCount: number }
+
+// Shared by both outer request tables below (Needs Review / Sent
+// Counters) -- same shadcn/tanstack sortable-column pattern as Dashboard
+// and Reports (see data-table-helpers.tsx). Each table gets its own column
+// list because the one date column between them differs (Requested vs
+// Countered), but Staff/Items/Status/Expires are otherwise identical.
+// Expires uses computeExpiryDate() rather than a stored field (there isn't
+// one -- see LoanRequest.updated_at's own doc comment), falling back to ''
+// so an undated (indefinite) request sorts before any dated one ascending.
+const NEEDS_REVIEW_COLUMNS = sortableColumnHelper.columns([
+  sortableColumnHelper.accessor('staff_name', { id: 'staff_name', header: 'Staff', sortFn: 'alphanumeric' }),
+  sortableColumnHelper.accessor((r: LoanRequestRow) => r.itemCount, { id: 'item_count', header: 'Items', sortFn: 'alphanumeric' }),
+  sortableColumnHelper.accessor('status', { id: 'status', header: 'Status', sortFn: 'alphanumeric' }),
+  // created_at is set once at submission and never changes -- exactly
+  // "when the staff member requested" this loan.
+  sortableColumnHelper.accessor('created_at', { id: 'requested', header: 'Requested', sortFn: 'text' }),
+  sortableColumnHelper.accessor((r: LoanRequestRow) => computeExpiryDate(r) ?? '', { id: 'expiry', header: 'Expires', sortFn: 'text' }),
+])
+
+const SENT_COUNTERS_COLUMNS = sortableColumnHelper.columns([
+  sortableColumnHelper.accessor('staff_name', { id: 'staff_name', header: 'Staff', sortFn: 'alphanumeric' }),
+  sortableColumnHelper.accessor((r: LoanRequestRow) => r.itemCount, { id: 'item_count', header: 'Items', sortFn: 'alphanumeric' }),
+  sortableColumnHelper.accessor('status', { id: 'status', header: 'Status', sortFn: 'alphanumeric' }),
+  // updated_at is bumped on every status transition -- sendCounter() sets
+  // it alongside status: 'countered', so on a request that's currently
+  // sitting in this tab it's exactly when Selouna sent the counter.
+  sortableColumnHelper.accessor('updated_at', { id: 'countered', header: 'Countered', sortFn: 'text' }),
+  sortableColumnHelper.accessor((r: LoanRequestRow) => computeExpiryDate(r) ?? '', { id: 'expiry', header: 'Expires', sortFn: 'text' }),
+])
 
 export default function LoanRequestsPage() {
   const { user, profile } = useAuth()
@@ -86,6 +111,11 @@ export default function LoanRequestsPage() {
   const [declining, setDeclining] = useState<LoanRequest | null>(null)
   const [declineMessage, setDeclineMessage] = useState('')
   const [declineBusy, setDeclineBusy] = useState(false)
+  // Default: oldest Requested first on Needs Review, oldest Countered
+  // first on Sent Counters -- both ascending on their own date column, so
+  // whatever's been waiting longest for a response surfaces at the top.
+  const [pendingSorting, setPendingSorting] = useState<SortingState>([{ id: 'requested', desc: false }])
+  const [counteredSorting, setCounteredSorting] = useState<SortingState>([{ id: 'countered', desc: false }])
 
   useEffect(() => { load() }, [])
 
@@ -285,8 +315,31 @@ export default function LoanRequestsPage() {
     setDeclineBusy(false)
   }
 
-  const pending = requests.filter((r) => r.status === 'pending').sort(byExpirySoonestFirst)
-  const countered = requests.filter((r) => r.status === 'countered').sort(byExpirySoonestFirst)
+  // itemCount isn't a field on LoanRequest itself (it's derived from
+  // linesByRequest), so it's attached here -- once per row, not recomputed
+  // by every column's accessor/sortFn -- before handing rows to the table.
+  const pendingRows = requests.filter((r) => r.status === 'pending')
+    .map((r) => ({ ...r, itemCount: (linesByRequest[r.id] ?? []).length }))
+  const counteredRows = requests.filter((r) => r.status === 'countered')
+    .map((r) => ({ ...r, itemCount: (linesByRequest[r.id] ?? []).length }))
+
+  const pendingTable = useTable({
+    features: SORTABLE_TABLE_FEATURES,
+    columns: NEEDS_REVIEW_COLUMNS,
+    data: pendingRows,
+    state: { sorting: pendingSorting },
+    onSortingChange: setPendingSorting,
+  })
+  const pending = pendingTable.getSortedRowModel().rows.map((row) => row.original as typeof pendingRows[number])
+
+  const counteredTable = useTable({
+    features: SORTABLE_TABLE_FEATURES,
+    columns: SENT_COUNTERS_COLUMNS,
+    data: counteredRows,
+    state: { sorting: counteredSorting },
+    onSortingChange: setCounteredSorting,
+  })
+  const countered = counteredTable.getSortedRowModel().rows.map((row) => row.original as typeof counteredRows[number])
 
   function EditableRow({ r }: { r: LoanRequest }) {
     // A 'countered' request is read-only from here on — Selouna already
@@ -302,7 +355,7 @@ export default function LoanRequestsPage() {
                     is whitespace-nowrap by default — see the same fix in
                     audit-log/page.tsx. Without this the message sets the cell's
                     min-content width and drags the table past the screen. */}
-        <TableCell colSpan={5} className="px-8 py-6 break-words whitespace-normal">
+        <TableCell colSpan={6} className="px-8 py-6 break-words whitespace-normal">
           {!draft ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : (
@@ -310,13 +363,13 @@ export default function LoanRequestsPage() {
               <div className="flex flex-wrap items-end gap-4">
                 <div className="grid gap-1.5">
                   <label className="text-sm font-semibold text-slate-600">From</label>
-                  <Input type="date" className="w-48 border-slate-300 bg-white font-mono text-slate-700 focus-visible:border-[#8046B5] focus-visible:ring-[#8046B5]/50" value={draft.fromDate} min={todayDateStr()}
-                    onChange={(e) => updateDraftDate(r.id, 'fromDate', e.target.value)} />
+                  <AvailabilityDatePicker id={`lr-from-${r.id}`} className="w-48 border-slate-300 bg-white text-slate-700" value={draft.fromDate} min={todayDateStr()}
+                    onChange={(next) => updateDraftDate(r.id, 'fromDate', next)} />
                 </div>
                 <div className="grid gap-1.5">
                   <label className="text-sm font-semibold text-slate-600">To</label>
-                  <Input type="date" className="w-48 border-slate-300 bg-white font-mono text-slate-700 focus-visible:border-[#8046B5] focus-visible:ring-[#8046B5]/50" value={draft.toDate} min={draft.fromDate}
-                    onChange={(e) => updateDraftDate(r.id, 'toDate', e.target.value)} />
+                  <AvailabilityDatePicker id={`lr-to-${r.id}`} clearable className="w-48 border-slate-300 bg-white text-slate-700" value={draft.toDate} min={draft.fromDate}
+                    onChange={(next) => updateDraftDate(r.id, 'toDate', next)} />
                 </div>
               </div>
 
@@ -415,7 +468,7 @@ export default function LoanRequestsPage() {
                     is whitespace-nowrap by default — see the same fix in
                     audit-log/page.tsx. Without this the message sets the cell's
                     min-content width and drags the table past the screen. */}
-        <TableCell colSpan={5} className="px-8 py-6 break-words whitespace-normal">
+        <TableCell colSpan={6} className="px-8 py-6 break-words whitespace-normal">
           <div className="flex flex-col gap-4">
             {r.message && (
               <div className="grid gap-1.5">
@@ -482,12 +535,16 @@ export default function LoanRequestsPage() {
     )
   }
 
-  function requestRows(list: LoanRequest[]) {
-    if (loading) return <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>
-    if (list.length === 0) return <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Nothing here ✓</TableCell></TableRow>
+  function requestRows(list: LoanRequestRow[], dateColumn: 'requested' | 'countered') {
+    if (loading) return <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Loading…</TableCell></TableRow>
+    if (list.length === 0) return <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Nothing here ✓</TableCell></TableRow>
     return list.map((r) => {
-      const itemCount = (linesByRequest[r.id] ?? []).length
       const expiry = computeExpiryDate(r)
+      // Requested = created_at (set once at submission, never changes).
+      // Countered = updated_at (bumped on every status transition -- on a
+      // request currently sitting in this tab, its last transition was
+      // sendCounter() setting status: 'countered').
+      const dateValue = dateColumn === 'requested' ? r.created_at : r.updated_at
       return (
         <Fragment key={r.id}>
           <TableRow className="group cursor-pointer hover:bg-[#FAF7FC]" onClick={() => toggleExpand(r)}>
@@ -500,10 +557,11 @@ export default function LoanRequestsPage() {
                 </div>
               )}
             </TableCell>
-            <TableCell className="py-4 text-sm text-slate-600">{itemCount} item{itemCount === 1 ? '' : 's'}</TableCell>
+            <TableCell className="py-4 text-sm text-slate-600">{r.itemCount} item{r.itemCount === 1 ? '' : 's'}</TableCell>
             <TableCell className="py-4">
               <Badge className={STATUS_BADGE_CLASS[r.status]}>{sentenceCase(r.status.replace('_', ' '))}</Badge>
             </TableCell>
+            <TableCell className="py-4 text-sm font-medium text-slate-600">{formatDateShort(dateValue)}</TableCell>
             <TableCell className="py-4 pr-6 text-sm font-medium text-slate-600">{expiry ? formatDateOnly(expiry) : '—'}</TableCell>
           </TableRow>
           {isExpanded(r.id) && <EditableRow r={r} />}
@@ -559,13 +617,14 @@ export default function LoanRequestsPage() {
               <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
                 <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
                   <TableHead className="h-auto w-8 py-3.5 pl-6"></TableHead>
-                  <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff</TableHead>
-                  <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Items</TableHead>
-                  <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Status</TableHead>
-                  <TableHead className="h-auto py-3.5 pr-6 text-base font-bold text-[#2D203A]">Expires</TableHead>
+                  <SortableHead column={pendingTable.getColumn('staff_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff</SortableHead>
+                  <SortableHead column={pendingTable.getColumn('item_count')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Items</SortableHead>
+                  <SortableHead column={pendingTable.getColumn('status')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Status</SortableHead>
+                  <SortableHead column={pendingTable.getColumn('requested')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Requested</SortableHead>
+                  <SortableHead column={pendingTable.getColumn('expiry')!} className="h-auto py-3.5 pr-6 text-base font-bold text-[#2D203A]">Expires</SortableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>{requestRows(pending)}</TableBody>
+              <TableBody>{requestRows(pending, 'requested')}</TableBody>
             </Table>
             </div>
           </Card>
@@ -578,13 +637,14 @@ export default function LoanRequestsPage() {
               <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
                 <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
                   <TableHead className="h-auto w-8 py-3.5 pl-6"></TableHead>
-                  <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff</TableHead>
-                  <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Items</TableHead>
-                  <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Status</TableHead>
-                  <TableHead className="h-auto py-3.5 pr-6 text-base font-bold text-[#2D203A]">Expires</TableHead>
+                  <SortableHead column={counteredTable.getColumn('staff_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff</SortableHead>
+                  <SortableHead column={counteredTable.getColumn('item_count')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Items</SortableHead>
+                  <SortableHead column={counteredTable.getColumn('status')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Status</SortableHead>
+                  <SortableHead column={counteredTable.getColumn('countered')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Countered</SortableHead>
+                  <SortableHead column={counteredTable.getColumn('expiry')!} className="h-auto py-3.5 pr-6 text-base font-bold text-[#2D203A]">Expires</SortableHead>
                 </TableRow>
               </TableHeader>
-              <TableBody>{requestRows(countered)}</TableBody>
+              <TableBody>{requestRows(countered, 'countered')}</TableBody>
             </Table>
             </div>
           </Card>
