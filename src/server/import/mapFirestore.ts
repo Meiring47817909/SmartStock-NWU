@@ -62,6 +62,8 @@ export interface FirestoreSource {
   list(collection: string): Promise<FirestoreDoc[]>
   /** Every top-level collection name, so collections the app no longer has can be reported. Optional. */
   listCollections?(): Promise<string[]>
+  /** How many documents a collection the app no longer has holds (reported, not imported). Optional: else list().length. */
+  countDocuments?(collection: string): Promise<number>
 }
 
 /** A whole Firestore database as JSON: { <collection>: { <docId>: data } } (the shape of the test fixtures). */
@@ -79,9 +81,11 @@ export function memorySource(state: FirestoreState): FirestoreSource {
   }
 }
 
-/** A collection reference, as far as the importer is concerned: something a read-only transaction can get(). */
+/** A collection reference, as far as the importer is concerned: something a read-only transaction can get(), or count. */
 export interface ReadOnlyCollection {
   get(): Promise<{ docs: { id: string; data(): FirestoreData }[] }>
+  /** A count() aggregate query: the number of documents, without reading them. */
+  count(): { get(): Promise<{ data(): { count: number } }> }
 }
 
 /** What a read-only transaction offers the importer: reading a whole collection, nothing else. */
@@ -90,10 +94,11 @@ export interface ReadOnlyTransaction {
 }
 
 /**
- * The only Firestore calls the importer ever makes: list the top-level collection names, name a collection, and read
- * collections inside ONE read-only transaction. Typed this narrowly on purpose: no write method (add, set, update,
- * delete, batch ...) is reachable through it, and the transaction it opens is `readOnly: true`, which the server itself
- * refuses to write in. The Admin SDK's Firestore satisfies this interface.
+ * The only Firestore calls the importer ever makes: list the top-level collection names, name a collection, count the
+ * documents of a collection the app no longer has, and read the app's collections inside ONE read-only transaction.
+ * Typed this narrowly on purpose: no write method (add, set, update, delete, batch ...) is reachable through it, and the
+ * transaction it opens is `readOnly: true`, which the server itself refuses to write in. The Admin SDK's Firestore
+ * satisfies this interface.
  */
 export interface ReadOnlyFirestore {
   listCollections(): Promise<{ id: string }[]>
@@ -101,40 +106,51 @@ export interface ReadOnlyFirestore {
   runTransaction<T>(fn: (tx: ReadOnlyTransaction) => Promise<T>, options: { readOnly: true }): Promise<T>
 }
 
-/** A source over already-read documents, handed out as they are (no copy): the Admin SDK's own values stay intact. */
-function snapshotSource(state: Map<string, FirestoreDoc[]>): FirestoreSource {
+/**
+ * A source over already-read documents, handed out as they are (no copy): the Admin SDK's own values stay intact.
+ * `others` holds the document counts of the collections the app no longer has (never read, only counted).
+ */
+function snapshotSource(state: Map<string, FirestoreDoc[]>, others: Map<string, number>): FirestoreSource {
   return {
     async list(collection) {
       return [...(state.get(collection) ?? [])]
     },
     async listCollections() {
-      return [...state.keys()]
+      return [...state.keys(), ...others.keys()]
+    },
+    async countDocuments(collection) {
+      return others.get(collection) ?? state.get(collection)?.length ?? 0
     },
   }
 }
 
 /**
- * Reads every collection the importer needs (the app's, plus any other top-level collection so it can be reported) in one
- * read-only transaction, so all of them come from the same consistent snapshot: a Stock Out saved while the import reads
- * can't appear with only half of its lines. Collection names are listed first (that call is not part of a transaction;
- * a collection created in between is simply read as well, inside the snapshot). Returns an in-memory source.
+ * Reads every collection the app had in one read-only transaction, so all of them come from the same consistent
+ * snapshot: a Stock Out saved while the import reads can't appear with only half of its lines. Any other top-level
+ * collection is only counted, with a count() aggregate outside that transaction (it is reported, never imported, so its
+ * documents are not downloaded; one with no documents is left out of the report). Collection names are listed first
+ * (that call is not part of a transaction either). Returns an in-memory source.
  */
 export async function readFirestoreSnapshot(firestore: ReadOnlyFirestore): Promise<FirestoreSource> {
-  const names = new Set<string>([...IMPORTED_COLLECTIONS, ...(await firestore.listCollections()).map((c) => c.id)])
+  const imported = new Set<string>(IMPORTED_COLLECTIONS)
+  const otherNames = (await firestore.listCollections()).map((c) => c.id).filter((name) => !imported.has(name))
   const state = await firestore.runTransaction(
     async (tx) => {
       const out = new Map<string, FirestoreDoc[]>()
-      for (const name of names) {
+      for (const name of IMPORTED_COLLECTIONS) {
         const snap = await tx.get(firestore.collection(name))
-        if (snap.docs.length > 0 || (IMPORTED_COLLECTIONS as readonly string[]).includes(name)) {
-          out.set(name, snap.docs.map((d) => ({ id: d.id, data: d.data() })))
-        }
+        out.set(name, snap.docs.map((d) => ({ id: d.id, data: d.data() })))
       }
       return out
     },
     { readOnly: true },
   )
-  return snapshotSource(state)
+  const others = new Map<string, number>()
+  for (const name of otherNames) {
+    const n = (await firestore.collection(name).count().get()).data().count
+    if (n > 0) others.set(name, n)
+  }
+  return snapshotSource(state, others)
 }
 
 // --- The plan ----------------------------------------------------------------------------------------------------------
@@ -468,12 +484,6 @@ class DocReader {
     }
     return new Date(0)
   }
-  /** Optional timestamp: missing or null -> `fallback`. */
-  optTimestamp(field: string, fallback: Date): Date {
-    const v = this.raw(field)
-    if (v === undefined || v === null) return fallback
-    return this.timestamp(field)
-  }
   day(field: string): string {
     const v = this.raw(field)
     if (v === undefined || v === null) {
@@ -573,7 +583,9 @@ export async function planImport(source: FirestoreSource, opts: PlanOptions = {}
   if (source.listCollections) {
     const known = new Set<string>(IMPORTED_COLLECTIONS)
     for (const name of (await source.listCollections()).sort()) {
-      if (!known.has(name)) notImported.push({ collection: name, documents: (await source.list(name)).length })
+      if (known.has(name)) continue
+      const documents = source.countDocuments ? await source.countDocuments(name) : (await source.list(name)).length
+      notImported.push({ collection: name, documents })
     }
   }
 
@@ -714,23 +726,28 @@ export async function planImport(source: FirestoreSource, opts: PlanOptions = {}
 
     // barcodes[] (in saved order; [0] is the primary), or the pre-multi-barcode single `barcode` field. When both exist
     // the old app showed and saved barcodes[] only (productBarcodes() on the Products page), so that list wins.
+    // Every code is trimmed, as the app trims what it saves (a scan never carries the spaces); a NUL is a problem.
     const legacy = r.raw('barcode')
     const list = r.raw('barcodes')
     let codes: string[] = []
     if (list !== undefined && list !== null) {
       codes = r.textList('barcodes')
-      if (typeof legacy === 'string' && legacy.trim() !== '' && !codes.includes(legacy)) {
-        r.warn(`legacy barcode "${legacy}" ignored: the product has barcodes[], which the old app showed and saved instead`)
+      const legacyCode = typeof legacy === 'string' ? legacy.trim() : ''
+      if (legacyCode !== '' && !codes.some((c) => c.trim() === legacyCode)) {
+        r.warn(`legacy barcode "${legacyCode}" ignored: the product has barcodes[], which the old app showed and saved instead`)
       }
     } else if (legacy !== undefined && legacy !== null) {
       if (typeof legacy !== 'string') r.problem(`barcode should be text, found ${describe(legacy)}`)
+      else if (legacy.includes(NUL)) r.problem('barcode contains a NUL character, which PostgreSQL cannot store')
       else codes = [legacy]
     }
     const seen = new Set<string>()
-    for (const code of codes) {
-      if (code.trim() === '') r.warn('a blank barcode was skipped')
+    for (const raw of codes) {
+      const code = raw.trim()
+      if (code === '') r.warn('a blank barcode was skipped')
       else if (seen.has(code)) r.warn(`barcode "${code}" is listed twice on this product; imported once`)
       else {
+        if (code !== raw) r.warn(`barcode ${JSON.stringify(raw)} had spaces around it; imported as "${code}"`)
         seen.add(code)
         barcodeRows.push({ id: r.id, row: { barcode: code, product_id: r.id, position: seen.size - 1 } })
       }
@@ -937,14 +954,16 @@ export async function planImport(source: FirestoreSource, opts: PlanOptions = {}
       else {
         const name = snapshotName(id) ?? [...m.names][0]
         const categoryId = text(before.category_id)
-        if (categoryId !== null && !ids.categories.has(categoryId)) {
+        const categoryKept = categoryId !== null && ids.categories.has(categoryId)
+        if (categoryId !== null && !categoryKept) {
           issues.warn('products', id, `category_id "${categoryId}" of the deleted product no longer exists; restored without a category`)
         }
         const threshold = before.reorder_threshold
         restoredRows.push({
           id,
-          category_id: categoryId !== null && ids.categories.has(categoryId) ? categoryId : null,
-          category_name: text(before.category_name),
+          // Without its category it keeps no category name either (the app shows category_name as the category).
+          category_id: categoryKept ? categoryId : null,
+          category_name: categoryId !== null && !categoryKept ? null : text(before.category_name),
           name: name ?? id,
           description: text(before.description),
           quantity_on_hand: 0,
@@ -960,8 +979,10 @@ export async function planImport(source: FirestoreSource, opts: PlanOptions = {}
         })
         const codes = Array.isArray(before.barcodes) ? before.barcodes : []
         let position = 0
-        for (const code of codes) {
-          if (typeof code !== 'string' || code.trim() === '' || code.includes(NUL)) continue
+        for (const raw of codes) {
+          if (typeof raw !== 'string' || raw.trim() === '' || raw.includes(NUL)) continue
+          const code = raw.trim()
+          if (barcodeOwner.get(code) === id) continue // listed twice in the snapshot
           const owner = barcodeOwner.get(code)
           if (owner !== undefined) {
             issues.warn('products', id, `barcode "${code}" of the deleted product is now on product ${owner} (${productName.get(owner) ?? 'restored'}); not restored`)

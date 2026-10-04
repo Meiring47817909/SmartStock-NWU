@@ -28,9 +28,12 @@ import type { ImportPlan, ImportRows, ImportTableName } from '@/server/import/ma
 //     guards come first, because a target that merely looks local (Cloud SQL through the Auth Proxy on 127.0.0.1) could
 //     otherwise be emptied by a mistyped re-run after go-live:
 //       (a) `confirmDatabase` must equal current_database() on the connection;
-//       (b) no app table may hold a row created after the newest created_at in the plan: such a row exists only in
-//           PostgreSQL (entered after cut-over) and would be lost. Every save in the app writes an audit entry, so an
-//           edit after cut-over is caught by audit_log even when it creates no other row.
+//       (b) no app table may hold a row the plan does not account for, as such a row exists only in PostgreSQL
+//           (entered after cut-over) and would be lost: no row whose `id` is not in the plan (every table with an `id`
+//           column), and no created_at or updated_at newer than the newest created_at / updated_at in the plan. Every
+//           save in the app writes an audit entry, so an edit after cut-over is caught by audit_log even when it
+//           creates no other row; updated_at also catches an edit to a mutable row (a product, a staff member, a
+//           request, the settings) directly.
 //   - Any failing insert (or a final count that doesn't match the plan) throws, and the whole transaction rolls back:
 //     the database is left exactly as it was.
 //
@@ -103,16 +106,27 @@ async function countAll(tx: Tx | Db): Promise<ImportCounts> {
   return out
 }
 
-/** The newest created_at among the plan's rows (null for an empty plan). */
-export function newestPlannedCreatedAt(plan: ImportPlan): Date | null {
+/** The newest created_at or updated_at among the plan's rows (null for an empty plan). */
+export function newestPlannedTimestamp(plan: ImportPlan): Date | null {
   let newest: Date | null = null
   for (const rows of Object.values(plan.rows) as Record<string, unknown>[][]) {
     for (const row of rows) {
-      const at = row.created_at
-      if (at instanceof Date && (newest === null || at > newest)) newest = at
+      for (const at of [row.created_at, row.updated_at]) {
+        if (at instanceof Date && (newest === null || at > newest)) newest = at
+      }
     }
   }
   return newest
+}
+
+/** Up to `limit` ids in `table` that are not among `planned` (one jsonb parameter, so any number of ids fits). */
+async function idsNotInPlan(tx: Tx, table: PgTable, planned: string[], limit = 3): Promise<{ ids: string[]; total: number }> {
+  const id = (table as unknown as { id: AnyPgColumn }).id
+  const notPlanned = sql`not (${id} = any (select jsonb_array_elements_text(${JSON.stringify(planned)}::jsonb)))`
+  const [{ total }] = await tx.select({ total: count() }).from(table).where(notPlanned)
+  if (total === 0) return { ids: [], total }
+  const rows = await tx.select({ id }).from(table).where(notPlanned).orderBy(id).limit(limit)
+  return { ids: rows.map((r) => String(r.id)), total }
 }
 
 export interface RunImportOptions {
@@ -141,17 +155,30 @@ export async function runImport(db: Db, plan: ImportPlan, opts: RunImportOptions
             `(${opts.confirmDatabase === undefined ? 'none was given' : `"${opts.confirmDatabase}" was given`}). Nothing was written.`,
         )
       }
-      const newest = newestPlannedCreatedAt(plan)
-      for (const [name, table] of Object.entries(IMPORT_TABLES)) {
-        if (!('created_at' in table)) continue
-        const [row] = await tx.select({ at: max((table as unknown as { created_at: AnyPgColumn }).created_at) }).from(table)
-        const at = row.at as Date | null
-        if (at !== null && (newest === null || at > newest)) {
+      const lost = 'Rows like that exist only in PostgreSQL (entered after cut-over?) and would be lost. Nothing was written.'
+      for (const [name, table] of Object.entries(IMPORT_TABLES) as [ImportTableName, PgTable][]) {
+        if (!('id' in table)) continue
+        const planned = (rows[name] as { id?: unknown }[]).map((r) => String(r.id))
+        const extra = await idsNotInPlan(tx, table, planned)
+        if (extra.total > 0) {
+          const shown = extra.ids.map((id) => `"${id}"`).join(', ') + (extra.total > extra.ids.length ? ', ...' : '')
           throw new ImportRefusedError(
-            `Refusing to replace: ${name} has a row created ${at.toISOString()}, after the newest record being imported ` +
-              `(${newest?.toISOString() ?? 'none'}). Rows like that exist only in PostgreSQL (entered after cut-over?) ` +
-              'and would be lost. Nothing was written.',
+            `Refusing to replace: ${name} has ${plural(extra.total, 'row')} whose id is not in the import (${shown}). ${lost}`,
           )
+        }
+      }
+      const newest = newestPlannedTimestamp(plan)
+      for (const [name, table] of Object.entries(IMPORT_TABLES)) {
+        for (const [column, verb] of [['created_at', 'created'], ['updated_at', 'updated']] as const) {
+          if (!(column in table)) continue
+          const [row] = await tx.select({ at: max((table as unknown as Record<string, AnyPgColumn>)[column]) }).from(table)
+          const at = row.at as Date | null
+          if (at !== null && (newest === null || at > newest)) {
+            throw new ImportRefusedError(
+              `Refusing to replace: ${name} has a row ${verb} ${at.toISOString()}, after the newest record being imported ` +
+                `(${newest?.toISOString() ?? 'none'}). ${lost}`,
+            )
+          }
         }
       }
       await tx.execute(sql.raw(`truncate table ${tableList}`))

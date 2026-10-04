@@ -16,12 +16,14 @@
 //   --write             imports into DATABASE_URL in one transaction. Refused if the plan has any problem, or if the
 //                       database already has data.
 //   --replace=<database>  with --write: empties the app tables first, inside the same transaction. <database> must be
-//                       the target's own name (current_database()), and it is refused if the target holds a row created
-//                       after the newest record in Firestore (data entered after cut-over).
+//                       the target's own name (current_database()), and it is refused if the target holds a row the
+//                       import does not account for: an id that is not in the plan, or a row created or updated after
+//                       the newest record in Firestore (data entered after cut-over).
 //   --restore-deleted-products  rebuilds products that history still points at but that were deleted in Firestore,
 //                       from their product `delete` audit entry (unavailable, 0 in stock); listed in the output.
-//   --allow-non-local-db  needed to write anywhere but this machine (e.g. Cloud SQL at cut-over). The target host and
-//                       database are printed before anything is written.
+//   --allow-non-local-db  needed to write anywhere but this machine (e.g. Cloud SQL by its address). Not needed through
+//                       the Cloud SQL Auth Proxy, which looks local. The target host and database are printed before
+//                       anything is written.
 //
 // DATABASE_URL is taken from the environment only (never from .env.local), defaulting to the local development database.
 // Server modules import 'server-only': run with `tsx --conditions=react-server` (the npm script does).

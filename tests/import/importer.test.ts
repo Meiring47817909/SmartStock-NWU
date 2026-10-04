@@ -23,6 +23,7 @@ import {
   transactions,
 } from '@/server/db/schema'
 import {
+  IMPORTED_COLLECTIONS,
   INT4_MAX,
   memorySource,
   readFirestoreSnapshot,
@@ -30,7 +31,7 @@ import {
   type FirestoreState,
   type ImportPlan,
 } from '@/server/import/mapFirestore'
-import { IMPORT_TABLES, ImportRefusedError, runImport } from '@/server/import/runImport'
+import { IMPORT_TABLES, ImportRefusedError, newestPlannedTimestamp, runImport } from '@/server/import/runImport'
 import { claimNotificationMarker } from '@/lib/server/notificationDelivery'
 import { getSettingsRow } from '@/server/data/settings'
 import { loadDashboard } from '@/server/data/dashboard'
@@ -351,6 +352,36 @@ describe('problems block the write', () => {
     expect(INT4_MAX).toBe(2 ** 31 - 1)
   })
 
+  it('barcodes are trimmed (as the app saves them) and a NUL in the legacy single barcode is a problem', async () => {
+    const state = one()
+    state.products.p1.barcodes = [' P1-PRIMARY', 'P1-SECOND ', 'P1-PRIMARY']
+    state.products.p2.barcode = '  P2-LEGACY\t'
+    let plan = await planOf(state)
+    expect(plan.problems).toEqual([])
+    expect(plan.rows.product_barcodes).toEqual([
+      { barcode: 'P1-PRIMARY', product_id: 'p1', position: 0 },
+      { barcode: 'P1-SECOND', product_id: 'p1', position: 1 },
+      { barcode: 'P2-LEGACY', product_id: 'p2', position: 0 },
+    ])
+    expect(plan.warnings).toEqual(
+      expect.arrayContaining([
+        { collection: 'products', id: 'p1', problem: 'barcode " P1-PRIMARY" had spaces around it; imported as "P1-PRIMARY"' },
+        { collection: 'products', id: 'p1', problem: 'barcode "P1-PRIMARY" is listed twice on this product; imported once' },
+        { collection: 'products', id: 'p2', problem: 'barcode "  P2-LEGACY\\t" had spaces around it; imported as "P2-LEGACY"' },
+      ]),
+    )
+    // A legacy barcode equal to a listed one once trimmed is not reported as ignored.
+    state.products.p1.barcode = ' P1-SECOND'
+    plan = await planOf(state)
+    expect(plan.warnings.filter((w) => w.problem.startsWith('legacy barcode'))).toEqual([])
+
+    const nul = one()
+    nul.products.p2.barcode = 'P2\u0000LEGACY'
+    plan = await planOf(nul)
+    expect(problemTexts(plan)).toEqual(['products/p2: barcode contains a NUL character, which PostgreSQL cannot store'])
+    expect(plan.rows.product_barcodes.filter((b) => b.product_id === 'p2')).toEqual([])
+  })
+
   it("legacy documents lacking a NOT NULL field get the old app's reading of it, with a warning", async () => {
     const state = one()
     for (const f of ['location', 'available', 'quantity_on_hand', 'reorder_threshold', 'images']) delete state.products.p1[f]
@@ -550,10 +581,11 @@ describe('what is reported but not imported', () => {
     expect(plan.rows.transactions).toHaveLength(3)
   })
 
-  it('reads live Firestore in ONE read-only transaction, through nothing but listCollections, collection() and tx.get()', async () => {
+  it('reads live Firestore in ONE read-only transaction, through nothing but listCollections, collection(), tx.get() and count()', async () => {
     const calls: string[] = []
     const transactions: unknown[] = []
-    const state: FirestoreState = { ...one(), old_reports: { x1: { a: 1 } } }
+    let inTransaction = false
+    const state: FirestoreState = { ...one(), old_reports: { x1: { a: 1 }, x2: { a: 2 } }, empty_parent: {} }
     const forbid = (where: string) => (_t: object, prop: string | symbol) => {
       throw new Error(`write-capable or unexpected access ${where}.${String(prop)}`)
     }
@@ -564,7 +596,19 @@ describe('what is reported but not imported', () => {
         calls.push('listCollections')
         return Object.keys(state).map((id) => ({ id }))
       },
-      collection: (name: string) => allow(`collection(${name})`, { name } as never),
+      collection: (name: string) =>
+        allow(`collection(${name})`, {
+          name,
+          // count() aggregate: the number only, never the documents
+          count: () =>
+            allow(`collection(${name}).count()`, {
+              get: async () => {
+                calls.push(`count ${name}${inTransaction ? ' (inside the transaction)' : ''}`)
+                const n = Object.keys(state[name] ?? {}).length
+                return { data: () => ({ count: n }) }
+              },
+            }),
+        } as never),
       runTransaction: async (fn: (tx: unknown) => Promise<unknown>, options: unknown) => {
         transactions.push(options)
         const tx = allow('tx', {
@@ -573,19 +617,26 @@ describe('what is reported but not imported', () => {
             return { docs: Object.entries(state[ref.name] ?? {}).map(([id, data]) => ({ id, data: () => structuredClone(data) })) }
           },
         })
-        return fn(tx)
+        inTransaction = true
+        try {
+          return await fn(tx)
+        } finally {
+          inTransaction = false
+        }
       },
     })
     const source = await readFirestoreSnapshot(fakeFirestore as never)
     const plan = await planImport(source, { now: new Date() })
     expect(transactions).toEqual([{ readOnly: true }])
     expect(calls[0]).toBe('listCollections')
-    expect(calls.slice(1).every((c) => c.startsWith('tx.get '))).toBe(true)
     expect(calls).toContain('tx.get transactions')
-    expect(calls).toContain('tx.get old_reports')
+    // The app's collections are read in the transaction; any other collection is only counted, after it.
+    expect(calls.filter((c) => c.startsWith('tx.get ')).sort()).toEqual([...IMPORTED_COLLECTIONS].map((c) => `tx.get ${c}`).sort())
+    expect(calls.filter((c) => c.startsWith('count ')).sort()).toEqual(['count empty_parent', 'count old_reports'])
+    expect(calls).not.toContain('tx.get old_reports')
     expect(plan.problems).toEqual([])
     expect(plan.rows.transactions).toHaveLength(3)
-    expect(plan.notImported).toEqual([{ collection: 'old_reports', documents: 1 }])
+    expect(plan.notImported).toEqual([{ collection: 'old_reports', documents: 2 }])
   })
 })
 
@@ -621,6 +672,17 @@ describe('deleted products that history still points at', () => {
     expect(plan.warnings).toContainEqual({
       collection: 'products', id: 'p-gone',
       problem: 'RESTORED from delete audit entry a-del-gone (deleted 2026-09-28T08:00:00.000Z by Ada Admin): "Cordless Drill", unavailable, 0 in stock, no photos',
+    })
+  })
+
+  it('a restored product whose category no longer exists loses the category name too', async () => {
+    const state = withDeleted()
+    const del = Object.values(state.audit_log).find((a) => a.entity_id === 'p-gone' && a.action === 'delete')!
+    ;(del.before as Record<string, unknown>).category_id = 'c-gone'
+    const plan = await planImport(memorySource(state), { now: new Date(), restoreDeletedProducts: true })
+    expect(plan.rows.products.find((p) => p.id === 'p-gone')).toMatchObject({ category_id: null, category_name: null })
+    expect(plan.warnings).toContainEqual({
+      collection: 'products', id: 'p-gone', problem: 'category_id "c-gone" of the deleted product no longer exists; restored without a category',
     })
   })
 
@@ -673,9 +735,10 @@ describe('runImport: one transaction, never into existing data', () => {
   })
 
   it('with replace it empties the app tables first, in the same transaction, and imports', async () => {
-    await db.insert(categories).values({ id: 'existing', name: 'Already here', created_at: new Date('2026-01-01T00:00:00Z') })
+    // An earlier (rehearsal) import's row, under an id the plan has: replaced by the plan's version.
+    await db.insert(categories).values({ id: 'c1', name: 'Already here', created_at: new Date('2026-01-01T00:00:00Z') })
     const counts = await runImport(db, plan, { replace: true, confirmDatabase: 'smartstock_test' })
-    expect(await db.select({ id: categories.id }).from(categories)).toEqual([{ id: 'c1' }])
+    expect(await db.select({ id: categories.id, name: categories.name }).from(categories)).toEqual([{ id: 'c1', name: plan.rows.categories[0].name }])
     expect(counts).toEqual(await tableCounts())
     expect(counts.transactions).toBe(3)
   })
@@ -712,11 +775,12 @@ describe('runImport: one transaction, never into existing data', () => {
   })
 
   it('a failing insert with replace also restores the data that was there before', async () => {
-    await db.insert(categories).values({ id: 'existing', name: 'Already here', created_at: new Date('2026-01-01T00:00:00Z') })
+    await db.insert(categories).values({ id: 'c1', name: 'Already here', created_at: new Date('2026-01-01T00:00:00Z') })
     const broken: ImportPlan = structuredClone(plan)
     ;(broken.rows.audit_log[0] as { action: string }).action = 'bogus'
     await expect(runImport(db, broken, { replace: true, confirmDatabase: 'smartstock_test' })).rejects.toThrow(/audit_log_action_check|Failed query/)
     expect(await tableCounts()).toEqual({ ...allZero, categories: 1 })
+    expect(await db.select({ name: categories.name }).from(categories)).toEqual([{ name: 'Already here' }])
   })
 
   it('replace guard (a): it needs the target database named, and refuses any other name, changing nothing', async () => {
@@ -728,17 +792,50 @@ describe('runImport: one transaction, never into existing data', () => {
     await expect(runImport(db, plan, { replace: true, confirmDatabase: 'smartstock_test' })).resolves.toEqual(before)
   })
 
-  it('replace guard (b): it refuses when the target holds a row created after the newest record being imported', async () => {
+  it('replace guard (b): it refuses when the target holds a row whose id is not in the import, changing nothing', async () => {
     await runImport(db, plan, { replace: false })
-    // a Stock In saved in PostgreSQL after cut-over (newer than anything in Firestore)
-    await db.insert(transactions).values({ id: 'after-go-live', transaction_type: 'IN', reference_no: 'TXN-NEW00001', created_at: new Date('2026-10-05T09:00:00.000Z') })
+    // a Stock In saved in PostgreSQL after cut-over, dated before the newest Firestore record (a clock that disagrees)
+    await db.insert(transactions).values({ id: 'after-go-live', transaction_type: 'IN', reference_no: 'TXN-NEW00001', created_at: new Date('2026-09-01T09:00:00.000Z') })
     const before = await tableCounts()
     await expect(runImport(db, plan, { replace: true, confirmDatabase: 'smartstock_test' })).rejects.toThrow(
-      'Refusing to replace: transactions has a row created 2026-10-05T09:00:00.000Z, after the newest record being imported (2026-09-26T08:00:00.000Z). ' +
+      'Refusing to replace: transactions has 1 row whose id is not in the import ("after-go-live"). ' +
         'Rows like that exist only in PostgreSQL (entered after cut-over?) and would be lost. Nothing was written.',
     )
     expect(await tableCounts()).toEqual(before)
     expect(await db.select({ id: transactions.id }).from(transactions).where(eq(transactions.id, 'after-go-live'))).toHaveLength(1)
+    // More than three: the first three by id, then "...".
+    for (const id of ['x-1', 'x-2', 'x-3', 'x-4']) await db.insert(categories).values({ id, name: `Extra ${id}`, created_at: new Date('2026-09-01T00:00:00Z') })
+    await expect(runImport(db, plan, { replace: true, confirmDatabase: 'smartstock_test' })).rejects.toThrow(
+      'Refusing to replace: categories has 4 rows whose id is not in the import ("x-1", "x-2", "x-3", ...).',
+    )
+  })
+
+  it('replace guard (b): it refuses when the target holds a row created after the newest record being imported', async () => {
+    await runImport(db, plan, { replace: false })
+    expect(newestPlannedTimestamp(plan)?.toISOString()).toBe('2026-09-26T08:00:00.000Z')
+    await db.update(categories).set({ created_at: new Date('2026-10-05T09:00:00.000Z') }).where(eq(categories.id, 'c1'))
+    const before = await tableCounts()
+    await expect(runImport(db, plan, { replace: true, confirmDatabase: 'smartstock_test' })).rejects.toThrow(
+      'Refusing to replace: categories has a row created 2026-10-05T09:00:00.000Z, after the newest record being imported (2026-09-26T08:00:00.000Z). ' +
+        'Rows like that exist only in PostgreSQL (entered after cut-over?) and would be lost. Nothing was written.',
+    )
+    expect(await tableCounts()).toEqual(before)
+  })
+
+  it('replace guard (b): it refuses when a row was updated after the newest record being imported (an edit after go-live)', async () => {
+    await runImport(db, plan, { replace: false })
+    // e.g. a product edited in the new app; its audit entry has been lost or was never written
+    await db.update(products).set({ updated_at: new Date('2026-10-06T10:00:00.000Z'), name: 'Edited after go-live' }).where(eq(products.id, 'p1'))
+    await expect(runImport(db, plan, { replace: true, confirmDatabase: 'smartstock_test' })).rejects.toThrow(
+      'Refusing to replace: products has a row updated 2026-10-06T10:00:00.000Z, after the newest record being imported (2026-09-26T08:00:00.000Z).',
+    )
+    expect((await db.select({ name: products.name }).from(products).where(eq(products.id, 'p1')))[0].name).toBe('Edited after go-live')
+  })
+
+  it('newestPlannedTimestamp reads updated_at as well as created_at', () => {
+    const later: ImportPlan = structuredClone(plan)
+    later.rows.products[0].updated_at = new Date('2026-09-30T00:00:00.000Z')
+    expect(newestPlannedTimestamp(later)?.toISOString()).toBe('2026-09-30T00:00:00.000Z')
   })
 })
 
