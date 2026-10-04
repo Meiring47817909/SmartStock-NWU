@@ -51,22 +51,32 @@ async function readBody(req: NextRequest): Promise<unknown> {
   return req.json().catch(() => ({}))
 }
 
+/** Next's second route-handler argument: `{ params }` is a promise of the dynamic segments (`[id]`, `[...slug]`). */
+export type RouteSegment = { params: Promise<Record<string, string | string[]>> }
+
+async function readParams(segment: RouteSegment | undefined): Promise<Record<string, string>> {
+  const raw = (await segment?.params) ?? {}
+  return Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, Array.isArray(v) ? v.join('/') : v]))
+}
+
 /**
  * Wrap a route handler: check the Firebase ID token, load the caller (role from `profiles`, staff link from
- * `staff.uid`), enforce `access`, and turn errors into `{ error }` JSON. GET handlers get the query params as `body`.
+ * `staff.uid`), enforce `access`, and turn errors into `{ error }` JSON. GET handlers get the query params as `body`;
+ * dynamic-segment params (catch-all joined with '/') arrive as the 4th argument.
  */
 export function route<B = unknown, R = unknown>(
   access: Access,
-  handler: (ctx: Ctx, body: B, req: NextRequest) => Promise<R>,
-): (req: NextRequest) => Promise<NextResponse> {
-  return async (req) => {
+  handler: (ctx: Ctx, body: B, req: NextRequest, params: Record<string, string>) => Promise<R>,
+): (req: NextRequest, segment?: RouteSegment) => Promise<NextResponse> {
+  return async (req, segment) => {
     try {
       const db = getRouteDb()
       const caller = await resolveCaller(req, access, db)
       const ctx: Ctx = { db, caller, now: () => new Date() }
       if (access === 'admin') assertAdmin(ctx)
       const body = (await readBody(req)) as B
-      const result = await handler(ctx, body, req)
+      const params = await readParams(segment)
+      const result = await handler(ctx, body, req, params)
       return NextResponse.json(result)
     } catch (err) {
       if (err instanceof DataError || err instanceof ApiError) {

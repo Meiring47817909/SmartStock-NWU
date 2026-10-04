@@ -123,6 +123,14 @@ describe('route()', () => {
     expect(await res.json()).toEqual({ a: '1', b: 'two' })
   })
 
+  it('passes dynamic-segment params to the handler (catch-all values joined with "/")', async () => {
+    const handler = route('public', async (_ctx, _body, _req, params) => params)
+    const res = await handler(req('GET'), { params: Promise.resolve({ id: 'abc', rest: ['x', 'y'] }) })
+    expect(await res.json()).toEqual({ id: 'abc', rest: 'x/y' })
+    const none = await handler(req('GET'))
+    expect(await none.json()).toEqual({})
+  })
+
   it('ctx.now defaults to the current time and ctx.db is the test database', async () => {
     const handler = route('public', async (ctx) => ({ sameDb: ctx.db === db, near: Math.abs(ctx.now().getTime() - Date.now()) < 5000 }))
     expect(await (await handler(req('GET'))).json()).toEqual({ sameDb: true, near: true })
