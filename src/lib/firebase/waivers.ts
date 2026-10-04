@@ -3,19 +3,12 @@ import { collection, getDocs, addDoc } from 'firebase/firestore'
 import { logAudit } from './audit'
 import type { ReturnWaiver } from '@/types/database'
 
-// Outstanding stock is never stored — it's replayed every time from the
-// append-only ledger as (issued on an OUT line) − (returned against that
-// same OUT transaction). A waiver is the third term in that subtraction:
-// Selouna has agreed the staff member keeps the item, so the remaining
-// balance is written off without a RETURN ever happening.
-//
-// Keyed [OUT transaction id][product_id], exactly like the `returnedByTxn`
-// maps the Dashboard / Returns / Staff / Reports pages already build — a
-// waiver has to be scoped to its specific originating OUT transaction for
-// the same reason a return does: the same staff member can hold the same
-// product from two different loans, and writing one off must not silently
-// cancel the other.
-export type WaivedByTxn = Record<string, Record<string, number>>
+// The pure part (WaivedByTxn, waivedQty) now lives in src/lib/stockRules.ts, shared with the PostgreSQL stock module; this
+// file goes in Task 13 once the Staff, Dashboard and Reports pages no longer import it.
+import type { WaivedByTxn } from '@/lib/stockRules'
+
+export { waivedQty } from '@/lib/stockRules'
+export type { WaivedByTxn } from '@/lib/stockRules'
 
 export async function loadWaivedByTxn(): Promise<WaivedByTxn> {
   const snap = await getDocs(collection(db, 'return_waivers'))
@@ -36,10 +29,6 @@ export async function loadWaivedByTxn(): Promise<WaivedByTxn> {
 export async function loadWaivers(): Promise<ReturnWaiver[]> {
   const snap = await getDocs(collection(db, 'return_waivers'))
   return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as ReturnWaiver[]
-}
-
-export function waivedQty(map: WaivedByTxn, txnId: string, productId: string | number): number {
-  return map[txnId]?.[String(productId)] ?? 0
 }
 
 interface CreateWaiverInput {

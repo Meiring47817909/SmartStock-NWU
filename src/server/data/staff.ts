@@ -6,6 +6,7 @@ import { newId } from '@/server/db/ids'
 import { pgError } from '@/server/db/pgError'
 import { returnWaivers, staff, transactionLines, transactions } from '@/server/db/schema'
 import { writeAudit } from '@/server/data/audit'
+import { createReturnWaiver } from '@/server/data/stock'
 import { setOwnProfileName } from '@/server/data/profiles'
 import { normalizeEmail } from '@/lib/firebase/staff'
 import {
@@ -521,38 +522,16 @@ export async function getStaffHoldings(ctx: Ctx): Promise<StaffHoldings> {
 
 /**
  * Record that an item a staff member holds does not need to come back (a return waiver). Stock levels are not changed:
- * the item left the shelf when it was issued. Logged as `resolve` against the originating transaction.
+ * the item left the shelf when it was issued. Logged as `resolve` against the originating transaction. This is the
+ * Staff page's entry point to the one waiver code path (createReturnWaiver in stock.ts), which also checks the
+ * transaction belongs to this staff member and locks it so concurrent resolves can't over-resolve.
  */
 export async function resolveHeldItem(ctx: Ctx, staffId: string, input: ResolveHeldItemInput): Promise<string> {
-  assertAdmin(ctx)
-  const quantity = Number(input?.quantity)
-  if (!Number.isInteger(quantity) || quantity <= 0) throw new DataError(400, 'Quantity must be a whole number above zero.')
-  const transactionId = String(input?.transactionId ?? '')
-  const productId = String(input?.productId ?? '')
-  const reason = clean(input?.reason)
-
-  return inTx(ctx, async (c) => {
-    const holder = await loadRow(c, staffId)
-    const open = (await computeHoldings(c, staffId))[staffId]?.items.find(
-      (i) => !i.waived && i.txn_id === transactionId && i.product_id === productId,
-    )
-    if (!open || open.qty < quantity) throw new DataError(409, 'Nothing outstanding to resolve for this item.')
-
-    const id = newId()
-    const payload = {
-      transaction_id: transactionId,
-      product_id: productId,
-      product_name: open.product_name,
-      staff_id: staffId,
-      staff_name: holder.full_name,
-      quantity,
-      reason,
-      created_at: c.now().toISOString(),
-      resolved_by_uid: c.caller.uid,
-      resolved_by_name: c.caller.name,
-    }
-    await c.db.insert(returnWaivers).values({ ...payload, id, created_at: c.now() })
-    await writeAudit(c, { action: 'resolve', entityType: 'transaction', entityId: transactionId, before: null, after: payload })
-    return id
+  return createReturnWaiver(ctx, {
+    transactionId: String(input?.transactionId ?? ''),
+    productId: String(input?.productId ?? ''),
+    quantity: Number(input?.quantity),
+    reason: input?.reason,
+    staffId,
   })
 }
