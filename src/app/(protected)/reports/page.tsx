@@ -12,6 +12,7 @@ import {
   sortableColumnHelper as columnHelper,
   SortableHead,
   ExportCsvButton,
+  ExportPdfButton,
   type PageSize,
   paginate,
   TablePagination,
@@ -24,12 +25,14 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { AvailabilityDatePicker } from '@/components/portal/AvailabilityDatePicker'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { collapseLinesByProduct, formatBarcodeQuantities, formatBarcodeLabels, openBarcodeQuantities } from '@/lib/transactionLines'
 
 type ReportTab = 'stock-levels' | 'low-stock' | 'issued-per-staff' | 'returns'
 
@@ -412,6 +415,29 @@ function StockLevelsReport() {
             { header: 'Status', value: (p: any) => p.status },
           ]}
         />
+        {/* Same rows, order and columns as the CSV, as a PDF table. The
+            header lists every category and status covered (all of them
+            spelled out when nothing is filtered), as on the Audit Log. */}
+        <ExportPdfButton
+          className="border-[#D5CBE0] text-[#322342] hover:border-[#6C3D91] hover:bg-[#F8F5FA]"
+          filename={`stock-levels-${todayDateStr()}.pdf`}
+          title="Current Stock Levels Report"
+          subtitle={[
+            `Compiled ${formatDateOnly(todayDateStr())}  ·  ${sorted.length} ${sorted.length === 1 ? 'product' : 'products'}  ·  ${totalUnits} total units`,
+            `Categories: ${[...cats, { id: UNCATEGORIZED_CATEGORY, name: 'Uncategorized' }]
+              .filter((c: any) => catFilter === null || catFilter.has(c.id)).map((c: any) => c.name).join(', ') || 'None'}`,
+            `Status: ${STOCK_STATUS_VALUES.filter(v => statusFilter.has(v)).map(v => sentenceCase(v)).join(', ') || 'None'}`,
+            search ? `Search: "${search}"` : '',
+          ].filter(Boolean)}
+          rows={sorted}
+          columns={[
+            { header: 'Product', value: (p: any) => p.name },
+            { header: 'Category', width: 140, value: (p: any) => p.category_name ?? '—' },
+            { header: 'Qty On Hand', width: 90, value: (p: any) => p.qty },
+            { header: 'Threshold', width: 80, value: (p: any) => p.threshold },
+            { header: 'Status', width: 90, value: (p: any) => p.status },
+          ]}
+        />
       </section>
       <Card className="min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -537,6 +563,23 @@ function LowStockReport() {
             { header: 'Qty On Hand', value: (p: any) => p.quantity_on_hand },
             { header: 'Threshold', value: (p: any) => p.reorder_threshold },
             { header: 'Shortage', value: (p: any) => p.quantity_on_hand - p.reorder_threshold },
+          ]}
+        />
+        <ExportPdfButton
+          className="border-[#D5CBE0] text-[#322342] hover:border-[#6C3D91] hover:bg-[#F8F5FA]"
+          filename={`low-stock-${todayDateStr()}.pdf`}
+          title="Low Stock Items Report"
+          subtitle={[
+            `Compiled ${formatDateOnly(todayDateStr())}  ·  ${sorted.length} ${sorted.length === 1 ? 'item' : 'items'} at or below reorder threshold`,
+            search ? `Search: "${search}"` : '',
+          ].filter(Boolean)}
+          rows={sorted}
+          columns={[
+            { header: 'Product', value: (p: any) => p.name },
+            { header: 'Category', width: 140, value: (p: any) => p.category_name ?? '—' },
+            { header: 'Qty On Hand', width: 90, value: (p: any) => p.quantity_on_hand },
+            { header: 'Threshold', width: 80, value: (p: any) => p.reorder_threshold },
+            { header: 'Shortage', width: 80, value: (p: any) => p.quantity_on_hand - p.reorder_threshold },
           ]}
         />
       </section>
@@ -716,19 +759,32 @@ function IssuedPerStaffReport() {
   // them — with the transaction-level columns left blank, since there is no
   // transaction to report.
   const staffCsvRows = sortedStaff.flatMap((s: any) => {
-    if (s.txns.length === 0) return [{ ...s, ref: null, issuedAt: null, product: null, quantity: null }]
+    if (s.txns.length === 0) return [{ ...s, ref: null, issuedAt: null, expectedAt: null, product: null, barcodes: null, barcodesPdf: null, quantity: null }]
     return s.txns.flatMap((t: any) => {
-      const tLines = t.transaction_lines || []
+      const tLines = collapseLinesByProduct(t.transaction_lines || [])
       const lineRows = tLines.length > 0 ? tLines : [null]
       return lineRows.map((l: any) => ({
         ...s,
         ref: t.reference_no,
         issuedAt: t.created_at,
+        // Lend To date of the Stock Out (null for open-ended / legacy issues).
+        expectedAt: t.lend_to ?? null,
         product: l ? (l.product_name ?? '?') : 'No items recorded',
+        // Every distinct barcode scanned for the line, pipe-separated with a
+        // space either side ("A | B") -- null on request-fulfilled lines and
+        // pre-barcode-capture lines, same as the on-screen expanded row.
+        // "A ×2 | B ×1" -- every barcode with how many units were scanned under it.
+        barcodes: l?.barcodeQuantities && l.barcodeQuantities.length > 0 ? formatBarcodeQuantities(l.barcodeQuantities).join(' | ') : null,
+        // Same barcodes for the PDF, comma-separated (no pipes).
+        barcodesPdf: l?.barcodeQuantities && l.barcodeQuantities.length > 0 ? formatBarcodeQuantities(l.barcodeQuantities).join(', ') : null,
         quantity: l ? l.quantity : null,
       }))
     })
   })
+  // The PDF reads best grouped: a staff member's name, department and totals
+  // are printed once, on their first line, and left blank on the lines under it
+  // (the CSV repeats them on every line so each row stands alone in Excel).
+  const staffPdfRows = staffCsvRows.map((r: any, i: number, all: any[]) => ({ ...r, first: i === 0 || all[i - 1].id !== r.id }))
   // Counted over the transactions that already clear issued-from, since those
   // are the ones the toggle decides. Unlike Returns — where both ends test the
   // one field, so an undated row is counted against the whole set — here the
@@ -749,22 +805,22 @@ function IssuedPerStaffReport() {
         <div className="flex flex-1 flex-wrap items-end gap-4">
           <div className="flex flex-col gap-1">
             <label htmlFor="issued-from-date" className="text-sm font-semibold text-slate-600">Issued from</label>
-            <Input
+            <AvailabilityDatePicker
               id="issued-from-date"
-              type="date"
-              className="w-36 rounded-lg border-[#E2D8E9] bg-[#F8F6FA] py-1.5 text-xs text-[#2A1D39] focus-visible:border-[#6C3D91] focus-visible:ring-[#6C3D91]/50"
+              clearable
+              className="w-40 rounded-lg border-[#E2D8E9] bg-[#F8F6FA] text-xs text-[#2A1D39]"
               value={fromDate}
-              onChange={e => setFromDate(e.target.value)}
+              onChange={setFromDate}
             />
           </div>
           <div className="flex flex-col gap-1">
             <label htmlFor="issued-to-date" className="text-sm font-semibold text-slate-600">Expected back by</label>
-            <Input
+            <AvailabilityDatePicker
               id="issued-to-date"
-              type="date"
-              className="w-36 rounded-lg border-[#E2D8E9] bg-[#F8F6FA] py-1.5 text-xs text-[#2A1D39] focus-visible:border-[#6C3D91] focus-visible:ring-[#6C3D91]/50"
+              clearable
+              className="w-40 rounded-lg border-[#E2D8E9] bg-[#F8F6FA] text-xs text-[#2A1D39]"
               value={toDate}
-              onChange={e => setToDate(e.target.value)}
+              onChange={setToDate}
             />
           </div>
           {(fromDate || toDate) && (
@@ -813,8 +869,35 @@ function IssuedPerStaffReport() {
             { header: 'Total Items Issued', value: (s: any) => s.totalQty },
             { header: 'Transaction ID', value: (s: any) => s.ref ?? '—' },
             { header: 'Issued At', value: (s: any) => s.issuedAt ? formatDate(s.issuedAt) : '—' },
+            { header: 'Expected At', value: (s: any) => s.expectedAt ? formatDateOnly(s.expectedAt) : '—' },
             { header: 'Product', value: (s: any) => s.product ?? '—' },
+            { header: 'Barcodes', value: (s: any) => s.barcodes ?? '—' },
             { header: 'Quantity', value: (s: any) => s.quantity ?? '—' },
+          ]}
+        />
+        <ExportPdfButton
+          className="border-[#D5CBE0] text-[#322342] hover:border-[#6C3D91] hover:bg-[#F8F5FA]"
+          filename={`issued-per-staff-${todayDateStr()}.pdf`}
+          title="Issued per Staff Report"
+          subtitle={[
+            `Compiled ${formatDateOnly(todayDateStr())}  ·  ${sortedStaff.length} staff  ·  ${rangeTxns} transactions  ·  ${rangeItems} items`,
+            fromDate || toDate
+              ? `Issued from: ${fromDate ? formatDateOnly(fromDate) : 'any date'}  ·  Expected back by: ${toDate ? formatDateOnly(toDate) : 'any date'}${toDate ? (includeUndated ? ' (including items with no return date)' : ' (excluding items with no return date)') : ''}`
+              : 'Dates: All dates (full system log)',
+            search ? `Search: "${search}"` : '',
+          ].filter(Boolean)}
+          rows={staffPdfRows}
+          columns={[
+            { header: 'Staff Member', width: 80, value: (s: any) => s.first ? s.full_name : '' },
+            { header: 'Department', width: 88, value: (s: any) => s.first ? (s.department ?? '—') : '' },
+            { header: 'Total Txns', width: 48, value: (s: any) => s.first ? s.txns.length : '' },
+            { header: 'Total Items', width: 48, value: (s: any) => s.first ? s.totalQty : '' },
+            { header: 'Transaction ID', width: 82, value: (s: any) => s.ref ?? '—' },
+            { header: 'Issued At', width: 84, value: (s: any) => s.issuedAt ? formatDate(s.issuedAt) : '—' },
+            { header: 'Expected At', width: 62, value: (s: any) => s.expectedAt ? formatDateOnly(s.expectedAt) : '—' },
+            { header: 'Product', value: (s: any) => s.product ?? '—' },
+            { header: 'Barcodes', width: 156, value: (s: any) => s.barcodesPdf ?? '—' },
+            { header: 'Qty', width: 30, value: (s: any) => s.quantity ?? '—' },
           ]}
         />
       </section>
@@ -864,14 +947,14 @@ function IssuedPerStaffReport() {
                     // product and its own quantity to be its own line here.
                     //
                     // Each cell sits under the parent column it belongs to —
-                    // product under Total OUT Transactions, quantity under
-                    // Total Items Issued — so a staff member's totals read as
-                    // the sum of the lines beneath them rather than as two
-                    // numbers with unaligned prose underneath. No colSpan, for
+                    // Expected date under Total OUT Transactions, quantity under
+                    // Total Items Issued — so a staff member's unit total reads
+                    // as the sum of the quantities directly beneath it rather
+                    // than as a number with unaligned prose underneath. No colSpan, for
                     // the same reason. Reference and issue date repeat on every
                     // line of a multi-item transaction, matching the one-row-
                     // per-product-line shape staffCsvRows below now takes too.
-                    const tLines = t.transaction_lines || []
+                    const tLines = collapseLinesByProduct(t.transaction_lines || [])
                     const rows = tLines.length > 0 ? tLines : [null]
                     return rows.map((l: any, idx: number) => (
                       <TableRow key={`${t.id}_${idx}`} className="border-b border-[#F0EBF5] bg-[#FDFCFF] text-sm hover:bg-[#FDFCFF]">
@@ -882,12 +965,20 @@ function IssuedPerStaffReport() {
                         </TableCell>
                         <TableCell className="max-w-xs text-sm whitespace-normal break-words text-[#3C304D]">
                           {l ? (l.product_name ?? '?') : 'No items recorded'}
+                          {/* Every distinct barcode scanned for this line at Stock Out — a
+                              product can carry more than one barcode, and more than one can
+                              genuinely get scanned onto the same line. Blank on lines
+                              fulfilled from a loan request (picked off the request, never
+                              scanned) and on lines written before this field existed. */}
+                          {l?.barcodeQuantities && l.barcodeQuantities.length > 0 && (
+                            <div className="mt-0.5 font-mono text-xs text-[#847896]">{formatBarcodeQuantities(l.barcodeQuantities).join(' · ')}</div>
+                          )}
                         </TableCell>
-                        <TableCell className="text-center text-sm font-semibold text-[#191024]">
-                          {l ? l.quantity : '—'}
-                        </TableCell>
-                        <TableCell className="text-sm font-medium text-[#564966]">
+                        <TableCell className="text-center text-sm font-medium whitespace-normal text-[#564966]">
                           {t.lend_to ? <>Expected {formatDateOnly(t.lend_to)}</> : '—'}
+                        </TableCell>
+                        <TableCell className="pr-6 text-center text-sm font-semibold text-[#191024]">
+                          {l ? l.quantity : '—'}
                         </TableCell>
                       </TableRow>
                     ))
@@ -1112,6 +1203,13 @@ function ReturnsReport() {
         if (outSnap.exists()) outTxnById[id] = { id: outSnap.id, ...outSnap.data() }
       }))
 
+      // Every RETURN's lines grouped by the OUT they settle, so the barcodes
+      // still outstanding can be worked out per barcode below.
+      const returnLinesByOut: Record<string, any[]> = {}
+      txns.forEach(t => {
+        if (t.linked_txn_id) (returnLinesByOut[t.linked_txn_id] ??= []).push(...(t.transaction_lines || []))
+      })
+
       txns.forEach(t => {
         const outTxn = t.linked_txn_id ? outTxnById[t.linked_txn_id] : null
         // The raw Firestore doc ID (t.linked_txn_id) means nothing to
@@ -1121,7 +1219,7 @@ function ReturnsReport() {
         // match this return back to the Stock Out it settles.
         t.linked_txn_ref = outTxn?.reference_no ?? null
         t.expected_date = outTxn?.lend_to ?? null
-        const outLines = outTxn ? (linesByTxn[outTxn.id] || []) : []
+        const outLines = outTxn ? collapseLinesByProduct(linesByTxn[outTxn.id] || []) : []
         // Per-product remaining balance on the linked OUT transaction — used
         // to show Selouna exactly what's still owed when she expands a
         // Partial row, not just the fact that something is.
@@ -1131,7 +1229,14 @@ function ReturnsReport() {
                 const issued = l.quantity || 0
                 const returned = returnedByOutTxn[outTxn.id]?.[l.product_id] ?? 0
                 const waived = waivedQty(waivedByTxn, outTxn.id, l.product_id)
-                return { product_name: l.product_name ?? 'Unknown', outstanding: issued - returned - waived }
+                // Which barcodes the outstanding units were issued under.
+                const productLines = (linesByTxn[outTxn.id] || []).filter((x: any) => String(x.product_id) === String(l.product_id))
+                const productReturns = (returnLinesByOut[outTxn.id] || []).filter((x: any) => String(x.product_id) === String(l.product_id))
+                return {
+                  product_name: l.product_name ?? 'Unknown',
+                  outstanding: issued - returned - waived,
+                  barcodeQuantities: openBarcodeQuantities(productLines, productReturns, waived),
+                }
               })
               .filter((l: any) => l.outstanding > 0)
           : []
@@ -1169,7 +1274,8 @@ function ReturnsReport() {
 
   const searched = statusFiltered.filter((t: any) =>
     matchesSearch(search, t.reference_no, t.staff_name, t.linked_txn_ref,
-      ...(t.transaction_lines || []).map((l: any) => l.product_name)))
+      ...(t.transaction_lines || []).map((l: any) => l.product_name),
+      ...(t.transaction_lines || []).map((l: any) => l.barcode)))
 
   const table = useTable({
     features: REPORT_TABLE_FEATURES,
@@ -1187,23 +1293,11 @@ function ReturnsReport() {
   // another filter.
   const { pageRows: pageReturns, safeIndex } = paginate(sortedReturns, pageIndex, pageSize)
 
-  // Same flattening the Issued per Staff export does: one row per line of
-  // detail the table only shows on expand. Here that's the "Still
-  // outstanding on <ref>: ..." list under a Partial row, so a Partial
-  // return gets one CSV row per outstanding product line, repeating its
-  // own columns on each — a non-partial return (or, in principle, a
-  // Partial one with nothing left in outstandingLines) keeps its single
-  // row, with the two outstanding-balance columns left blank since there's
-  // nothing to report.
-  const returnsCsvRows = sortedReturns.flatMap((t: any) => {
-    const outstanding = t.outstandingLines || []
-    if (outstanding.length === 0) return [{ ...t, outstandingProduct: null, outstandingQty: null }]
-    return outstanding.map((l: any) => ({
-      ...t,
-      outstandingProduct: l.product_name,
-      outstandingQty: l.outstanding,
-    }))
-  })
+  // One CSV row per return. A Partial return's still-outstanding products
+  // used to be flattened into one extra row each, repeating the return's own
+  // columns; they're now listed inside the single Outstanding Product cell
+  // instead (see the column below), so the export stays one row per return.
+  const returnsCsvRows = sortedReturns
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -1215,22 +1309,22 @@ function ReturnsReport() {
       <section className="mb-4 flex flex-wrap items-end gap-4 rounded-2xl border border-[#E2D8E9] bg-white px-5 py-3.5 shadow-sm">
         <div className="flex flex-col gap-1">
           <label htmlFor="returns-from-date" className="text-sm font-semibold text-slate-600">Expected from</label>
-          <Input
+          <AvailabilityDatePicker
             id="returns-from-date"
-            type="date"
-            className="w-36 rounded-lg border-[#E2D8E9] bg-[#F8F6FA] py-1.5 text-xs text-[#2A1D39] focus-visible:border-[#6C3D91] focus-visible:ring-[#6C3D91]/50"
+            clearable
+            className="w-40 rounded-lg border-[#E2D8E9] bg-[#F8F6FA] text-xs text-[#2A1D39]"
             value={fromDate}
-            onChange={e => setFromDate(e.target.value)}
+            onChange={setFromDate}
           />
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor="returns-to-date" className="text-sm font-semibold text-slate-600">Expected to</label>
-          <Input
+          <AvailabilityDatePicker
             id="returns-to-date"
-            type="date"
-            className="w-36 rounded-lg border-[#E2D8E9] bg-[#F8F6FA] py-1.5 text-xs text-[#2A1D39] focus-visible:border-[#6C3D91] focus-visible:ring-[#6C3D91]/50"
+            clearable
+            className="w-40 rounded-lg border-[#E2D8E9] bg-[#F8F6FA] text-xs text-[#2A1D39]"
             value={toDate}
-            onChange={e => setToDate(e.target.value)}
+            onChange={setToDate}
           />
         </div>
         {(fromDate || toDate) && (
@@ -1267,7 +1361,7 @@ function ReturnsReport() {
           <Search className="absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-[#5B4F67]" />
           <Input
             className="w-full rounded-lg border-[#E2D8E9] bg-[#F8F6FA] pl-9 text-xs text-[#2A1D39] placeholder:text-[#5B4F67] focus-visible:border-[#6C3D91] focus-visible:ring-[#6C3D91]/50"
-            placeholder="Search reference, staff, item…"
+            placeholder="Search reference, staff, item, barcode…"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -1281,15 +1375,66 @@ function ReturnsReport() {
             { header: 'Staff', value: (t: any) => t.staff_name ?? '—' },
             {
               header: 'Items Returned',
-              value: (t: any) => (t.transaction_lines || [])
-                .map((l: any) => `${l.product_name ?? '?'} ×${l.quantity}`).join(', '),
+              // One product per line, separated by " |" at the end of each
+              // line (the same shape the Audit Log's Details cell uses).
+              // Return lines are stored per (product, barcode), so collapse
+              // them first or a product returned under two barcodes would
+              // list twice.
+              value: (t: any) => collapseLinesByProduct(t.transaction_lines || [])
+                .map((l) => `${l.product_name ?? '?'} ×${l.quantity}` +
+                  (l.barcodeLabels.length > 0 ? ` [${formatBarcodeLabels(l.barcodeLabels).join(' | ')}]` : ''))
+                .join(' |\n'),
             },
             { header: 'Returning For', value: (t: any) => t.linked_txn_ref ?? '—' },
             { header: 'Status', value: (t: any) => returnRowStatus(t)?.label ?? '' },
             { header: 'Expected', value: (t: any) => formatDateOnly(t.expected_date) },
             { header: 'Date Returned', value: (t: any) => formatDate(t.created_at) },
-            { header: 'Outstanding Product', value: (t: any) => t.outstandingProduct ?? '—' },
-            { header: 'Outstanding Qty', value: (t: any) => t.outstandingQty ?? '—' },
+            {
+              // Every product still owed on the original Stock Out with its
+              // quantity ("Product ×1"), one per line, " |"-separated.
+              header: 'Outstanding Product',
+              value: (t: any) => (t.outstandingLines || []).length > 0
+                ? (t.outstandingLines as any[]).map((l) => `${l.product_name} ×${l.outstanding}` +
+                    (l.barcodeQuantities?.length > 0 ? ` [${formatBarcodeQuantities(l.barcodeQuantities).join(' | ')}]` : '')).join(' |\n')
+                : '—',
+            },
+          ]}
+        />
+        <ExportPdfButton
+          className="border-[#D5CBE0] text-[#322342] hover:border-[#6C3D91] hover:bg-[#F8F5FA]"
+          filename={`returns-${todayDateStr()}.pdf`}
+          title="Returns Report"
+          subtitle={[
+            `Compiled ${formatDateOnly(todayDateStr())}  ·  ${sortedReturns.length} ${sortedReturns.length === 1 ? 'return' : 'returns'}`,
+            `Status: ${RETURN_STATUS_VALUES.filter(v => statusFilter.has(v)).map(v => RETURN_STATUS_META[v].label).join(', ') || 'None'}`,
+            fromDate || toDate
+              ? `Expected back: ${fromDate ? formatDateOnly(fromDate) : 'earliest'} to ${toDate ? formatDateOnly(toDate) : 'latest'}${undatedCount > 0 ? (includeUndated ? ' (including returns with no due date)' : ' (excluding returns with no due date)') : ''}`
+              : 'Dates: All dates (full system log)',
+            search ? `Search: "${search}"` : '',
+          ].filter(Boolean)}
+          rows={returnsCsvRows}
+          columns={[
+            { header: 'Reference', width: 82, value: (t: any) => t.reference_no },
+            { header: 'Staff', width: 80, value: (t: any) => t.staff_name ?? '—' },
+            {
+              // One product per line, its barcodes in brackets, no pipes.
+              header: 'Items Returned',
+              value: (t: any) => collapseLinesByProduct(t.transaction_lines || [])
+                .map((l) => `${l.product_name ?? '?'} ×${l.quantity}` +
+                  (l.barcodeLabels.length > 0 ? ` [${formatBarcodeLabels(l.barcodeLabels).join(', ')}]` : ''))
+                .join(',\n'),
+            },
+            { header: 'Returning For', width: 90, value: (t: any) => t.linked_txn_ref ?? '—' },
+            { header: 'Status', width: 52, value: (t: any) => returnRowStatus(t)?.label ?? '' },
+            { header: 'Expected', width: 62, value: (t: any) => formatDateOnly(t.expected_date) },
+            { header: 'Date Returned', width: 84, value: (t: any) => formatDate(t.created_at) },
+            {
+              header: 'Outstanding Product',
+              value: (t: any) => (t.outstandingLines || []).length > 0
+                ? (t.outstandingLines as any[]).map((l) => `${l.product_name} ×${l.outstanding}` +
+                    (l.barcodeQuantities?.length > 0 ? ` [${formatBarcodeQuantities(l.barcodeQuantities).join(', ')}]` : '')).join(',\n')
+                : '—',
+            },
           ]}
         />
       </section>
@@ -1344,7 +1489,18 @@ function ReturnsReport() {
                       wrap, so a return with many items grows down, not the table
                       out. Same fix as the Audit Log's expanded detail cell. */}
                   <TableCell className="max-w-xs py-4 text-sm break-words whitespace-normal text-[#3C304D]">
-                    {tLines.map((l: any) => `${l.product_name ?? '?'} ×${l.quantity}`).join(', ')}
+                    {/* One line per product; return lines are stored per
+                        (product, barcode), so collapse them to products first. */}
+                    {collapseLinesByProduct(tLines).map((l, i) => (
+                      <div key={i}>
+                        {l.product_name ?? '?'} ×{l.quantity}
+                        {/* Barcodes scanned back for this product; a lost-label
+                            unit reads "issued → returned as". */}
+                        {l.barcodeLabels.length > 0 && (
+                          <div className="mt-0.5 font-mono text-xs text-[#847896]">{formatBarcodeLabels(l.barcodeLabels).join(' · ')}</div>
+                        )}
+                      </div>
+                    ))}
                   </TableCell>
                   <TableCell className="max-w-xs py-4 font-mono text-sm whitespace-normal break-all text-[#5B4F67]">
                     {t.linked_txn_ref ?? '—'}
@@ -1362,6 +1518,9 @@ function ReturnsReport() {
                           {t.outstandingLines.map((l: any, i: number) => (
                             <li key={i}>
                               {l.product_name} <span className="text-[#5B4F67]">× {l.outstanding}</span>
+                              {l.barcodeQuantities?.length > 0 && (
+                                <div className="font-mono text-xs text-[#847896]">{formatBarcodeQuantities(l.barcodeQuantities).join(' · ')}</div>
+                              )}
                             </li>
                           ))}
                         </ul>

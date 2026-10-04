@@ -1,3 +1,4 @@
+import { getDocsFresh } from './freshDocs'
 import { db } from './config'
 import { collection, doc, getDoc, getDocs, addDoc, updateDoc, query, where } from 'firebase/firestore'
 import { logAudit } from './audit'
@@ -790,7 +791,7 @@ export async function withdrawRequest(
 // badges. Kept in sync with loan-requests/page.tsx's own pending/countered
 // filters: if those change, mirror the change here too.
 export async function loadLoanRequestsAlertCount(): Promise<number> {
-  const reqSnap = await getDocs(collection(db, 'loan_requests'))
+  const reqSnap = await getDocsFresh(collection(db, 'loan_requests'))
   const reqs = reqSnap.docs.map(d => ({ id: d.id, ...d.data() })) as LoanRequest[]
   const resolved = await Promise.all(reqs.map(async (r) => {
     if (r.status !== 'pending' && r.status !== 'countered' && r.status !== 'accepted') return r.status
@@ -808,7 +809,7 @@ export async function loadLoanRequestsAlertCount(): Promise<number> {
 // History is still excluded -- same reasoning, it's already resolved.
 // Kept in sync with (portal)/lend/requests/page.tsx's own tab filters.
 export async function loadMyRequestsAlertCount(staffId: string): Promise<number> {
-  const reqSnap = await getDocs(query(collection(db, 'loan_requests'), where('staff_id', '==', staffId)))
+  const reqSnap = await getDocsFresh(query(collection(db, 'loan_requests'), where('staff_id', '==', staffId)))
   const reqs = reqSnap.docs.map(d => ({ id: d.id, ...d.data() })) as LoanRequest[]
   const resolved = await Promise.all(reqs.map(async (r) => {
     if (!ACTIVE_STATUSES.includes(r.status)) return r.status

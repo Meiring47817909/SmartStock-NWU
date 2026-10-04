@@ -216,23 +216,6 @@ export default function NotificationSettingsPage() {
 
           <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
             <CardHeader>
-              <CardTitle>Emails to staff members</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col">
-              {staffEmails.map((d) => (
-                <NotificationRow
-                  key={d.key}
-                  definition={d}
-                  checked={settings[d.key]}
-                  disabled={pendingKey === d.key}
-                  onToggle={(next) => handleToggle(d.key, next)}
-                />
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
-            <CardHeader>
               <CardTitle>System emails</CardTitle>
             </CardHeader>
             <CardContent>
@@ -268,6 +251,23 @@ export default function NotificationSettingsPage() {
             </CardHeader>
             <CardContent className="flex flex-col">
               {adminEmails.map((d) => (
+                <NotificationRow
+                  key={d.key}
+                  definition={d}
+                  checked={settings[d.key]}
+                  disabled={pendingKey === d.key}
+                  onToggle={(next) => handleToggle(d.key, next)}
+                />
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
+            <CardHeader>
+              <CardTitle>Emails to staff members</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col">
+              {staffEmails.map((d) => (
                 <NotificationRow
                   key={d.key}
                   definition={d}

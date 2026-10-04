@@ -142,6 +142,29 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
     })
   }, [canManageLoanRequests])
 
+  // Staff can accept a counter offer or send a new request at any time
+  // from their own device, which never goes through this admin's alertsBus.
+  // So besides the mount / navigation / in-app refreshes above, re-check
+  // whenever the admin comes back to this tab and every minute while it is
+  // open, so the Loan Requests and Dashboard badges don't sit stale.
+  useEffect(() => {
+    function refresh() {
+      if (document.visibilityState === 'hidden') return
+      loadDashboardAlertCounts().then(counts => setAlertCount(counts.total)).catch(() => {})
+      if (canManageLoanRequests) {
+        loadLoanRequestsAlertCount().then(setLoanRequestCount).catch(() => {})
+      }
+    }
+    const timer = window.setInterval(refresh, 60_000)
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [canManageLoanRequests])
+
   async function handleLogout() {
     // Admins land on the public home page after signing out, not back on
     // the login screen — this sidebar is admin-only (see the ROLE_BADGE_CLASS

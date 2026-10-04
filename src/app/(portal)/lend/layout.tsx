@@ -9,6 +9,7 @@ import { auth } from '@/lib/firebase/config'
 import { markLoggingOut, consumeLoggingOut } from '@/lib/authTransition'
 import { StaffPortalProvider, useStaffPortal } from '@/context/StaffPortalContext'
 import { PortalCartProvider, usePortalCart } from '@/context/PortalCartContext'
+import { PortalMobileSearchProvider, usePortalMobileSearch } from '@/context/PortalMobileSearchContext'
 import { loadMyRequestsAlertCount } from '@/lib/firebase/loanRequests'
 import { subscribeToAlertsChanged } from '@/lib/alertsBus'
 import CookieNotice from '@/components/portal/CookieNotice'
@@ -23,7 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { avatarInitials, avatarColorClass } from '@/lib/utils'
 import { ContactEmailLink } from '@/components/ContactEmailLink'
-import { LogOut, Package, ShoppingCart, ClipboardList, User as UserIcon } from 'lucide-react'
+import { LogOut, Package, ShoppingCart, ClipboardList, User as UserIcon, Menu, Search } from 'lucide-react'
 
 function PortalShell({ children }: { children: React.ReactNode }) {
   const { user, staffMember, loading } = useStaffPortal()
@@ -35,6 +36,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
   // the admin sidebar's own alert badges use for counts that matter by
   // quantity rather than by row.
   const cartQty = cart.reduce((sum, i) => sum + i.quantity, 0)
+  const { mobileSearchOpen, setMobileSearchOpen, toggleMobileSearch } = usePortalMobileSearch()
 
   // Combined total of My Requests' three actionable tabs (Needs your
   // response, Awaiting Jonathan, Upcoming) -- History is excluded, see
@@ -68,6 +70,13 @@ function PortalShell({ children }: { children: React.ReactNode }) {
       loadMyRequestsAlertCount(staffMember.id.toString()).then(setMyRequestsCount).catch(() => {})
     })
   }, [staffMember])
+
+  // Collapse the mobile search/filter panel whenever the route changes —
+  // otherwise it stays expanded after navigating away from Browse and
+  // back, or leaves the header's search icon looking stuck "active".
+  useEffect(() => {
+    setMobileSearchOpen(false)
+  }, [pathname, setMobileSearchOpen])
 
   useEffect(() => {
     if (loading) return
@@ -173,12 +182,43 @@ function PortalShell({ children }: { children: React.ReactNode }) {
       <header className="border-b bg-card">
         <div className={`mx-auto flex items-center justify-between px-5 sm:px-6 md:px-8 lg:px-10 xl:px-14 py-4 ${CONTENT_MAX_WIDTH}`}>
           <div className="flex items-center gap-6">
+            {/* Mobile nav menu — collapses Browse / My Requests / Profile
+                into a single expandable button on small screens, where the
+                desktop <nav> below (hidden until md:) has no room. Same
+                DropdownMenu component the account button already uses. */}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={<button type="button" className="rounded-lg p-2 text-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring md:hidden" />}
+                aria-label="Open menu"
+              >
+                <Menu className="size-5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48">
+                <DropdownMenuItem render={<Link href="/lend" />}>
+                  <Package className="size-3.5" /> Browse
+                </DropdownMenuItem>
+                <DropdownMenuItem render={<Link href="/lend/requests" />}>
+                  <ClipboardList className="size-3.5" /> My Requests
+                  {!!myRequestsCount && (
+                    <Badge className="ml-auto bg-(--nwu-turquoise) text-xs text-white">{myRequestsCount}</Badge>
+                  )}
+                </DropdownMenuItem>
+                <DropdownMenuItem render={<Link href="/lend/profile" />}>
+                  <UserIcon className="size-3.5" /> Profile
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             {/* Same SmartStock-NWU lockup as the login page and the admin
                 sidebar, swapped in for the old plain-text "NWU Lending"
                 wordmark — fixed height/auto width so it sits naturally in
                 this horizontal header, next to the nav buttons, rather than
                 the tall fixed-width sizing those two vertical layouts use. */}
             <Link href="/lend" className="flex items-center">
+              {/* Below 500px there's no room for the wordmark next to the
+                  menu/search/cart/avatar buttons, so only the standalone
+                  icon mark is shown (same artwork as the full lockup's
+                  icon -- see public/smartstock-nwu-icon.svg). */}
               <Image
                 src="/smartstock-nwu-logo.svg"
                 alt="SmartStock-NWU"
@@ -186,10 +226,19 @@ function PortalShell({ children }: { children: React.ReactNode }) {
                 height={120}
                 priority
                 unoptimized
-                className="h-16 w-auto"
+                className="h-16 w-auto max-dlg:hidden"
+              />
+              <Image
+                src="/smartstock-nwu-icon.svg"
+                alt="SmartStock-NWU"
+                width={100}
+                height={100}
+                priority
+                unoptimized
+                className="hidden size-11 max-dlg:block"
               />
             </Link>
-            <nav className="flex items-center gap-1.5">
+            <nav className="hidden items-center gap-1.5 md:flex">
               <Button
                 variant={isActive('/lend') && pathname === '/lend' ? 'default' : 'ghost'}
                 render={<Link href="/lend" />}
@@ -220,6 +269,35 @@ function PortalShell({ children }: { children: React.ReactNode }) {
             </nav>
           </div>
           <div className="flex items-center gap-3">
+            {/* Mobile-only search + cart icon buttons — the desktop nav's
+                Cart button and Browse page's own search/filter card cover
+                these on md and up, so both only render below that
+                breakpoint. Search only appears on Browse itself, the only
+                page with anything for it to expand. */}
+            {pathname === '/lend' && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="md:hidden"
+                aria-label="Search equipment"
+                aria-pressed={mobileSearchOpen}
+                onClick={toggleMobileSearch}
+              >
+                <Search className="size-5" />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              render={<Link href="/lend/cart" />}
+              className="relative md:hidden"
+              aria-label="Cart"
+            >
+              <ShoppingCart className="size-5" />
+              {cartQty > 0 && (
+                <Badge className="absolute -top-1 -right-1 bg-(--nwu-turquoise) px-1 text-[10px] text-white">{cartQty}</Badge>
+              )}
+            </Button>
             {/* Replaces the plain "Firstname Surname" text that used to sit
                 here — same info (and more) is one click away on Profile now,
                 so the header itself just needs something identifiable and
@@ -257,7 +335,15 @@ function PortalShell({ children }: { children: React.ReactNode }) {
       <div className="flex-1" style={mainStyle}>
         <main className={`mx-auto px-5 sm:px-6 md:px-8 lg:px-10 xl:px-14 py-6 ${CONTENT_MAX_WIDTH}`}>{children}</main>
       </div>
-      <footer className="border-t bg-card">
+      {/* Bottom padding tracks the device's safe-area inset, guarding
+          against mobile browsers' bottom gesture-nav bar / auto-hiding
+          toolbar overlapping the very last pixels of the page when
+          scrolled all the way down -- costs nothing on desktop (that
+          inset is 0 there). Written as a literal CSS value below (not
+          Tailwind's bracket shorthand in a comment) because Tailwind's
+          class scanner matches candidate utilities anywhere in the file,
+          comments included, and a bare "env(...)" isn't valid CSS. */}
+      <footer className="border-t bg-card pb-[env(safe-area-inset-bottom)]">
         <div className={`mx-auto flex flex-col items-center justify-between gap-4 px-5 sm:px-6 md:px-8 lg:px-10 xl:px-14 py-8 sm:flex-row ${CONTENT_MAX_WIDTH}`}>
           <div className="flex flex-col items-center gap-2 text-center sm:flex-row sm:gap-4 sm:text-left">
             <div className="flex items-center gap-2">
@@ -293,7 +379,9 @@ export default function LendLayout({ children }: { children: React.ReactNode }) 
   return (
     <StaffPortalProvider>
       <PortalCartProvider>
-        <PortalShell>{children}</PortalShell>
+        <PortalMobileSearchProvider>
+          <PortalShell>{children}</PortalShell>
+        </PortalMobileSearchProvider>
       </PortalCartProvider>
     </StaffPortalProvider>
   )

@@ -277,31 +277,31 @@ export default function MyRequestsPage() {
               h-[calc(100%-1px)], which otherwise wins and stretches every
               tab to the track's full height with no breathing room
               top/bottom. */}
-          <TabsList className="flex w-full !h-14 gap-1.5 overflow-hidden rounded-2xl border border-purple-200/50 bg-white/60 p-1.5 backdrop-blur-sm">
+          <TabsList className="flex w-full !h-auto gap-1 overflow-hidden rounded-2xl border border-purple-200/50 bg-white/60 p-1.5 backdrop-blur-sm sm:!h-14 sm:gap-1.5">
             <TabsTrigger
               value="countered"
-              className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
+              className="!h-auto min-h-16 flex-1 flex-col cursor-pointer items-center justify-center gap-1 self-center rounded-xl px-1 py-2 text-center text-xs leading-tight font-semibold whitespace-normal text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md sm:!h-11 sm:min-h-0 sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm sm:leading-normal sm:whitespace-nowrap"
             >
               Needs your response
               {countered.length > 0 && <Badge className="bg-(--nwu-turquoise) text-white">{countered.length}</Badge>}
             </TabsTrigger>
             <TabsTrigger
               value="pending"
-              className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
+              className="!h-auto min-h-16 flex-1 flex-col cursor-pointer items-center justify-center gap-1 self-center rounded-xl px-1 py-2 text-center text-xs leading-tight font-semibold whitespace-normal text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md sm:!h-11 sm:min-h-0 sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm sm:leading-normal sm:whitespace-nowrap"
             >
               Awaiting Jonathan
               {pending.length > 0 && <Badge className="bg-(--nwu-turquoise) text-white">{pending.length}</Badge>}
             </TabsTrigger>
             <TabsTrigger
               value="accepted"
-              className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
+              className="!h-auto min-h-16 flex-1 flex-col cursor-pointer items-center justify-center gap-1 self-center rounded-xl px-1 py-2 text-center text-xs leading-tight font-semibold whitespace-normal text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md sm:!h-11 sm:min-h-0 sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm sm:leading-normal sm:whitespace-nowrap"
             >
               Upcoming
               {accepted.length > 0 && <Badge className="bg-(--nwu-turquoise) text-white">{accepted.length}</Badge>}
             </TabsTrigger>
             <TabsTrigger
               value="history"
-              className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
+              className="!h-auto min-h-16 flex-1 flex-col cursor-pointer items-center justify-center gap-1 self-center rounded-xl px-1 py-2 text-center text-xs leading-tight font-semibold whitespace-normal text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md sm:!h-11 sm:min-h-0 sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm sm:leading-normal sm:whitespace-nowrap"
             >
               History
             </TabsTrigger>

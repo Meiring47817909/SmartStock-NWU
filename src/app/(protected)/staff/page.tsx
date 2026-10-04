@@ -30,6 +30,7 @@ import {
 import { useTable, type SortingState } from '@tanstack/react-table'
 import { SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead } from '@/components/data-table-helpers'
 import type { StaffMember, ReturnWaiver } from '@/types/database'
+import { collapseLinesByProduct } from '@/lib/transactionLines'
 
 // One item a staff member currently holds — an OUT line with a remaining
 // balance, or one that's been written off via Resolve. Mirrors the
@@ -263,7 +264,7 @@ export default function StaffPage() {
     outTxns.forEach(t => {
       if (!t.staff_id) return
       const staffKey = t.staff_id.toString()
-      const lines = linesByTxn[t.id] || []
+      const lines = collapseLinesByProduct(linesByTxn[t.id] || [])
       lines.forEach((l: any) => {
         const issued = l.quantity || 0
         const returned = returnedByTxn[t.id]?.[l.product_id] ?? 0

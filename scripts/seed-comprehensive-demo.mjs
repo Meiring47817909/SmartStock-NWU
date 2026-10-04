@@ -4,7 +4,7 @@
 //
 //   - Dashboard -> Outstanding Returns: No Return Date, Overdue, Due Today,
 //     Not Due Yet, Partly Resolved (waived), Mixed (one holder, 3 states),
-//     plus a partial-return-still-overdue example from the Returns section
+//     plus a partial return whose remaining items are not yet due from the Returns section
 //     below.
 //   - Dashboard -> Incoming Pickups: On Schedule, Insufficient (with a
 //     correlated overdue return as the "likely cause"), Insufficient (no
@@ -79,6 +79,9 @@ process.env.FIRESTORE_EMULATOR_HOST ||= '127.0.0.1:8081'
 process.env.FIREBASE_AUTH_EMULATOR_HOST ||= '127.0.0.1:9099'
 process.env.FIREBASE_STORAGE_EMULATOR_HOST ||= '127.0.0.1:9199'
 
+import { readFileSync, existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { initializeApp } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
 import { getFirestore } from 'firebase-admin/firestore'
@@ -101,6 +104,8 @@ const app = initializeApp({ projectId: PROJECT_ID, storageBucket: BUCKET_NAME })
 const auth = getAuth(app)
 const db = getFirestore(app)
 const bucket = getStorage(app).bucket()
+// Real product photos (AI-generated, see scripts/generate-product-images.mjs).
+const CATALOG_IMAGES_DIR = join(dirname(fileURLToPath(import.meta.url)), 'catalog-images')
 
 // ---------------------------------------------------------------------------
 // Shared helpers -- same conventions (todayStr/addDays/genRef, upsert-by-
@@ -168,7 +173,27 @@ function placeholderSvg(name, angleLabel, bgColor, glyph) {
 
 // Uploads 1-3 placeholder images for a product (cycling counts across
 // calls) and returns their Storage paths, ready to save on the product doc.
-async function seedProductImages(productId, productName) {
+async function seedProductImages(productId, productName, imageSlug = null) {
+  // Real photos when scripts/catalog-images/<slug>/1.jpg, 2.jpg ... exist.
+  if (imageSlug) {
+    const real = []
+    for (let n = 1; n <= 3; n++) {
+      const file = join(CATALOG_IMAGES_DIR, imageSlug, `${n}.jpg`)
+      if (existsSync(file)) real.push({ n, file })
+    }
+    if (real.length > 0) {
+      const paths = []
+      for (const { n, file } of real) {
+        const path = `products/${productId}/${imageSlug}-${n}.jpg`
+        await bucket.file(path).save(readFileSync(file), {
+          contentType: 'image/jpeg',
+          metadata: { cacheControl: 'public, max-age=3600' },
+        })
+        paths.push(path)
+      }
+      return paths
+    }
+  }
   const imageCount = (imageSeq % 3) + 1
   imageSeq += 1
   const angleLabels = ['Front', 'Side', 'In case']
@@ -247,10 +272,10 @@ async function upsertStaff(spec) {
   if (!existingSnap.empty) {
     const ref = existingSnap.docs[0].ref
     await ref.set(payload, { merge: true })
-    return { id: ref.id, full_name: spec.full_name, email: spec.email }
+    return { id: ref.id, name: spec.name, surname: spec.surname, full_name: spec.full_name, email: spec.email, department: payload.department, card_uid: payload.card_uid, uid: payload.uid }
   }
   const ref = await db.collection('staff').add({ ...payload, created_at: now })
-  return { id: ref.id, full_name: spec.full_name, email: spec.email }
+  return { id: ref.id, name: spec.name, surname: spec.surname, full_name: spec.full_name, email: spec.email, department: payload.department, card_uid: payload.card_uid, uid: payload.uid }
 }
 
 async function upsertProduct(spec) {
@@ -260,8 +285,12 @@ async function upsertProduct(spec) {
     category_id: spec.category_id ?? null,
     category_name: spec.category_name ?? null,
     name: spec.name,
-    description: spec.description ?? 'Seed data -- scripts/seed-comprehensive-demo.mjs',
-    barcodes: [spec.barcode],
+    description: spec.description ?? `${spec.name} -- seeded by scripts/seed-comprehensive-demo.mjs`,
+    // spec.barcode is always the lookup/primary key; spec.barcodes lets a
+    // product carry extras on top of it (e.g. a manufacturer code plus an
+    // NWU-printed one) so Stock Out's multi-barcode capture has something
+    // real to demonstrate against -- see P.healthy below.
+    barcodes: spec.barcodes ?? [spec.barcode],
     reorder_threshold: spec.reorder_threshold,
     available: spec.available ?? true,
     location: LOCATION,
@@ -281,17 +310,17 @@ async function upsertProduct(spec) {
     // Re-generate images on every run too, same as a fresh create below --
     // cheap (small SVGs) and keeps a re-run's image count in sync with
     // wherever this product now falls in the seq counter's cycle.
-    const images = await seedProductImages(ref.id, spec.name)
+    const images = await seedProductImages(ref.id, spec.name, spec.image_slug)
     await ref.set({ images }, { merge: true })
     const snap = await ref.get()
-    return { id: ref.id, name: spec.name, quantity_on_hand: snap.data()?.quantity_on_hand ?? spec.quantity_on_hand }
+    return { id: ref.id, name: spec.name, description: payload.description, quantity_on_hand: snap.data()?.quantity_on_hand ?? spec.quantity_on_hand, barcodes: payload.barcodes }
   }
   const ref = await db.collection('products').add({
     ...payload, quantity_on_hand: spec.quantity_on_hand, created_at: now, images: [],
   })
-  const images = await seedProductImages(ref.id, spec.name)
+  const images = await seedProductImages(ref.id, spec.name, spec.image_slug)
   await ref.set({ images }, { merge: true })
-  return { id: ref.id, name: spec.name, quantity_on_hand: spec.quantity_on_hand }
+  return { id: ref.id, name: spec.name, description: payload.description, quantity_on_hand: spec.quantity_on_hand, barcodes: payload.barcodes }
 }
 
 async function writeAudit({ userId = null, userName = null, action, entityType, entityId, before = null, after = null, createdAt }) {
@@ -306,6 +335,12 @@ async function writeAudit({ userId = null, userName = null, action, entityType, 
 // Writes one transaction + its lines, adjusts quantity_on_hand by the given
 // direction, and logs the same 'create' audit entry stock-in/stock-out/
 // returns' own page.tsx files write for a real transaction.
+// OUT txn id -> [{product_id, barcode, quantity}] as issued, and OUT txn id ->
+// Map('productId|barcode' -> units already returned). Lets recordTxn make a
+// RETURN use exactly the barcodes its OUT was issued with.
+const txnLineIndex = new Map()
+const returnedIndex = new Map()
+
 async function recordTxn({
   type, staff = null, items, direction, lendFrom = null, lendTo = null, returnDate = null,
   manualOverride = false, notes = null, linkedTxnId = null,
@@ -324,6 +359,9 @@ async function recordTxn({
   // matches what stock-in/page.tsx actually writes (no key at all, not
   // `false`).
   const isStaffFlow = type === 'OUT' || type === 'RETURN'
+  // A staff member with no card on file can only ever have been picked from the
+  // list, so their Stock Outs / Returns are manual entries by definition.
+  if (isStaffFlow && staff && !staff.card_uid) manualOverride = true
   if (manualOverride && !isStaffFlow) {
     throw new Error(`recordTxn: manual_override is only meaningful on OUT/RETURN transactions, got ${type}`)
   }
@@ -341,16 +379,85 @@ async function recordTxn({
     created_at: issuedAt,
   }
   const txnRef = await db.collection('transactions').add(txnPayload)
-  for (const item of items) {
-    await db.collection('transaction_lines').add({
-      transaction_id: txnRef.id, product_id: item.product.id, quantity: item.quantity,
-      unit_cost: item.unit_cost ?? 0, product_name: item.product.name, created_at: issuedAt,
-    })
+  // One transaction_lines document per (product, barcode), exactly like the
+  // app writes them now (see stock-out / stock-in / returns page.tsx): scanning
+  // two different barcodes of the same product yields two rows, each with its
+  // own singular `barcode` and its own quantity.
+  //
+  // Where the barcodes come from, per item:
+  //   - item.barcodes (string[])  -> explicit; quantity is spread across them
+  //   - RETURN with linkedTxnId   -> must be drawn from the linked OUT's own
+  //                                  barcodes for that product (exact match,
+  //                                  same rule Returns enforces at scan time)
+  //   - otherwise IN/OUT          -> the product's own barcodes
+  //   - ADJUST                    -> none (a manual count correction isn't scanned)
+  // Capped at the line's quantity: each distinct barcode implies at least one
+  // scan, which is at least one unit.
+  function spreadQuantity(codes, quantity) {
+    const n = Math.min(codes.length, quantity)
+    const base = Math.floor(quantity / n)
+    const extra = quantity - base * n
+    return codes.slice(0, n).map((code, i) => ({ barcode: code, quantity: base + (i < extra ? 1 : 0) }))
+  }
+  function resolveLines(item) {
+    if (type === 'ADJUST') return [{ barcode: null, quantity: item.quantity }]
+    if (type === 'RETURN' && linkedTxnId) {
+      const outLines = (txnLineIndex.get(linkedTxnId) ?? []).filter(l => l.product_id === item.product.id)
+      const returned = returnedIndex.get(linkedTxnId) ?? new Map()
+      const remaining = new Map(outLines.map(l => [l.barcode, l.quantity - (returned.get(`${l.product_id}|${l.barcode}`) ?? 0)]))
+      if (item.barcodes) {
+        for (const code of item.barcodes) {
+          if (!remaining.has(code)) throw new Error(`recordTxn: RETURN barcode "${code}" was never issued on OUT ${linkedTxnId}`)
+        }
+        const spread = spreadQuantity(item.barcodes, item.quantity)
+        for (const s of spread) {
+          if (s.quantity > remaining.get(s.barcode)) throw new Error(`recordTxn: RETURN of ${s.quantity} x "${s.barcode}" exceeds what is still out`)
+        }
+        return spread
+      }
+      // No explicit barcodes: return the first units still out, in issue order.
+      const picked = []
+      let need = item.quantity
+      for (const l of outLines) {
+        const take = Math.min(need, remaining.get(l.barcode))
+        if (take > 0) { picked.push({ barcode: l.barcode, quantity: take }); need -= take }
+        if (need === 0) break
+      }
+      if (need > 0) throw new Error(`recordTxn: RETURN quantity ${item.quantity} exceeds units still out on OUT ${linkedTxnId}`)
+      return picked
+    }
+    const all = item.barcodes ?? item.product.barcodes
+    if (!all || all.length === 0) return [{ barcode: null, quantity: item.quantity }]
+    return spreadQuantity(all, item.quantity)
+  }
+  const resolved = items.map(item => resolveLines(item))
+  for (const [idx, item] of items.entries()) {
+    for (const l of resolved[idx]) {
+      await db.collection('transaction_lines').add({
+        transaction_id: txnRef.id, product_id: item.product.id, quantity: l.quantity,
+        unit_cost: item.unit_cost ?? 0, product_name: item.product.name,
+        barcode: l.barcode,
+        created_at: issuedAt,
+      })
+    }
     await db.collection('products').doc(item.product.id).update({
       quantity_on_hand: item.product.quantity_on_hand + dir * item.quantity,
       updated_at: new Date().toISOString(),
     })
     item.product.quantity_on_hand += dir * item.quantity
+  }
+  // Remember what each OUT issued / each RETURN took back so later RETURNs can
+  // be validated against it.
+  if (type === 'OUT') {
+    txnLineIndex.set(txnRef.id, items.flatMap((item, idx) => resolved[idx].map(l => ({ product_id: item.product.id, barcode: l.barcode, quantity: l.quantity }))))
+  }
+  if (type === 'RETURN' && linkedTxnId) {
+    const m = returnedIndex.get(linkedTxnId) ?? new Map()
+    items.forEach((item, idx) => resolved[idx].forEach(l => {
+      const k = `${item.product.id}|${l.barcode}`
+      m.set(k, (m.get(k) ?? 0) + l.quantity)
+    }))
+    returnedIndex.set(linkedTxnId, m)
   }
   await writeAudit({
     userId: actorId, userName: actorName, action: 'create', entityType: 'transaction', entityId: txnRef.id,
@@ -365,7 +472,14 @@ async function recordTxn({
       // nothing to show for which products moved -- only the on-screen
       // friendly summary would still work, via its separate fallback join
       // to transaction_lines.
-      lines: items.map(i => ({ product_id: i.product.id, product_name: i.product.name, quantity: i.quantity })),
+      // One entry per PRODUCT; barcodes is always an array of every distinct
+      // barcode scanned for it (matches the app's frozen audit lines).
+      lines: items.map((i, idx) => ({
+        product_id: i.product.id, product_name: i.product.name, quantity: i.quantity,
+        barcodes: [...new Set(resolved[idx].map(l => l.barcode).filter(b => b !== null))],
+        // Units per barcode (what the audit CSV shows as "A ×2 | B ×1").
+        barcode_quantities: [...resolved[idx].filter(l => l.barcode !== null).reduce((m, l) => m.set(l.barcode, (m.get(l.barcode) ?? 0) + l.quantity), new Map())].map(([barcode, quantity]) => ({ barcode, quantity })),
+      })),
     },
     createdAt: issuedAt,
   })
@@ -507,7 +621,7 @@ async function main() {
   // account as well means it doubles as something you can actually sign
   // into /lend/login as, rather than needing a 29th, separate staff record
   // just for that).
-  const portalBorrowerUser = await upsertUser('demo.portallinked@example.com', 'password123', 'seed-demo-portallinked-uid')
+  const portalBorrowerUser = await upsertUser('jessica.moore@gmail.com', 'password123', 'seed-demo-portallinked-uid')
 
   // =====================================================================
   // 1. CATEGORIES -- reuse the standard 7-category list (seed-products.mjs)
@@ -528,61 +642,87 @@ async function main() {
   const categoryId = {}
   for (const c of CATEGORY_SPECS) categoryId[c.name] = await upsertCategory(c.name, c.description)
 
-  const demoCatId = await upsertCategory('Demo Category -- Seed', 'Placeholder category for audit-log demo purposes.')
+  const demoCatId = await upsertCategory('Office Accessories', 'Desk organisers, monitor stands and cable trays.')
   await writeAudit({
     userId: ADMIN_UID, userName: ADMIN_NAME, action: 'create', entityType: 'category', entityId: demoCatId,
-    before: null, after: { name: 'Demo Category -- Seed', description: 'Placeholder category for audit-log demo purposes.' },
+    before: null, after: { name: 'Office Accessories', description: 'Desk organisers, monitor stands and cable trays.' },
     createdAt: isoAt(-14),
   })
-  await db.collection('categories').doc(demoCatId).set({ description: 'Renamed -- audit-log update demo.' }, { merge: true })
+  await db.collection('categories').doc(demoCatId).set({ description: 'Desk organisers, monitor stands, cable trays and laptop risers.' }, { merge: true })
   await writeAudit({
     userId: ADMIN_UID, userName: ADMIN_NAME, action: 'update', entityType: 'category', entityId: demoCatId,
-    before: { name: 'Demo Category -- Seed', description: 'Placeholder category for audit-log demo purposes.' },
-    after: { name: 'Demo Category -- Seed', description: 'Renamed -- audit-log update demo.' },
+    before: { name: 'Office Accessories', description: 'Desk organisers, monitor stands and cable trays.' },
+    after: { name: 'Office Accessories', description: 'Desk organisers, monitor stands, cable trays and laptop risers.' },
     createdAt: isoAt(-13),
   })
 
   // =====================================================================
-  // 2. STAFF -- the Demo cast of characters. Each scenario below gets its
+  // 2. STAFF -- the cast of characters. Each scenario below gets its
   //    own staff record so every row is unambiguous in every list/sidebar.
   // =====================================================================
   const S = {}
+  // [key, first name, surname, gmail, department, what this person demonstrates]
+  // Every scenario still gets its OWN person (so each row is unambiguous in
+  // every list), but they now read like real staff. The last column is the
+  // scenario -- printed as a "who is who" legend when the seed finishes.
+  const D = {
+    phys: 'Physical and Chemical Sciences', bio: 'Biological Sciences', geo: 'Geo- and Spatial Sciences',
+    agri: 'Agricultural Sciences', math: 'Mathematical and Statistical Sciences',
+    cs: 'Computer Science and Information Systems', bmi: 'Business Mathematics and Informatics',
+  }
   const staffSpecs = [
-    ['PendingFresh', 'Demo', 'Pending Fresh', 'demo.pendingfresh@example.com'],
-    ['PendingNearExpiry', 'Demo', 'Pending Near Expiry', 'demo.pendingnearexpiry@example.com'],
-    ['CounteredRich', 'Demo', 'Countered Rich', 'demo.counteredrich@example.com'],
-    ['CounteredSimple', 'Demo', 'Countered Simple', 'demo.counteredsimple@example.com'],
-    ['AcceptedOnSchedule', 'Demo', 'Accepted On Schedule', 'demo.acceptedonschedule@example.com'],
-    ['InsufficientCauseRecipient', 'Demo', 'Insufficient Recipient (Overdue Cause)', 'demo.insufficientcause@example.com'],
-    ['OverdueHolderCause', 'Demo', 'Overdue Holder (Insufficient Cause)', 'demo.overdueholdercause@example.com'],
-    ['InsufficientNoCauseRecipient', 'Demo', 'Insufficient Recipient (No Cause)', 'demo.insufficientnocause@example.com'],
-    ['NoShowLive', 'Demo', 'No Show (Live Transition)', 'demo.noshowlive@example.com'],
-    ['NoShowRecorded', 'Demo', 'No Show (Already Recorded)', 'demo.noshowrecorded@example.com'],
-    ['ExpiredRecorded', 'Demo', 'Expired (Already Recorded)', 'demo.expiredrecorded@example.com'],
-    ['FulfilledPickup', 'Demo', 'Fulfilled Pickup', 'demo.fulfilledpickup@example.com'],
-    ['DeclinedPending', 'Demo', 'Declined Pending', 'demo.declinedpending@example.com'],
-    ['DeclinedCounterRich', 'Demo', 'Declined Counter Rich', 'demo.declinedcounterrich@example.com'],
-    ['DeclinedByStaff', 'Demo', 'Declined By Staff', 'demo.declinedbystaff@example.com'],
-    ['WithdrawnByStaff', 'Demo', 'Withdrawn By Staff', 'demo.withdrawnbystaff@example.com'],
-    ['WithdrawnByAdmin', 'Demo', 'Withdrawn By Admin (Cancelled Pickup)', 'demo.withdrawnbyadmin@example.com'],
-    ['ReturnNoDate', 'Demo', 'Return -- No Date', 'demo.returnnodate@example.com'],
-    ['ReturnOverdue', 'Demo', 'Return -- Overdue', 'demo.returnoverdue@example.com'],
-    ['ReturnDueToday', 'Demo', 'Return -- Due Today', 'demo.returnduetoday@example.com'],
-    ['ReturnNotDueYet', 'Demo', 'Return -- Not Due Yet', 'demo.returnnotdueyet@example.com'],
-    ['ReturnPartlyResolved', 'Demo', 'Return -- Partly Resolved', 'demo.returnpartlyresolved@example.com'],
-    ['ReturnMixedHolder', 'Demo', 'Return -- Mixed Holder', 'demo.returnmixedholder@example.com'],
-    ['ReturnCompleted', 'Demo', 'Return -- Fully Returned', 'demo.returncompleted@example.com'],
-    ['ReturnPartial', 'Demo', 'Return -- Partially Returned (Overdue)', 'demo.returnpartial@example.com'],
-    ['BadgeActive', 'Demo', 'Staff Badge -- Active', 'demo.badgeactive@example.com'],
-    ['BadgeDeactivated', 'Demo', 'Staff Badge -- Deactivated', 'demo.badgedeactivated@example.com'],
-    ['PortalLinked', 'Demo', 'Staff -- Portal Access Granted', 'demo.portallinked@example.com'],
+    ['PendingFresh', 'Emma', 'Richardson', 'emma.richardson@gmail.com', D.cs, 'Pending loan request (fresh); staff create/update audit'],
+    ['PendingNearExpiry', 'Oliver', 'Bennett', 'oliver.bennett92@gmail.com', D.phys, 'Pending loan request, close to expiring'],
+    ['CounteredRich', 'Sophie', 'Hartley', 'sophie.hartley@gmail.com', D.bio, 'Counter-offer with removed line, messages and date change'],
+    ['CounteredSimple', 'James', 'Whitfield', 'james.whitfield@gmail.com', D.geo, 'Plain counter-offer'],
+    ['AcceptedOnSchedule', 'Charlotte', 'Ellis', 'charlotte.ellis88@gmail.com', D.agri, 'Accepted request, pickup on schedule'],
+    ['InsufficientCauseRecipient', 'Daniel', 'Mercer', 'daniel.mercer@gmail.com', D.math, 'Pickup short on stock, overdue return is the likely cause'],
+    ['OverdueHolderCause', 'Amelia', 'Hayes', 'amelia.hayes@gmail.com', D.bmi, 'Holds the overdue item behind the shortage above'],
+    ['InsufficientNoCauseRecipient', 'Benjamin', 'Carter', 'ben.carter.work@gmail.com', D.cs, 'Pickup short on stock, no overdue return to blame'],
+    ['NoShowLive', 'Grace', 'Thornton', 'grace.thornton@gmail.com', D.phys, 'Missed pickup -- flips to Not Picked Up live on first Dashboard load'],
+    ['NoShowRecorded', 'Samuel', 'Prescott', 'samuel.prescott@gmail.com', D.bio, 'Missed pickup, already recorded'],
+    ['ExpiredRecorded', 'Olivia', 'Sinclair', 'olivia.sinclair@gmail.com', D.geo, 'Expired request'],
+    ['FulfilledPickup', 'Henry', 'Caldwell', 'henry.caldwell@gmail.com', D.agri, 'Full pending -> countered -> accepted -> fulfilled history'],
+    ['DeclinedPending', 'Lily', 'Fraser', 'lily.fraser@gmail.com', D.math, 'Declined by admin from pending'],
+    ['DeclinedCounterRich', 'William', 'Ashford', 'william.ashford@gmail.com', D.bmi, 'Admin declined a rich counter-offer'],
+    ['DeclinedByStaff', 'Chloe', 'Winters', 'chloe.winters@gmail.com', D.cs, 'Declined by the staff member via the portal'],
+    ['WithdrawnByStaff', 'Thomas', 'Reeves', 'thomas.reeves@gmail.com', D.phys, 'Withdrawn by staff, no reason'],
+    ['WithdrawnByAdmin', 'Isabella', 'Crawford', 'isabella.crawford@gmail.com', D.bio, 'Admin cancelled an accepted pickup, with a reason'],
+    ['ReturnNoDate', 'Lucas', 'Hamilton', 'lucas.hamilton@gmail.com', D.geo, 'Outstanding return -- No Return Date'],
+    ['ReturnOverdue', 'Hannah', 'Wells', 'hannah.wells@gmail.com', D.agri, 'Outstanding return -- Overdue'],
+    ['ReturnDueToday', 'Nathan', 'Brooks', 'nathan.brooks@gmail.com', D.math, 'Outstanding return -- Due Today'],
+    ['ReturnNotDueYet', 'Victoria', 'Lang', 'victoria.lang@gmail.com', D.bmi, 'Outstanding return -- Not Due Yet'],
+    ['ReturnPartlyResolved', 'Joshua', 'Kerr', 'joshua.kerr@gmail.com', D.cs, 'Outstanding return -- Partly Resolved (one unit written off)'],
+    ['ReturnMixedHolder', 'Natalie', 'Pierce', 'natalie.pierce@gmail.com', D.phys, 'One holder, three return states at once'],
+    ['ReturnCompleted', 'Ethan', 'Marshall', 'ethan.marshall@gmail.com', D.bio, 'Fully returned'],
+    ['ReturnPartial', 'Rachel', 'Dawson', 'rachel.dawson@gmail.com', D.geo, 'Partially returned, the rest not due yet'],
+    ['MultiBarcodeFull', 'Adam', 'Sutton', 'adam.sutton@gmail.com', D.agri, 'Multi-product, multi-barcode Stock Out, fully returned'],
+    ['MultiBarcodePartial', 'Megan', 'Holloway', 'megan.holloway@gmail.com', D.math, 'Multi-product, multi-barcode Stock Out, partly returned (rest due today)'],
+    ['LostLabels', 'Ryan', 'Fletcher', 'ryan.fletcher@gmail.com', D.bmi, 'Lost-label Returns demo (relabel flow)'],
+    ['BadgeActive', 'Zoe', 'Mitchell', 'zoe.mitchell@gmail.com', D.cs, 'Staff badge activated (audit log); holds two items that are not due yet'],
+    ['BadgeDeactivated', 'Callum', 'Rhodes', 'callum.rhodes@gmail.com', D.phys, 'Deactivated staff badge (audit log, inactive card)'],
+    ['PortalLinked', 'Jessica', 'Moore', 'jessica.moore@gmail.com', D.bio, 'Portal borrower login -- owns the My Requests history'],
   ]
-  for (const [key, name, surname, email] of staffSpecs) {
-    S[key] = await upsertStaff({ name, surname, full_name: `${name} ${surname}`, email })
+  const STAFF_SCENARIO = Object.fromEntries(staffSpecs.map((r) => [r[0], r[5]]))
+  // Card / portal-access mix, spread evenly over the list (index mod 4):
+  // card + portal, card only, portal only, neither -- so the Staff page's
+  // "Not linked" / "Not granted" badges sit next to real values. Portal
+  // access is a real Auth login (password123), not just a flag.
+  const portalStaffKeys = []
+  for (const [i, [key, name, surname, email, department]] of staffSpecs.entries()) {
+    const hasCard = i % 4 === 0 || i % 4 === 1
+    const hasPortal = i % 4 === 0 || i % 4 === 2
+    const card_uid = hasCard ? (0x04a00000 + (i + 1) * 0x1f3b7).toString(16).toUpperCase().padStart(8, '0') : null
+    let uid = null
+    if (hasPortal) {
+      uid = key === 'PortalLinked' ? portalBorrowerUser.uid : (await upsertUser(email, 'password123', `seed-staff-${key.toLowerCase()}-uid`)).uid
+      portalStaffKeys.push(key)
+    }
+    S[key] = await upsertStaff({ name, surname, full_name: `${name} ${surname}`, email, department, card_uid, uid })
   }
   // A deactivated one, seeded directly (rather than toggled after create)
   // so it's already in that state.
-  await upsertStaff({ name: 'Demo', surname: 'Staff Badge -- Deactivated', full_name: S.BadgeDeactivated.full_name, email: S.BadgeDeactivated.email, is_active: false, card_uid: 'CARD-SEED-DEMO-01' })
+  await upsertStaff({ name: S.BadgeDeactivated.name, surname: S.BadgeDeactivated.surname, full_name: S.BadgeDeactivated.full_name, email: S.BadgeDeactivated.email, department: S.BadgeDeactivated.department, is_active: false, card_uid: S.BadgeDeactivated.card_uid })
   // Link the real portal-borrower Auth account created in section 0 above --
   // upsertStaff's tuple-based staffSpecs loop above has no uid field, so
   // this one's own doc still needs its uid filled in after the fact.
@@ -593,25 +733,25 @@ async function main() {
   await writeAudit({
     userId: ADMIN_UID, userName: ADMIN_NAME, action: 'create', entityType: 'staff', entityId: S.PendingFresh.id,
     before: null,
-    after: { name: 'Demo', surname: 'Pending Fresh', full_name: S.PendingFresh.full_name, email: S.PendingFresh.email, department: DEPARTMENT, card_uid: null, is_active: true, uid: null },
+    after: { name: S.PendingFresh.name, surname: S.PendingFresh.surname, full_name: S.PendingFresh.full_name, email: S.PendingFresh.email, department: S.PendingFresh.department, card_uid: null, is_active: true, uid: null },
     createdAt: isoAt(-30),
   })
   await writeAudit({
     userId: ADMIN_UID, userName: ADMIN_NAME, action: 'update', entityType: 'staff', entityId: S.PendingFresh.id,
-    before: { name: 'Demo', surname: 'Pending Fresh', full_name: S.PendingFresh.full_name, email: S.PendingFresh.email, department: 'Testing', card_uid: null },
-    after: { name: 'Demo', surname: 'Pending Fresh', full_name: S.PendingFresh.full_name, email: S.PendingFresh.email, department: DEPARTMENT, card_uid: null },
+    before: { name: S.PendingFresh.name, surname: S.PendingFresh.surname, full_name: S.PendingFresh.full_name, email: S.PendingFresh.email, department: D.math, card_uid: null },
+    after: { name: S.PendingFresh.name, surname: S.PendingFresh.surname, full_name: S.PendingFresh.full_name, email: S.PendingFresh.email, department: S.PendingFresh.department, card_uid: null },
     createdAt: isoAt(-29),
   })
   await writeAudit({
     userId: ADMIN_UID, userName: ADMIN_NAME, action: 'activate', entityType: 'staff', entityId: S.BadgeActive.id,
-    before: { is_active: false, name: 'Demo', surname: 'Staff Badge -- Active', full_name: S.BadgeActive.full_name, email: S.BadgeActive.email },
-    after: { is_active: true, name: 'Demo', surname: 'Staff Badge -- Active', full_name: S.BadgeActive.full_name, email: S.BadgeActive.email },
+    before: { is_active: false, name: S.BadgeActive.name, surname: S.BadgeActive.surname, full_name: S.BadgeActive.full_name, email: S.BadgeActive.email },
+    after: { is_active: true, name: S.BadgeActive.name, surname: S.BadgeActive.surname, full_name: S.BadgeActive.full_name, email: S.BadgeActive.email },
     createdAt: isoAt(-20),
   })
   await writeAudit({
     userId: ADMIN_UID, userName: ADMIN_NAME, action: 'deactivate', entityType: 'staff', entityId: S.BadgeDeactivated.id,
-    before: { is_active: true, name: 'Demo', surname: 'Staff Badge -- Deactivated', full_name: S.BadgeDeactivated.full_name, email: S.BadgeDeactivated.email },
-    after: { is_active: false, name: 'Demo', surname: 'Staff Badge -- Deactivated', full_name: S.BadgeDeactivated.full_name, email: S.BadgeDeactivated.email },
+    before: { is_active: true, name: S.BadgeDeactivated.name, surname: S.BadgeDeactivated.surname, full_name: S.BadgeDeactivated.full_name, email: S.BadgeDeactivated.email },
+    after: { is_active: false, name: S.BadgeDeactivated.name, surname: S.BadgeDeactivated.surname, full_name: S.BadgeDeactivated.full_name, email: S.BadgeDeactivated.email },
     createdAt: isoAt(-19),
   })
   // Portal access: granting a login, and later re-issuing the link. These
@@ -636,38 +776,176 @@ async function main() {
     createdAt: isoAt(-11),
   })
 
+  // Portal access granted to the other staff with a login (Jessica Moore's two
+  // entries are above): one grant_access each, spread over the past weeks.
+  for (const [n, key] of portalStaffKeys.filter((k) => k !== 'PortalLinked').entries()) {
+    const ctx = { full_name: S[key].full_name, email: S[key].email, uid: S[key].uid }
+    await writeAudit({
+      userId: ADMIN_UID, userName: ADMIN_NAME, action: 'grant_access', entityType: 'staff', entityId: S[key].id,
+      before: ctx, after: ctx, createdAt: isoAt(-45 + n * 3),
+    })
+  }
+
   // =====================================================================
   // 3. PRODUCTS -- variety across stock level, lending interval, and the
   //    "Availability" toggle. Reused across the scenarios below.
   // =====================================================================
   const P = {}
-  P.healthy = await upsertProduct({ name: 'Demo Product -- Healthy Stock', barcode: 'DEMO-HEALTHY', quantity_on_hand: 25, reorder_threshold: 5, lending_interval: 'week_1', category_id: categoryId['Peripherals'], category_name: 'Peripherals' })
-  P.lowStock = await upsertProduct({ name: 'Demo Product -- Low Stock', barcode: 'DEMO-LOWSTOCK', quantity_on_hand: 4, reorder_threshold: 5, lending_interval: 'week_2', category_id: categoryId['Cables & Adapters'], category_name: 'Cables & Adapters' })
-  P.outOfStock = await upsertProduct({ name: 'Demo Product -- Out of Stock', barcode: 'DEMO-OUTOFSTOCK', quantity_on_hand: 0, reorder_threshold: 3, lending_interval: 'week_3', category_id: categoryId['Storage'], category_name: 'Storage' })
-  P.indefinite = await upsertProduct({ name: 'Demo Product -- Indefinite Lending', barcode: 'DEMO-INDEFINITE', quantity_on_hand: 12, reorder_threshold: 2, lending_interval: 'indefinite', category_id: categoryId['Laptops & Computers'], category_name: 'Laptops & Computers' })
-  P.monthInterval = await upsertProduct({ name: 'Demo Product -- 1 Month Interval', barcode: 'DEMO-MONTH', quantity_on_hand: 15, reorder_threshold: 3, lending_interval: 'month_1', category_id: categoryId['Networking'], category_name: 'Networking' })
-  P.legacyNoInterval = await upsertProduct({ name: 'Demo Product -- Legacy (No Interval Set)', barcode: 'DEMO-LEGACY', quantity_on_hand: 10, reorder_threshold: 2, category_id: categoryId['Power'], category_name: 'Power' }) // lending_interval omitted on purpose
-  P.unavailable = await upsertProduct({ name: 'Demo Product -- Unavailable (Toggled Off)', barcode: 'DEMO-UNAVAILABLE', quantity_on_hand: 8, reorder_threshold: 2, available: false, lending_interval: 'week_1', category_id: categoryId['Consumables'], category_name: 'Consumables' })
-  P.insufficientCause = await upsertProduct({ name: 'Demo Product -- Insufficient Pickup (Overdue Cause)', barcode: 'DEMO-INSUFF-CAUSE', quantity_on_hand: 3, reorder_threshold: 2, lending_interval: 'week_2' })
-  P.insufficientNoCause = await upsertProduct({ name: 'Demo Product -- Insufficient Pickup (No Clear Cause)', barcode: 'DEMO-INSUFF-NOCAUSE', quantity_on_hand: 1, reorder_threshold: 3, lending_interval: 'week_2' })
-  P.onSchedule = await upsertProduct({ name: 'Demo Product -- On Schedule Pickup', barcode: 'DEMO-ONSCHEDULE', quantity_on_hand: 10, reorder_threshold: 2, lending_interval: 'week_2' })
-  P.noShowFeeder = await upsertProduct({ name: 'Demo Product -- Not Picked Up Feeder', barcode: 'DEMO-NOSHOW', quantity_on_hand: 5, reorder_threshold: 2, lending_interval: 'week_1' })
-  P.fulfilled = await upsertProduct({ name: 'Demo Product -- Fulfilled Pickup', barcode: 'DEMO-FULFILLED', quantity_on_hand: 10, reorder_threshold: 2, lending_interval: 'week_2' })
-  P.returnNoDate = await upsertProduct({ name: 'Demo Product -- Return Feeder (No Date)', barcode: 'DEMO-RET-NODATE', quantity_on_hand: 20, reorder_threshold: 5 })
-  P.returnOverdue = await upsertProduct({ name: 'Demo Product -- Return Feeder (Overdue)', barcode: 'DEMO-RET-OVERDUE', quantity_on_hand: 20, reorder_threshold: 5 })
-  P.returnDueToday = await upsertProduct({ name: 'Demo Product -- Return Feeder (Due Today)', barcode: 'DEMO-RET-DUETODAY', quantity_on_hand: 20, reorder_threshold: 5 })
-  P.returnNotDueYet = await upsertProduct({ name: 'Demo Product -- Return Feeder (Not Due Yet)', barcode: 'DEMO-RET-NOTDUEYET', quantity_on_hand: 20, reorder_threshold: 5 })
-  P.returnPartlyResolved = await upsertProduct({ name: 'Demo Product -- Return Feeder (Partly Resolved)', barcode: 'DEMO-RET-PARTRESOLVED', quantity_on_hand: 20, reorder_threshold: 5 })
-  P.ioAdjustRestock = await upsertProduct({ name: 'Demo Product -- Stock-In Restock Example', barcode: 'DEMO-RESTOCK', quantity_on_hand: 6, reorder_threshold: 3 })
-  P.fullReturnPair = await upsertProduct({ name: 'Demo Product -- Full Return Example', barcode: 'DEMO-FULLRETURN', quantity_on_hand: 20, reorder_threshold: 5 })
-  P.partialReturnPair = await upsertProduct({ name: 'Demo Product -- Partial Return (Still Overdue)', barcode: 'DEMO-PARTIALRETURN', quantity_on_hand: 20, reorder_threshold: 5 })
+  // Each scenario product is a believable catalogue item. image_slug points
+  // at scripts/catalog-images/<slug>/ (the generated product photos); a few
+  // items share a photo set with a close variant. Barcodes keep their DEMO-
+  // prefix on purpose: the scenarios below (and the Returns/Stock Out
+  // walkthroughs in the notes at the bottom) refer to them by value.
+  const cat = (n) => ({ category_id: categoryId[n], category_name: n })
+
+  // Carries two barcodes on purpose -- its manufacturer code plus an
+  // NWU-printed one -- so the Fulfilled Pickup walk-in stock-out below can
+  // demonstrate a line where more than one of a product's barcodes was
+  // scanned (see TransactionLine.barcodes in database.ts).
+  P.healthy = await upsertProduct({
+    name: 'Wireless Mouse', barcode: 'DEMO-HEALTHY', barcodes: ['DEMO-HEALTHY', 'DEMO-HEALTHY-ALT'],
+    quantity_on_hand: 25, reorder_threshold: 5, lending_interval: 'week_1', ...cat('Peripherals'),
+    image_slug: 'wireless-mouse', description: '2.4 GHz wireless optical mouse with a nano USB-A receiver that stores inside the battery bay. Ergonomic right-hand shape with a precision scroll wheel, forward and back buttons and adjustable 800 / 1200 / 1600 DPI. Runs up to 12 months on a single AA battery. Plug-and-play on Windows, macOS and Linux.',
+  })
+  // Edge case: ten barcodes on one product (see the "Edge case" stock-out
+  // below, under Fulfilled Pickup) -- stress-tests how the Issued per Staff
+  // report renders a long barcode list under a single product line. Paper
+  // is a natural fit: every ream carries its own barcode.
+  P.manyBarcodes = await upsertProduct({
+    name: 'A4 Copy Paper (500 sheets)', barcode: 'DEMO-MANYBARCODE-01',
+    barcodes: Array.from({ length: 10 }, (_, i) => `DEMO-MANYBARCODE-${String(i + 1).padStart(2, '0')}`),
+    quantity_on_hand: 20, reorder_threshold: 3, lending_interval: 'week_1', ...cat('Consumables'),
+    image_slug: 'a4-copy-paper', description: '80 gsm white A4 multipurpose paper (210 x 297 mm), 500 sheets per ream. Suitable for laser and inkjet printers, photocopiers and fax machines. Acid-free, with a smooth finish that feeds reliably and resists jamming. Each ream carries its own barcode so individual reams can be issued and returned.',
+  })
+  // Two more multi-barcode products for the "Multi-Barcode" Stock In / Stock
+  // Out / Return scenario in section 5: each carries several barcodes, and
+  // that scenario uses more than one of them per product, on more than one
+  // product per transaction.
+  P.kitCable = await upsertProduct({
+    name: 'USB-C Cable 1m', barcode: 'DEMO-KITCABLE-A',
+    barcodes: ['DEMO-KITCABLE-A', 'DEMO-KITCABLE-B', 'DEMO-KITCABLE-C'],
+    quantity_on_hand: 0, reorder_threshold: 2, lending_interval: 'week_2', ...cat('Cables & Adapters'),
+    image_slug: 'usb-c-cable', description: 'Braided nylon USB-C to USB-C cable, 1 metre, with a connector at each end. Supports USB 3.1 Gen 2 data transfer up to 10 Gbps, 60 W fast charging and video output on compatible devices. Reinforced strain relief and a reversible plug that fits either way round.',
+  })
+  P.kitAdapter = await upsertProduct({
+    name: 'DisplayPort Cable 2m', barcode: 'DEMO-KITADAPTER-A',
+    barcodes: ['DEMO-KITADAPTER-A', 'DEMO-KITADAPTER-B'],
+    quantity_on_hand: 0, reorder_threshold: 2, lending_interval: 'week_2', ...cat('Cables & Adapters'),
+    image_slug: 'displayport-cable', description: 'DisplayPort 1.4 cable, 2 metres, with a DisplayPort male connector at each end. Carries video and audio up to 8K at 30 Hz or 4K at 120 Hz, with HDR support. Gold-plated latching connectors give a secure fit on monitors, docking stations and graphics cards.',
+  })
+  // Lost-label demo: THREE units are issued under ONE barcode (A) even though
+  // the product has three registered barcodes -- so Returns shows a single row
+  // "issued 3, returnable 3" for barcode A. See the LostLabels scenario below.
+  P.lostLabel = await upsertProduct({
+    name: '27-inch Monitor', barcode: 'DEMO-LOSTLABEL-A',
+    barcodes: ['DEMO-LOSTLABEL-A', 'DEMO-LOSTLABEL-B', 'DEMO-LOSTLABEL-C'],
+    quantity_on_hand: 10, reorder_threshold: 2, lending_interval: 'week_2', ...cat('Peripherals'),
+    image_slug: 'monitor-27', description: '27-inch Full HD (1920 x 1080) IPS monitor with wide 178-degree viewing angles and a 75 Hz refresh rate. Inputs: 2 x HDMI 1.4, 1 x DisplayPort 1.2 and a 3.5 mm audio output. Height-adjustable stand with tilt and swivel, plus a 100 x 100 mm VESA mount. Flicker-free with a low blue-light mode.',
+  })
+  // Second product on the same Lost Labels transaction, so that row has TWO
+  // products (3 x monitor + 2 x webcam) -- shows how a multi-product return,
+  // relabels and outstanding items look in the Returns report CSV.
+  P.lostLabelPair = await upsertProduct({
+    name: 'HD Webcam', barcode: 'DEMO-LOSTPAIR-A',
+    barcodes: ['DEMO-LOSTPAIR-A', 'DEMO-LOSTPAIR-B'],
+    quantity_on_hand: 8, reorder_threshold: 2, lending_interval: 'week_2', ...cat('Peripherals'),
+    image_slug: 'hd-webcam', description: '1080p Full HD webcam recording at 30 frames per second with a 90-degree wide-angle lens and autofocus. Built-in dual noise-reducing microphones. Connects through a 1.5 m attached USB-A 2.0 cable, plug and play with no drivers. Clips onto a monitor or screws onto a standard tripod, and works with Teams, Zoom and Google Meet.',
+  })
+  P.lowStock = await upsertProduct({
+    name: 'Ethernet Patch Cable Cat6', barcode: 'DEMO-LOWSTOCK', quantity_on_hand: 4, reorder_threshold: 5,
+    lending_interval: 'week_2', ...cat('Cables & Adapters'),
+    image_slug: 'ethernet-patch-cable', description: 'Cat6 patch cable with RJ45 connectors at both ends, 2 metres. Supports Gigabit Ethernet up to 1 Gbps (rated to 250 MHz) for switches, routers, access points and wall points. Snagless moulded boots protect the latch, and the shielded cable reduces interference.',
+  })
+  P.outOfStock = await upsertProduct({
+    name: 'Solid State Drive 1TB', barcode: 'DEMO-OUTOFSTOCK', quantity_on_hand: 0, reorder_threshold: 3,
+    lending_interval: 'week_3', ...cat('Storage'),
+    image_slug: 'ssd-1tb', description: '1 TB 2.5-inch SATA III solid state drive with sequential reads up to 550 MB/s and writes up to 520 MB/s. Connects through a standard SATA data port plus SATA power, in a 7 mm slim case that fits laptops and desktops. Shock-resistant with no moving parts, a quick way to upgrade an ageing hard drive.',
+  })
+  P.indefinite = await upsertProduct({
+    name: 'Business Laptop', barcode: 'DEMO-INDEFINITE', quantity_on_hand: 12, reorder_threshold: 2,
+    lending_interval: 'indefinite', ...cat('Laptops & Computers'),
+    image_slug: 'business-laptop', description: '14-inch business laptop with a Full HD anti-glare display, 16 GB RAM and a 512 GB NVMe SSD. Ports: 2 x USB-A 3.2, 2 x USB-C (Thunderbolt 4, charging and DisplayPort), 1 x HDMI 2.0, a 3.5 mm combo audio jack and a microSD reader. Backlit keyboard, fingerprint reader and Wi-Fi 6. Issued for the duration of a project.',
+  })
+  P.monthInterval = await upsertProduct({
+    name: 'Wi-Fi Router', barcode: 'DEMO-MONTH', quantity_on_hand: 15, reorder_threshold: 3,
+    lending_interval: 'month_1', ...cat('Networking'),
+    image_slug: 'wifi-router', description: 'Dual-band AC1200 Wi-Fi router (2.4 GHz and 5 GHz) with four external antennas. Ports: 1 x Gigabit WAN, 4 x Gigabit LAN and 1 x USB 3.0 for sharing storage. Supports guest networks, WPA3 and basic parental controls, and is configured through a web page. Ideal for labs and temporary office set-ups.',
+  })
+  // lending_interval omitted on purpose (pre-Lending-Interval-field legacy shape)
+  P.legacyNoInterval = await upsertProduct({
+    name: 'Surge Protector Power Strip', barcode: 'DEMO-LEGACY', quantity_on_hand: 10, reorder_threshold: 2,
+    ...cat('Power'),
+    image_slug: 'surge-power-strip', description: 'Six-outlet surge protector with an illuminated on/off switch and a protected and grounded indicator light. Absorbs up to 1800 joules and has a built-in overload breaker. 2 metre power cord, and keyhole mounting slots so it can be fixed to a wall or desk underside.',
+  })
+  P.unavailable = await upsertProduct({
+    name: 'Laser Toner Cartridge (Black)', barcode: 'DEMO-UNAVAILABLE', quantity_on_hand: 8, reorder_threshold: 2,
+    available: false, lending_interval: 'week_1', ...cat('Consumables'),
+    image_slug: 'toner-cartridge', description: 'Black toner cartridge for departmental monochrome laser printers, with a page yield of about 3,000 pages at 5 percent coverage. Includes a new drum interface and chip, installs without tools, and prints sharp text and graphics. Currently withdrawn from lending.',
+  })
+  P.insufficientCause = await upsertProduct({
+    name: 'Desktop PC', barcode: 'DEMO-INSUFF-CAUSE', quantity_on_hand: 3, reorder_threshold: 2,
+    lending_interval: 'week_2', ...cat('Laptops & Computers'),
+    image_slug: 'desktop-pc', description: 'Compact desktop PC with a quad-core processor, 16 GB RAM and a 512 GB SSD. Front ports: 2 x USB 3.2 and 1 x headphone/microphone combo jack. Rear ports: 1 x HDMI, 1 x DisplayPort, 1 x Gigabit Ethernet, 4 x USB 2.0 and 2 x audio jacks. Wi-Fi and Bluetooth are built in. Suited to labs and temporary workstations.',
+  })
+  P.insufficientNoCause = await upsertProduct({
+    name: 'UPS Battery Backup 1500VA', barcode: 'DEMO-INSUFF-NOCAUSE', quantity_on_hand: 1, reorder_threshold: 3,
+    lending_interval: 'week_2', ...cat('Power'),
+    image_slug: 'ups-battery-backup', description: '1500VA / 900 W line-interactive UPS with automatic voltage regulation and a front LCD showing input, output, load and runtime. Eight outlets: four with battery backup and surge protection, four surge-only. Includes a USB port for monitoring software and RJ45 network surge protection. Keeps equipment running through load-shedding and short power cuts.',
+  })
+  P.onSchedule = await upsertProduct({
+    name: 'Network Switch 8-Port', barcode: 'DEMO-ONSCHEDULE', quantity_on_hand: 10, reorder_threshold: 2,
+    lending_interval: 'week_2', ...cat('Networking'),
+    image_slug: 'network-switch', description: '8-port gigabit unmanaged Ethernet switch with 8 x 10/100/1000 RJ45 ports that auto-negotiate speed and cable type. Plug and play with no configuration, and LED indicators for link and activity on every port. Compact metal case with a fanless design, suited to desks, labs and small cabinets.',
+  })
+  P.noShowFeeder = await upsertProduct({
+    name: 'Wireless Access Point', barcode: 'DEMO-NOSHOW', quantity_on_hand: 5, reorder_threshold: 2,
+    lending_interval: 'week_1', ...cat('Networking'),
+    image_slug: 'wireless-access-point', description: 'Ceiling- or wall-mount Wi-Fi 6 access point, dual-band up to 1.8 Gbps, supporting more than 100 connected devices. One Gigabit Ethernet port that is powered over PoE (802.3af), so no separate power adapter is needed. Supports multiple SSIDs, VLANs and band steering. Mounting bracket included.',
+  })
+  P.fulfilled = await upsertProduct({
+    name: 'Mechanical Keyboard', barcode: 'DEMO-FULFILLED', quantity_on_hand: 10, reorder_threshold: 2,
+    lending_interval: 'week_2', ...cat('Peripherals'),
+    image_slug: 'mechanical-keyboard', description: 'Full-size mechanical keyboard with 104 keys including a numeric keypad. Tactile blue switches rated for 50 million keystrokes, with per-key backlighting and N-key rollover. Metal top plate with a removable cable and a USB-A connection. Compatible with Windows, macOS and Linux.',
+  })
+  P.returnNoDate = await upsertProduct({
+    name: 'External Hard Drive 2TB', barcode: 'DEMO-RET-NODATE', quantity_on_hand: 20, reorder_threshold: 5,
+    ...cat('Storage'), image_slug: 'external-hard-drive', description: 'Portable 2 TB external hard drive in a slim, shock-resistant case. Supports USB 3.0 (5 Gbps), with both a USB-A and a USB-C connection cable included. Powered over USB with no external adapter. Pre-formatted for Windows and also usable on macOS and Linux. Ideal for backups and moving large datasets.',
+  })
+  P.returnOverdue = await upsertProduct({
+    name: 'Ultrabook Laptop 14-inch', barcode: 'DEMO-RET-OVERDUE', quantity_on_hand: 20, reorder_threshold: 5,
+    ...cat('Laptops & Computers'), image_slug: 'business-laptop', description: 'Lightweight 14-inch ultrabook weighing about 1.3 kg, with a Full HD display, 16 GB RAM and a 512 GB SSD. Ports: 2 x USB-C (Thunderbolt 4), 1 x USB-A 3.2, 1 x HDMI 2.0 and a 3.5 mm audio jack. Up to 12 hours of battery life. Popular for conferences and fieldwork.',
+  })
+  P.returnDueToday = await upsertProduct({
+    name: 'USB Flash Drive 64GB', barcode: 'DEMO-RET-DUETODAY', quantity_on_hand: 20, reorder_threshold: 5,
+    ...cat('Storage'), image_slug: 'usb-flash-drive', description: '64 GB USB 3.0 flash drive with read speeds up to 120 MB/s. Retractable USB-A connector, so there is no cap to lose, and a loop for a lanyard or key ring. Compatible with Windows, macOS and Linux.',
+  })
+  P.returnNotDueYet = await upsertProduct({
+    name: 'HDMI Cable 2m', barcode: 'DEMO-RET-NOTDUEYET', quantity_on_hand: 20, reorder_threshold: 5,
+    ...cat('Cables & Adapters'), image_slug: 'hdmi-cable', description: 'High-speed HDMI 2.0 cable, 2 metres, with HDMI Type A male connectors at both ends. Supports 4K at 60 Hz, HDR and Ethernet channel, and carries up to 8 channels of audio. Gold-plated connectors and a shielded cable for a clean picture.',
+  })
+  P.returnPartlyResolved = await upsertProduct({
+    name: '24-inch Monitor', barcode: 'DEMO-RET-PARTRESOLVED', quantity_on_hand: 20, reorder_threshold: 5,
+    ...cat('Peripherals'), image_slug: 'monitor-27', description: '24-inch Full HD (1920 x 1080) IPS monitor with a 75 Hz refresh rate. Inputs: 1 x HDMI 1.4, 1 x VGA and a 3.5 mm audio output. Tilt-adjustable stand and a 75 x 75 mm VESA mount. Slim bezel design suited to lecture rooms and office desks.',
+  })
+  P.ioAdjustRestock = await upsertProduct({
+    name: 'High-Yield Toner Cartridge (Black)', barcode: 'DEMO-RESTOCK', quantity_on_hand: 6, reorder_threshold: 3,
+    ...cat('Consumables'), image_slug: 'toner-cartridge', description: 'High-yield black toner cartridge for shared monochrome laser printers, with a page yield of about 6,000 pages at 5 percent coverage. Includes a new drum interface and chip, and installs without tools. A better fit than the standard cartridge for busy printers.',
+  })
+  P.fullReturnPair = await upsertProduct({
+    name: 'Compact Wireless Mouse', barcode: 'DEMO-FULLRETURN', quantity_on_hand: 20, reorder_threshold: 5,
+    ...cat('Peripherals'), image_slug: 'wireless-mouse', description: 'Compact 2.4 GHz wireless mouse sized for laptop bags, with a nano USB-A receiver that stores in the battery bay. 1000 DPI optical sensor and a quiet-click scroll wheel. Runs on one AA battery for up to 18 months. Plug and play on Windows, macOS and Linux.',
+  })
+  P.partialReturnPair = await upsertProduct({
+    name: 'Network Switch 24-Port', barcode: 'DEMO-PARTIALRETURN', quantity_on_hand: 20, reorder_threshold: 5,
+    ...cat('Networking'), image_slug: 'network-switch', description: '24-port gigabit managed Ethernet switch with 24 x 10/100/1000 RJ45 ports and 2 x SFP uplink slots. Supports VLANs, QoS, link aggregation and port mirroring, configured through a web interface. Rack-mountable in a 19-inch rack (1U), with LED indicators on every port.',
+  })
 
   // ---- Product audit log coverage: create / update -----------------------
   await writeAudit({
     userId: ADMIN_UID, userName: ADMIN_NAME, action: 'create', entityType: 'product', entityId: P.healthy.id,
     before: null,
     after: {
-      category_id: categoryId['Peripherals'], name: 'Demo Product -- Healthy Stock', description: 'Seed data -- scripts/seed-comprehensive-demo.mjs',
+      category_id: categoryId['Peripherals'], name: P.healthy.name, description: P.healthy.description,
       barcodes: ['DEMO-HEALTHY'], quantity_on_hand: 25, reorder_threshold: 5, available: true, location: LOCATION,
       lend_from: addDays(TODAY, -365), lend_to: null, lending_interval: 'week_1', images: [],
     },
@@ -676,13 +954,13 @@ async function main() {
   await writeAudit({
     userId: ADMIN_UID, userName: ADMIN_NAME, action: 'update', entityType: 'product', entityId: P.insufficientCause.id,
     before: {
-      name: 'Demo Product -- Insufficient Pickup (Overdue Cause)', barcodes: ['DEMO-INSUFF-CAUSE'], category_id: null,
-      description: 'Seed data -- scripts/seed-comprehensive-demo.mjs', quantity_on_hand: 5, reorder_threshold: 1,
+      name: P.insufficientCause.name, barcodes: ['DEMO-INSUFF-CAUSE'], category_id: categoryId['Laptops & Computers'],
+      description: P.insufficientCause.description, quantity_on_hand: 5, reorder_threshold: 1,
       available: true, location: LOCATION, lend_from: addDays(TODAY, -365), lend_to: null, lending_interval: 'week_1', images: [],
     },
     after: {
-      name: 'Demo Product -- Insufficient Pickup (Overdue Cause)', barcodes: ['DEMO-INSUFF-CAUSE'], category_id: null,
-      description: 'Seed data -- scripts/seed-comprehensive-demo.mjs', quantity_on_hand: 3, reorder_threshold: 2,
+      name: P.insufficientCause.name, barcodes: ['DEMO-INSUFF-CAUSE'], category_id: categoryId['Laptops & Computers'],
+      description: P.insufficientCause.description, quantity_on_hand: 3, reorder_threshold: 2,
       available: true, location: LOCATION, lend_from: addDays(TODAY, -365), lend_to: null, lending_interval: 'week_2', images: [],
     },
     createdAt: isoAt(-21),
@@ -714,6 +992,11 @@ async function main() {
     lendFrom: addDays(TODAY, -20), lendTo: addDays(TODAY, -5), dayOffset: -20,
   })
 
+  // Two more walk-in stock-outs that are not due for a while, so Not Due Yet is
+  // clearly the biggest group on the Dashboard (Overdue only a handful).
+  await recordTxn({ type: 'OUT', staff: S.BadgeActive, items: [{ product: P.returnNotDueYet, quantity: 2 }], lendFrom: addDays(TODAY, -2), lendTo: addDays(TODAY, 8), dayOffset: -2 })
+  await recordTxn({ type: 'OUT', staff: S.BadgeActive, items: [{ product: P.fullReturnPair, quantity: 1 }], lendFrom: addDays(TODAY, -1), lendTo: addDays(TODAY, 12), dayOffset: -1 })
+
   // =====================================================================
   // 5. REPORTS -- IN / RETURN / ADJUST activity, plus a full and a partial
   //    return (the partial one lands as an extra Overdue Outstanding
@@ -726,8 +1009,80 @@ async function main() {
   const fullReturnOut = await recordTxn({ type: 'OUT', staff: S.ReturnCompleted, items: [{ product: P.fullReturnPair, quantity: 2 }], lendFrom: addDays(TODAY, -20), lendTo: addDays(TODAY, -10), dayOffset: -20 })
   await recordTxn({ type: 'RETURN', staff: S.ReturnCompleted, items: [{ product: P.fullReturnPair, quantity: 2 }], returnDate: addDays(TODAY, -9), linkedTxnId: fullReturnOut.id, notes: 'Returned in good condition.', dayOffset: -9 })
 
-  const partialReturnOut = await recordTxn({ type: 'OUT', staff: S.ReturnPartial, items: [{ product: P.partialReturnPair, quantity: 4 }], lendFrom: addDays(TODAY, -15), lendTo: addDays(TODAY, -5), dayOffset: -15 })
+  const partialReturnOut = await recordTxn({ type: 'OUT', staff: S.ReturnPartial, items: [{ product: P.partialReturnPair, quantity: 4 }], lendFrom: addDays(TODAY, -15), lendTo: addDays(TODAY, 9), dayOffset: -15 })
   await recordTxn({ type: 'RETURN', staff: S.ReturnPartial, items: [{ product: P.partialReturnPair, quantity: 2 }], returnDate: addDays(TODAY, -4), linkedTxnId: partialReturnOut.id, notes: 'Only 2 of the 4 units back so far -- other 2 still out.', dayOffset: -4 })
+
+  // ---- Multi-item, multi-barcode Stock In / Stock Out / Return -------------
+  // Every transaction here has more than one product, and each product has
+  // more than one of its barcodes scanned. Returns reuse exactly the barcodes
+  // the matching Stock Out was issued with (recordTxn enforces that).
+  const kitIn = await recordTxn({
+    type: 'IN',
+    items: [
+      { product: P.kitCable, quantity: 9, barcodes: ['DEMO-KITCABLE-A', 'DEMO-KITCABLE-B', 'DEMO-KITCABLE-C'] },
+      { product: P.kitAdapter, quantity: 7, barcodes: ['DEMO-KITADAPTER-A', 'DEMO-KITADAPTER-B'] },
+    ],
+    notes: 'Delivery of cable + adapter kits -- several barcodes scanned per product.', dayOffset: -30,
+  })
+  // Full return: 2 products x 2-3 barcodes out, exactly the same barcodes back.
+  const kitFullOut = await recordTxn({
+    type: 'OUT', staff: S.MultiBarcodeFull,
+    items: [
+      { product: P.kitCable, quantity: 3, barcodes: ['DEMO-KITCABLE-A', 'DEMO-KITCABLE-B', 'DEMO-KITCABLE-C'] },
+      { product: P.kitAdapter, quantity: 3, barcodes: ['DEMO-KITADAPTER-A', 'DEMO-KITADAPTER-B'] },
+    ],
+    lendFrom: addDays(TODAY, -14), lendTo: addDays(TODAY, -7), dayOffset: -14,
+  })
+  await recordTxn({
+    type: 'RETURN', staff: S.MultiBarcodeFull,
+    items: [
+      { product: P.kitCable, quantity: 3, barcodes: ['DEMO-KITCABLE-A', 'DEMO-KITCABLE-B', 'DEMO-KITCABLE-C'] },
+      { product: P.kitAdapter, quantity: 3, barcodes: ['DEMO-KITADAPTER-A', 'DEMO-KITADAPTER-B'] },
+    ],
+    returnDate: addDays(TODAY, -6), linkedTxnId: kitFullOut.id, notes: 'Everything back -- same barcodes as issued.', dayOffset: -6,
+  })
+  // Partial return: two products out, only some of the barcodes come back, so
+  // the rest stay outstanding (due today) on the dashboard.
+  const kitPartialOut = await recordTxn({
+    type: 'OUT', staff: S.MultiBarcodePartial,
+    items: [
+      { product: P.kitCable, quantity: 3, barcodes: ['DEMO-KITCABLE-A', 'DEMO-KITCABLE-B', 'DEMO-KITCABLE-C'] },
+      { product: P.kitAdapter, quantity: 2, barcodes: ['DEMO-KITADAPTER-A', 'DEMO-KITADAPTER-B'] },
+    ],
+    lendFrom: addDays(TODAY, -12), lendTo: TODAY, dayOffset: -12,
+  })
+  await recordTxn({
+    type: 'RETURN', staff: S.MultiBarcodePartial,
+    items: [
+      { product: P.kitCable, quantity: 2, barcodes: ['DEMO-KITCABLE-A', 'DEMO-KITCABLE-B'] },
+      { product: P.kitAdapter, quantity: 1, barcodes: ['DEMO-KITADAPTER-A'] },
+    ],
+    returnDate: addDays(TODAY, -3), linkedTxnId: kitPartialOut.id,
+    notes: 'Cable A + B and Adapter A back -- Cable C and Adapter B still out.', dayOffset: -3,
+  })
+  void kitIn
+
+  // ---- Lost-label scenario ---------------------------------------------------
+  // The Lost Labels scenario (Ryan Fletcher) was issued 3 x 27-inch Monitor, all scanned
+  // as DEMO-LOSTLABEL-A, so Returns shows ONE row: barcode A, issued 3,
+  // returnable 3. Pretend two of the three labels have come off. To test:
+  // The same row also holds 2 x HD Webcam (barcode DEMO-LOSTPAIR-A; -B is
+  // its registered replacement barcode).
+  //   1. Scan DEMO-LOSTLABEL-A once        -> row 1 / 3, + is still there
+  //   2. Click +, enter DEMO-LOSTLABEL-B   -> row 2 / 3, + is still there
+  //   3. Click +, enter DEMO-LOSTLABEL-B (or -C) again -> row 3 / 3, + gone
+  // Also try: a barcode that isn't registered (rejected -- add it under
+  // Products -> Edit first), the issued barcode A via + (rejected -- scan it),
+  // and - to take units back off (relabelled ones come off last).
+  await recordTxn({
+    type: 'OUT', staff: S.LostLabels,
+    items: [
+      { product: P.lostLabel, quantity: 3, barcodes: ['DEMO-LOSTLABEL-A'] },
+      { product: P.lostLabelPair, quantity: 2, barcodes: ['DEMO-LOSTPAIR-A'] },
+    ],
+    lendFrom: addDays(TODAY, -10), lendTo: addDays(TODAY, 5), dayOffset: -10,
+    notes: 'Seed: 3 units issued under one barcode -- for testing lost-label returns.',
+  })
 
   // =====================================================================
   // 6. LOAN REQUESTS -- every LoanRequestStatus, with a matching audit trail.
@@ -889,16 +1244,29 @@ async function main() {
     })
     // A couple of extra, unrelated stock-outs against the same staff member --
     // no loan request behind either one -- so the Issued per Staff report has
-    // more than a single transaction to expand and group for Demo Fulfilled
-    // Pickup: a multi-item pickup and a later single-item one.
+    // more than a single transaction to expand and group for the Fulfilled Pickup scenario
+    // Pickup: a multi-item pickup and a later single-item one. Both lines'
+    // barcodes come from recordTxn's walk-in default now (the Wireless Mouse's
+    // two, the Wi-Fi Router's one) -- quantity 2 on the Wireless Mouse simulates
+    // both of its barcodes having been scanned once each.
     await recordTxn({
       type: 'OUT', staff: S.FulfilledPickup,
-      items: [{ product: P.healthy, quantity: 1 }, { product: P.monthInterval, quantity: 2 }],
-      lendFrom: addDays(TODAY, -20), lendTo: addDays(TODAY, -13), dayOffset: -20,
+      items: [{ product: P.healthy, quantity: 2 }, { product: P.monthInterval, quantity: 2 }],
+      lendFrom: addDays(TODAY, -20), lendTo: addDays(TODAY, 10), dayOffset: -20,
     })
     await recordTxn({
       type: 'OUT', staff: S.FulfilledPickup, items: [{ product: P.indefinite, quantity: 1 }],
       lendFrom: addDays(TODAY, -6), lendTo: null, dayOffset: -6,
+    })
+    // Edge case: a product carrying ten barcodes at once, to see how the
+    // Issued per Staff report's expanded row handles a long list of them
+    // under one product (wrapping, row height, etc.) rather than just two.
+    // Quantity 10 to match -- ten distinct barcodes implies ten scans, so
+    // ten units issued, not one (see spreadQuantity in recordTxn
+    // above).
+    await recordTxn({
+      type: 'OUT', staff: S.FulfilledPickup, items: [{ product: P.manyBarcodes, quantity: 10 }],
+      lendFrom: addDays(TODAY, -3), lendTo: addDays(TODAY, 4), dayOffset: -3,
     })
   }
 
@@ -996,7 +1364,7 @@ async function main() {
 
   // =====================================================================
   // 7. MY REQUESTS (portal) -- a full spread of every tab/status combo on
-  //    ONE staff member (S.PortalLinked / demo.portallinked@example.com),
+  //    ONE staff member (S.PortalLinked / jessica.moore@gmail.com),
   //    so signing into the portal as them shows every possible "My
   //    Requests" outcome in one place, unlike section 6 above which
   //    deliberately spreads one status per staff member for the ADMIN's
@@ -1108,14 +1476,14 @@ async function main() {
   {
     const req = await createLoanRequest({
       staff: S.PortalLinked, status: 'fulfilled',
-      fromDate: addDays(TODAY, -8), toDate: addDays(TODAY, -1),
+      fromDate: addDays(TODAY, -8), toDate: addDays(TODAY, 6),
       lines: [{ product: P.fulfilled, requested: 2, offered: 2 }],
       createdDayOffset: -15, updatedDayOffset: -8,
     })
     await writeLoanUpdate({ request: req, dayOffset: -10, before: { status: 'pending' }, after: { status: 'accepted' } })
     const fulfillTxn = await recordTxn({
       type: 'OUT', staff: S.PortalLinked, items: [{ product: P.fulfilled, quantity: 2 }],
-      lendFrom: addDays(TODAY, -8), lendTo: addDays(TODAY, -1),
+      lendFrom: addDays(TODAY, -8), lendTo: addDays(TODAY, 6),
       linkedRequestId: req.id, linkedRequestRef: req.reference_no, dayOffset: -8,
     })
     await db.collection('loan_requests').doc(req.id).update({ status: 'fulfilled', fulfilled_txn_id: fulfillTxn.id, updated_at: isoAt(-8) })
@@ -1300,24 +1668,26 @@ async function main() {
   console.log('LOGINS:')
   console.log(`  BICS admin:      ${ADMIN_EMAIL} / password123               -> http://localhost:3000/login   (${ADMIN_NAME})`)
   console.log(`  Notifications:   administrator emails -> ${ADMIN_EMAIL}; sent from ${SYSTEM_FROM_EMAIL}`)
-  console.log('  Portal borrower: demo.portallinked@example.com / password123 -> http://localhost:3000/lend/login')
+  console.log(`  Portal borrower: ${S.PortalLinked.email} / password123 -> http://localhost:3000/lend/login`)
+  console.log('  Other staff with portal access (same password): ' + portalStaffKeys.filter((k) => k !== 'PortalLinked').map((k) => S[k].email).join(', '))
   console.log('')
   console.log('DASHBOARD -> Outstanding Returns: No Date / Overdue / Due Today / Not Due Yet /')
-  console.log('  Partly Resolved / Mixed holder / the Insufficient-cause overdue OUT / a')
-  console.log('  still-overdue partial return -- 8 rows in all, expand any "Demo --" one.')
+  console.log('  Partly Resolved / Mixed holder / the Insufficient-cause overdue OUT. Mostly Not')
+  console.log('  Due Yet, a few Due Today and No Return Date, and only a handful Overdue --')
+  console.log('  expand any row to see its items.')
   console.log('')
   console.log('DASHBOARD -> Incoming Pickups: On Schedule, Insufficient (x2 -- one with an')
   console.log('  overdue "likely cause" bullet, one with the fallback "worth a stock check"')
   console.log('  message), and Not Picked Up (one flips live on your next Dashboard load --')
   console.log('  reload fast to catch the badge -- one already recorded).')
   console.log('')
-  console.log('DASHBOARD -> Low Stock Alerts: "Demo Product -- Low Stock" and "-- Out of Stock".')
+  console.log(`DASHBOARD -> Low Stock Alerts: "${P.lowStock.name}" (low) and "${P.outOfStock.name}" (out of stock).`)
   console.log('')
-  console.log('LOAN REQUESTS: every status is represented -- expand any "Demo --" row on')
+  console.log('LOAN REQUESTS: every status is represented -- expand any row on')
   console.log('  Needs Review / Sent Counters, and check History for accepted/fulfilled/')
   console.log('  declined/expired/no_show/withdrawn.')
   console.log('')
-  console.log('MY REQUESTS (portal): sign in as demo.portallinked@example.com above, then')
+  console.log('MY REQUESTS (portal): sign in as the portal borrower above, then')
   console.log('  http://localhost:3000/lend/requests -- every tab (Needs your response,')
   console.log('  Awaiting Selouna, Upcoming, History) has several rows, and History alone')
   console.log('  has 12 -- past the 10-row page size, so its pagination footer has a real')
@@ -1325,14 +1695,27 @@ async function main() {
   console.log('')
   console.log('REPORTS: Stock Levels & Low Stock reflect the products above; Issued Per')
   console.log('  Staff and Transaction History include IN/OUT/RETURN/ADJUST activity across')
-  console.log('  every "Demo --" staff member; Returns has a full and a partial return.')
+  console.log('  every staff member; Returns has a full and a partial return.')
   console.log('')
-  console.log('PRODUCT IMAGES: every product above got 1-3 generated placeholder photos')
+  console.log(`MULTI-BARCODE: ${S.MultiBarcodeFull.full_name} (fully returned) and ${S.MultiBarcodePartial.full_name} (partly) each have a`)
+  console.log('  multi-product, multi-barcode Stock Out and a Return using exactly its barcodes;')
+  console.log('  a matching multi-barcode Stock In sits in Transaction History / Audit Log.')
+  console.log('')
+  console.log(`LOST LABELS: Returns -> "${S.LostLabels.full_name}" has one row per product (3 x ${P.lostLabel.name},`)
+  console.log(`  barcode DEMO-LOSTLABEL-A; 2 x ${P.lostLabelPair.name}, barcode DEMO-LOSTPAIR-A). Scan A once, then click + twice and enter`)
+  console.log('  DEMO-LOSTLABEL-B / -C: every unit can be returned, lost labels included.')
+  console.log('')
+  console.log('WHO IS WHO (each staff member demonstrates one scenario):')
+  for (const [key, , , , department] of staffSpecs) {
+    console.log(`  ${S[key].full_name.padEnd(20)} ${STAFF_SCENARIO[key]}`)
+  }
+  console.log('')
+  console.log('PRODUCT IMAGES: every product above got 1-3 product photos (scripts/catalog-images)')
   console.log('  uploaded to the Storage emulator -- check Browse or the Products page.')
   console.log('')
   console.log("AUDIT LOG: filter by entity to see product/category/staff/transaction/")
   console.log('  loan_request coverage -- including the new decline-of-a-counter rich')
-  console.log('  snapshot on "Demo -- Declined Counter Rich".')
+  console.log('  snapshot on "' + S.DeclinedCounterRich.full_name + '".')
   console.log('')
   console.log('Re-running this script adds a second batch of ledger/audit data on top of')
   console.log('this one (append-only, like the real app) -- clear the emulator data from')

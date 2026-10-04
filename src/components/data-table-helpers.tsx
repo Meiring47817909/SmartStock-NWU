@@ -1,6 +1,6 @@
 'use client'
 
-import { type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
   createColumnHelper,
   createSortedRowModel,
@@ -11,8 +11,9 @@ import {
   tableFeatures,
   type Column,
 } from '@tanstack/react-table'
-import { ArrowDown, ArrowUp, ArrowUpDown, Download } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, FileText } from 'lucide-react'
 import { cn, downloadCsv } from '@/lib/utils'
+import { downloadPdfTable, type PdfColumn } from '@/lib/pdf'
 import { Button } from '@/components/ui/button'
 import { CardFooter } from '@/components/ui/card'
 import {
@@ -107,6 +108,39 @@ export function ExportCsvButton<T>({
     >
       <Download className="size-3.5" />
       Export CSV
+    </Button>
+  )
+}
+
+// PDF twin of ExportCsvButton: same disabled-when-empty behaviour, and the
+// same row/column shape, plus a title printed at the top of the document.
+export function ExportPdfButton<T>({
+  filename, title, subtitle, columns, rows, className,
+}: {
+  filename: string
+  title: string
+  subtitle?: string | string[]
+  columns: PdfColumn<T>[]
+  rows: T[]
+  className?: string
+}) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <Button
+      variant="outline"
+      className={className}
+      disabled={rows.length === 0 || busy}
+      onClick={async () => {
+        setBusy(true)
+        try {
+          await downloadPdfTable({ filename, title, subtitle, columns, rows })
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      <FileText className="size-3.5" />
+      {busy ? 'Preparing…' : 'Export PDF'}
     </Button>
   )
 }

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { genRef } from '@/lib/utils'
 import { CheckCircle, X, Minus, Plus, Barcode } from 'lucide-react'
 import { db } from '@/lib/firebase/config'
+import { notifyAlertsChanged } from '@/lib/alertsBus'
 import { collection, addDoc, updateDoc, doc } from 'firebase/firestore'
 import { logAudit } from '@/lib/firebase/audit'
 import { findProductByBarcode } from '@/lib/firebase/products'
@@ -14,11 +15,20 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import type { Product, CartItem } from '@/types/database'
+import type { Product } from '@/types/database'
+import { groupRowsByProduct, totalForProduct, type ScanRow } from '@/lib/scanCart'
+
+// One row per (product, barcode): the same product scanned via two different
+// barcodes is two rows, each becoming its own transaction_lines document.
+type StockInRow = ScanRow & { barcode: string }
+
+function rowKey(i: StockInRow): string {
+  return `${i.product.id}|${i.barcode}`
+}
 
 export default function StockInPage() {
   const { user, profile } = useAuth()
-  const [cart, setCart] = useState<CartItem[]>([])
+  const [cart, setCart] = useState<StockInRow[]>([])
   const [barcodeInput, setBarcodeInput] = useState('')
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
@@ -28,12 +38,13 @@ export default function StockInPage() {
 
   async function lookupBarcode(barcode: string) {
     setError('')
+    const trimmedBarcode = barcode.trim()
     const product = await findProductByBarcode(barcode) as unknown as Product | null
     if (!product) { setError(`Barcode "${barcode}" not found`); return }
     setCart(prev => {
-      const existing = prev.find(i => i.product.id === product.id)
-      if (existing) return prev.map(i => i.product.id === product.id ? { ...i, quantity: i.quantity + 1 } : i)
-      return [...prev, { product, quantity: 1 }]
+      const existing = prev.find(i => i.product.id === product.id && i.barcode === trimmedBarcode)
+      if (existing) return prev.map(i => i === existing ? { ...i, quantity: i.quantity + 1 } : i)
+      return [...prev, { product, quantity: 1, barcode: trimmedBarcode }]
     })
     setBarcodeInput('')
   }
@@ -76,16 +87,21 @@ export default function StockInPage() {
         // quantities as they were at the time.
         after: {
           ...txnPayload,
-          line_count: cart.length,
+          line_count: groupRowsByProduct(cart).length,
           total_qty: cart.reduce((s, i) => s + i.quantity, 0),
-          lines: cart.map((i) => ({
-            product_id: i.product.id,
-            product_name: i.product.name,
-            quantity: i.quantity,
+          // One entry per product; barcodes is always an array (every
+          // distinct barcode scanned for it, one entry when only one was).
+          lines: groupRowsByProduct(cart).map((g) => ({
+            product_id: g.product.id,
+            product_name: g.product.name,
+            quantity: g.quantity,
+            barcodes: g.barcodes,
+            barcode_quantities: g.barcodeQuantities,
           })),
         },
       })
 
+      // One transaction_lines document per (product, barcode) row.
       for (const item of cart) {
         await addDoc(collection(db, 'transaction_lines'), {
           transaction_id: txnRef.id,
@@ -93,14 +109,20 @@ export default function StockInPage() {
           quantity: item.quantity,
           unit_cost: 0,
           product_name: item.product.name,
+          barcode: item.barcode,
           created_at: new Date().toISOString()
         })
-        await updateDoc(doc(db, 'products', item.product.id.toString()), {
-          quantity_on_hand: item.product.quantity_on_hand + item.quantity,
+      }
+      // Stock is incremented once per PRODUCT, not per row: rows for the
+      // same product would each start from the same stale quantity_on_hand.
+      for (const g of groupRowsByProduct(cart)) {
+        await updateDoc(doc(db, 'products', g.product.id.toString()), {
+          quantity_on_hand: g.product.quantity_on_hand + g.quantity,
           updated_at: new Date().toISOString()
         })
       }
       setReference(ref)
+      notifyAlertsChanged()
       setDone(true)
     } catch (err: any) {
       setError('Failed to create transaction. ' + err.message)
@@ -125,8 +147,13 @@ export default function StockInPage() {
     </div>
   )
 
+  // Narrow while empty; once the first item is scanned the page uses the full
+  // width/height like Returns, and the table scrolls inside the card. Removing
+  // every item drops it back to the narrow layout.
+  const expanded = cart.length > 0
+
   return (
-    <div className="max-w-[680px]">
+    <div className={expanded ? 'flex h-full min-h-0 flex-col' : 'max-w-[680px]'}>
       <div className="mb-6 space-y-1">
         <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Stock In</h1>
         <p className="text-sm text-[#5B4F67]">Receive new stock into the store</p>
@@ -138,12 +165,12 @@ export default function StockInPage() {
         </Alert>
       )}
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <Card className="rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
+      <form onSubmit={handleSubmit} className={expanded ? 'flex min-h-0 flex-1 flex-col gap-4' : 'flex flex-col gap-4'}>
+        <Card className={`rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0 ${expanded ? 'flex min-h-0 flex-1 flex-col' : ''}`}>
           <CardHeader className="border-b pt-4">
             <CardTitle className="flex items-center gap-2"><Barcode className="size-4" /> Scan Items</CardTitle>
           </CardHeader>
-          <CardContent className="py-4">
+          <CardContent className={`py-4 ${expanded ? 'flex min-h-0 flex-1 flex-col' : ''}`}>
             <div className="mb-4">
               <Input placeholder="Scan or type barcode, then press Enter…"
                 value={barcodeInput} onChange={e => setBarcodeInput(e.target.value)}
@@ -158,11 +185,12 @@ export default function StockInPage() {
             )}
 
             {cart.length > 0 && (
-              <div className="max-h-96 overflow-y-auto">
+              <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto">
               <Table>
                 <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
                   <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
                     <TableHead className="text-base font-bold text-[#2D203A]">Product</TableHead>
+                    <TableHead className="text-base font-bold text-[#2D203A]">Barcode</TableHead>
                     <TableHead className="text-base font-bold text-[#2D203A]">Current Stock</TableHead>
                     <TableHead className="text-base font-bold text-[#2D203A]">Receiving</TableHead>
                     <TableHead className="text-base font-bold text-[#2D203A]">After</TableHead>
@@ -171,30 +199,31 @@ export default function StockInPage() {
                 </TableHeader>
                 <TableBody>
                   {cart.map(item => (
-                    <TableRow key={item.product.id}>
+                    <TableRow key={rowKey(item)}>
                       <TableCell className="max-w-xs whitespace-normal">
                         <div className="break-words font-medium">{item.product.name}</div>
                       </TableCell>
+                      <TableCell className="max-w-xs font-mono text-xs whitespace-normal break-all text-muted-foreground">{item.barcode}</TableCell>
                       <TableCell className="text-muted-foreground">{item.product.quantity_on_hand}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1.5">
                           <Button type="button" variant="ghost" size="icon-sm"
-                            onClick={() => setCart(c => c.map(i => i.product.id === item.product.id ? { ...i, quantity: Math.max(1, i.quantity - 1) } : i))}>
+                            onClick={() => setCart(c => c.map(i => rowKey(i) === rowKey(item) ? { ...i, quantity: Math.max(1, i.quantity - 1) } : i))}>
                             <Minus className="size-3" />
                           </Button>
                           <span className="min-w-7 text-center font-bold">{item.quantity}</span>
                           <Button type="button" variant="ghost" size="icon-sm"
-                            onClick={() => setCart(c => c.map(i => i.product.id === item.product.id ? { ...i, quantity: i.quantity + 1 } : i))}>
+                            onClick={() => setCart(c => c.map(i => rowKey(i) === rowKey(item) ? { ...i, quantity: i.quantity + 1 } : i))}>
                             <Plus className="size-3" />
                           </Button>
                         </div>
                       </TableCell>
                       <TableCell className="font-semibold text-emerald-600">
-                        {item.product.quantity_on_hand + item.quantity}
+                        {item.product.quantity_on_hand + totalForProduct(cart, item.product.id)}
                       </TableCell>
                       <TableCell>
                         <Button type="button" variant="outline" size="icon-sm" className="border-[#D5C6E0] bg-[#F0EBF5] text-red-600 hover:bg-[#E4D9EE] hover:text-red-700"
-                          onClick={() => setCart(c => c.filter(i => i.product.id !== item.product.id))}>
+                          onClick={() => setCart(c => c.filter(i => rowKey(i) !== rowKey(item)))}>
                           <X className="size-3.5" />
                         </Button>
                       </TableCell>
@@ -217,7 +246,7 @@ export default function StockInPage() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm text-muted-foreground">
-                  {cart.reduce((s, i) => s + i.quantity, 0)} units · {cart.length} product{cart.length !== 1 ? 's' : ''}
+                  {cart.reduce((s, i) => s + i.quantity, 0)} units · {groupRowsByProduct(cart).length} product{groupRowsByProduct(cart).length !== 1 ? 's' : ''}
                 </span>
                 <Button type="submit" disabled={loading}>
                   {loading ? 'Processing…' : 'Confirm Receipt'}

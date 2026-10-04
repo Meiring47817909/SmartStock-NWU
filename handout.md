@@ -21,7 +21,7 @@ This document details the complete migration of the NWU BICS (Basic Inventory Co
 ### 3. Database Schema Re-architecture (PostgreSQL → NoSQL)
 * **NoSQL Adaptation:** Transitioned from a highly relational PostgreSQL schema to a document-oriented Firestore NoSQL schema. 
 * **Data Denormalization:** Addressed the "N+1 query problem" typical in NoSQL migrations by denormalizing related data. For example, instead of using cross-table joins, `staff_name`, `product_name`, and `product_sku` are now saved directly on the `transaction` documents when they are created. 
-* **Embedded Arrays:** Moved away from linking separate `transaction_lines` tables. Transaction line items are now directly embedded as an array inside their parent `transaction` document, allowing the application to fetch entire records atomically in a single query.
+* **Embedded Arrays — SUPERSEDED:** this was the original migration approach and is **no longer how the app works**. `transaction_lines` is a real Firestore collection (one doc per line, keyed by `transaction_id`), and since 2026-10-01 each line is per **(product, barcode)** — see "Session Handoff — 2026-10-01" at the bottom of this file. Treat the code as the source of truth.
 * **TypeScript Types:** Thoroughly updated `src/types/database.ts` to reflect the new document structures and resolve casting errors.
 
 ### 4. Page & Feature Migrations
@@ -1269,6 +1269,93 @@ Follow-up to cont. 9/10: instead of living inside the left column (Product detai
 The `min-w-0` chain from cont. 10 still applies exactly as before, just one link shorter: the chip's text wrapper, the chip row, and the chip list all still need it (long barcode content still has to not bubble up through those), but the left-column and two-column-grid links are gone since Barcodes no longer nests inside either — it goes straight from its own wrapper into `<form>`, then into the already-fixed `DialogPrimitive.Popup`.
 
 `npx tsc --noEmit` clean; `npx eslint` unchanged from cont. 10's baseline.
+
+
+# Session Handoff — 2026-10-01: per-barcode transaction lines, lost-label returns, barcode quantities everywhere, sidebar badge refresh
+
+Everything below was verified with `npx tsc --noEmit -p tsconfig.json` (clean). **None of it has been checked in a browser by the agent**, and none of it is committed. To see the seed changes, clear the emulator and re-run `npm run seed:comprehensive` on your own machine.
+
+## 1. Data model: `transaction_lines` are now per (product, barcode)
+
+- A Stock Out / Stock In / Return writes **one `transaction_lines` doc per (product, barcode)**, not one per product. `TransactionLine` (`src/types/database.ts`) gained `barcode?` and `issued_barcode?` (both optional so pre-existing data still reads).
+- Barcodes identify the **product**, not a unit. A product can have several registered barcodes; the same barcode can be on many units. So "×n" means "n units carrying this barcode", not n serial numbers.
+- **Never double-subtract.** Outstanding-return maths works per product, so any code that compares issued vs returned vs waived must first collapse lines with `collapseLinesByProduct` (`src/lib/transactionLines.ts`). It returns `barcodes`, `barcodeQuantities` and `barcodeLabels` per product. Already applied in `dashboardAlerts.ts`, Returns, the reports and the audit log.
+- Helpers: `src/lib/transactionLines.ts` — `collapseLinesByProduct`, `formatBarcodeQuantities`, `formatBarcodeLabels`, `openBarcodeQuantities(outLines, returnLines, waived)`; `src/lib/scanCart.ts` — `groupRowsByProduct` (returns `barcodeQuantities`), `totalForProduct`.
+- **Audit lines are frozen per product:** `{product_id, product_name, quantity, barcodes[], barcode_quantities[{barcode,quantity}], relabelled?[{from,to,quantity}]}`.
+- Firestore rejects `undefined` — optional fields are written as `null`.
+
+## 2. Stock In and Stock Out
+
+- Stock In now has per-barcode rows, and uses the full screen width once the first item is scanned (back to normal width when the cart is emptied), like Returns.
+- Stock Out's step indicator: any step you can click back to now has a rectangular outline (transparent border on non-clickable steps, so nothing shifts).
+
+## 3. Returns page — rewritten around exact barcode matching
+
+- One row per (Stock Out transaction, product, barcode) in **Items Currently Issued** (the separate "returning items" table was dropped). Columns: Product, Barcode, Ref, Issued, Returnable, Expected, Status, **Returns / Scanned**. Each scan returns one unit and must match **exactly** the barcode the item left with.
+- **− button** appears left of the scanned count once the row has a scan. **+ button** appears right of it while units on the row are still unscanned.
+- **Lost-label flow (the + button):** opens a dialog saying the product has lost its barcode; the admin must scan/type a replacement barcode. That barcode **must already be registered to that product** (Products → Edit) — an unregistered barcode is rejected, and so is the originally issued barcode (scan it instead). On success the unit counts as returned and the line is written with `issued_barcode` set to the barcode it left with.
+- **Option B (multi-unit):** the + can be used repeatedly on one row, and the same replacement barcode can be used for several units. The row shows "Label lost, returned as:" with one line per replacement barcode and its `×n` (a `×1` is shown even for one). − takes relabelled units off last.
+- Outstanding maths counts a return against `issued_barcode ?? barcode`. Page state: `OpenLine.relabels: string[]`; helpers `entriesOf`, `groupByProduct`, `decrementScanned`, `openRelabel`, `submitRelabel`; `returnedExact` is keyed by `issued_barcode ?? barcode`.
+- **Restart button** on the staff card goes back to "Identify Staff Member". If anything was scanned, a confirm dialog warns it will be discarded. Disabled while a return is processing.
+- The items table now sits **inside** the card (padded, rounded, bordered, same look as the Loan Requests expanded-row table) rather than edge to edge.
+
+## 4. Barcode quantities in audit log and reports
+
+- **Audit Log:** shows `barcode_quantities` on screen and in the CSV Details (`formatBarcodeQuantities`); relabelled units show as `from → to ×n`.
+- **Issued per Staff:** expanded row shows barcodes with `×n`; the quantity and Expected-at columns were swapped; the CSV gained an **Expected At** column placed right after **Issued At**.
+- **Returns report:** CSV is now **one row per return**. *Items Returned* = one product per line, " |"-separated, each with its barcode labels; *Outstanding Product* = one line per still-owed product with `×n` and the outstanding barcodes (`openBarcodeQuantities`); the old *Outstanding Qty* column is gone. Example shape: `Lost Label Kit ×3 [A ×1 | A → B ×1 | A → C ×1] |` ⏎ `Lost Label Pair ×1 [PAIR-A ×1]`.
+
+## 5. Products page — barcode safety
+
+- Each barcode chip shows a **unit-count bubble** (like the "Primary" bubble) from `getBarcodeUnitCounts` in `src/lib/firebase/products.ts`. It is a **floor**: stock received before barcode capture isn't counted.
+- **Removing a barcode is blocked** while units carrying it are still outstanding (`outstandingBlockMessage`, enforced again at Save time), and otherwise shows a confirm warning (`pendingRemoval`) that every product carrying that barcode must be re-labelled, with the count.
+
+## 6. Sidebar badges — now refresh when they should
+
+- Cause of "have to click Dashboard to update": Stock Out / Returns / Stock In never called `notifyAlertsChanged()` (`src/lib/alertsBus.ts`); the Sidebar only refetched on mount and on navigating to/from `/dashboard` and `/loan-requests`. All three pages now call it right after a successful confirm.
+- **Page refresh / staff-side changes:** `src/lib/firebase/freshDocs.ts` (`getDocsFresh`: `getDocsFromServer`, falling back to cache when offline) is used by `loadDashboardAlertCounts` and both loan-request alert counters, so a reload can't be answered from the IndexedDB cache. (Firestore uses `persistentLocalCache`; the cache being the cause is the best explanation, not a reproduced one.) The Sidebar also re-checks on window focus / tab visible and every 60 s, so a request or counter acceptance made on a staff device appears without admin action.
+- **Design that was deliberately kept:** an *accepted* counter offer leaves the **Loan Requests** badge (which counts `pending` + `countered`) and joins the **Dashboard** badge as an Incoming Pickup. Counting it in both would double-count. Change this only if asked.
+
+## 7. Seed data (`npm run seed:comprehensive`)
+
+- Lost-label demo: staff **"Demo Lost Labels -- Stuck Row"** has one Stock Out with **3 × Lost Label Kit** (barcode `DEMO-LOSTLABEL-A`; `-B`/`-C` registered) **and 2 × Lost Label Pair** (`DEMO-LOSTPAIR-A`; `-B` registered), so Returns shows two rows. Test: scan A once, + → B, + → B or C again; also try an unregistered barcode (rejected) and the issued barcode via + (rejected).
+- `seed-outstanding.mjs` and `seed-conflict-scenarios.mjs` were updated for per-barcode lines too.
+
+## 8. Other changes visible in git since the last entry (not made in this session)
+
+`git log` shows these commits after the 2026-09-28 entry; this handout has no details on them — read the diffs before relying on them:
+
+- `94943ab` **Removed NWU-CAS sign in** (deleted `(auth)/cas-callback/page.tsx` and `api/auth/cas/validate/route.ts`; touched login page, portal layout and portal profile). Earlier handoff sections that describe those CAS routes (e.g. the 2026-09-19 "manager role is gone" notes) are now **historical**.
+- `f5e7d03` Staff department field on its own line.
+- `9cdf7fc` Update send login email.
+- `a033b38` / `92029e9` UI overhaul commits.
+
+## Still to do / watch
+
+- Browser-verify the Returns layout, Restart button, Stock Out step outline and the sidebar badges after a refresh.
+- Unit counts on the Products page undercount stock received before barcode capture existed.
+- eslint still reports pre-existing `no-explicit-any` / `set-state-in-effect` / hook-deps warnings; none are regressions.
+
+---
+
+## Session Handoff — 2026-10-02: Mailpit (local email testing)
+
+Emails sent while developing against the emulators now land in a local inbox instead of going nowhere. Nothing can reach a real address.
+
+**Run it**
+1. Start Docker Desktop, then `npm run mailpit` (stop it with `npm run mailpit:stop`). Inbox: http://localhost:8025. SMTP: `127.0.0.1:1025`.
+2. `npm install` once (adds `nodemailer`), then `npm run dev:emulators` as usual.
+
+**How it works**
+- `src/lib/server/mailer.ts` — one `sendMail()` on `nodemailer`. It only sends when `MAIL_TRANSPORT=smtp`; with it unset it does nothing, so production is unchanged. Other vars: `SMTP_HOST` (default `127.0.0.1`), `SMTP_PORT` (default `1025`), `MAIL_FROM` (default `SmartStock NWU <no-reply@smartstock.local>`). `dev:emulators` sets the first three; plain `npm run dev` sets none.
+- **Local-only guard:** while either Firebase emulator variable is set, the mailer refuses any `SMTP_HOST` other than `127.0.0.1`, `localhost` or `::1`, so the seeded gmail addresses can never get real mail.
+- `src/lib/server/emailTemplates.ts` — shared SmartStock NWU layout (HTML + plain text, everything escaped) plus the two emails below.
+- **Login email:** `send-reset-email` now calls `deliverLoginEmail()`. With the mailer on it generates the reset link (`adminAuth.generatePasswordResetLink`) and sends our own email; otherwise it calls `sendPasswordResetEmail` exactly as before. If Mailpit is down the toast says "Mail server not reachable. Is Mailpit running? (npm run mailpit)".
+- **Stock Out confirmation:** after a Stock Out saves, the page calls `POST /api/notifications/stock-out` in the background. It honours the Settings → Notifications "Stock Out confirmation" toggle, skips staff with no email, and never blocks the Stock Out (failure shows a toast). It does not modify the transaction.
+
+**Other emails:** the loan-request, pickup and low-stock emails are covered in the Email notifications handoff below. Only the three timer-based ones (expired, overdue, insufficient pickup stock) are not built.
+
+Design and plan: `docs/superpowers/specs/2026-10-02-mailpit-foundation-design.md`, `docs/superpowers/plans/2026-10-02-mailpit-foundation.md`.
 
 ---
 

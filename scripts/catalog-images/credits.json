@@ -1,0 +1,472 @@
+{
+  "mechanical-keyboard": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "top-down view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "top-down view",
+      "prompt": "a full-size black mechanical keyboard with white backlit keycaps and a slim aluminium top plate. Camera angle: top-down view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "2.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "three-quarter angle view from the front left",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "three-quarter angle view from the front left",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: three-quarter angle view from the front left. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "3.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "low side profile view showing the key height",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "low side profile view showing the key height",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: low side profile view showing the key height. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "wireless-mouse": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "top view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "top view",
+      "prompt": "a compact ergonomic matte-black wireless optical mouse with a scroll wheel. Camera angle: top view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "2.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "side view",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "side view",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: side view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "monitor-27": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "front view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "front view",
+      "prompt": "a modern 27-inch IPS computer monitor with very thin bezels, a silver height-adjustable stand, showing a calm landscape wallpaper on screen. Camera angle: front view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "2.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "three-quarter angle view",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "three-quarter angle view",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: three-quarter angle view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "3.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "rear view showing the back panel and stand",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "rear view showing the back panel and stand",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: rear view showing the back panel and stand. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "hd-webcam": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "front view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "front view",
+      "prompt": "a small black HD USB webcam with a round lens and a clip-on stand. Camera angle: front view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "2.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "side view showing the clip",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "side view showing the clip",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: side view showing the clip. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "business-laptop": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "open, front view showing the screen and keyboard",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "open, front view showing the screen and keyboard",
+      "prompt": "a slim 14-inch silver business laptop with a black keyboard and a plain desktop wallpaper on screen. Camera angle: open, front view showing the screen and keyboard. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "2.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "closed, three-quarter top view",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "closed, three-quarter top view",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: closed, three-quarter top view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "3.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "side view showing the ports",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "side view showing the ports",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: side view showing the ports. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "desktop-pc": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "front view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "front view",
+      "prompt": "a compact black desktop PC tower case with a mesh front panel, a power button and two front USB ports. Camera angle: front view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "2.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "three-quarter angle view",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "three-quarter angle view",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: three-quarter angle view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "3.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "rear view showing the ports and fan",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "rear view showing the ports and fan",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: rear view showing the ports and fan. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "wifi-router": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "front view with antennas up",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "front view with antennas up",
+      "prompt": "a white dual-band Wi-Fi router with three upright antennas and a row of small LED indicators on the front. Camera angle: front view with antennas up. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "2.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "three-quarter angle view",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "three-quarter angle view",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: three-quarter angle view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "3.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "rear view showing the Ethernet ports and power socket",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "rear view showing the Ethernet ports and power socket",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: rear view showing the Ethernet ports and power socket. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "network-switch": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "front view showing the ports",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "front view showing the ports",
+      "prompt": "a grey 24-port rack-mountable gigabit Ethernet network switch with small green link LEDs. Camera angle: front view showing the ports. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "2.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "three-quarter angle view",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "three-quarter angle view",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: three-quarter angle view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "wireless-access-point": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "view from slightly below, as if mounted on a ceiling",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "view from slightly below, as if mounted on a ceiling",
+      "prompt": "a round white ceiling-mount Wi-Fi access point with a subtle status LED ring. Camera angle: view from slightly below, as if mounted on a ceiling. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "2.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "side view showing the thin profile and mounting plate",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "side view showing the thin profile and mounting plate",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: side view showing the thin profile and mounting plate. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "ups-battery-backup": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "front view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "front view",
+      "prompt": "a black tower UPS battery backup unit with an LCD display and a row of power outlets. Camera angle: front view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "2.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "three-quarter angle view",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "three-quarter angle view",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: three-quarter angle view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "3.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "rear view showing the outlets",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "rear view showing the outlets",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: rear view showing the outlets. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "surge-power-strip": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "top view showing the sockets",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "top view showing the sockets",
+      "prompt": "a white six-socket surge protector power strip with a lit on/off switch and a coiled power cord. Camera angle: top view showing the sockets. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "2.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "three-quarter angle view with the cord",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "three-quarter angle view with the cord",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: three-quarter angle view with the cord. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "external-hard-drive": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "three-quarter angle view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "three-quarter angle view",
+      "prompt": "a slim black portable 2TB external hard drive with a short USB cable beside it. Camera angle: three-quarter angle view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "2.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "top view",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "top view",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: top view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "ssd-1tb": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "top view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "top view",
+      "prompt": "a slim 2.5-inch SATA solid state drive in a plain dark grey metal case. Camera angle: top view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    },
+    {
+      "file": "2.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-image",
+      "angle": "side view",
+      "photographer": "AI-generated (gemini-3.1-flash-image)",
+      "page_url": "",
+      "tags": "side view",
+      "prompt": "Use the attached photo as the reference. Show exactly the same product -- identical design, colours, materials and proportions -- from this camera angle: side view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "usb-flash-drive": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "three-quarter angle view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "three-quarter angle view",
+      "prompt": "a small silver metal USB flash drive with a keyring loop, cap removed. Camera angle: three-quarter angle view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "hdmi-cable": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "three-quarter overhead view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "three-quarter overhead view",
+      "prompt": "a black braided HDMI cable, loosely coiled, with both connectors visible. Camera angle: three-quarter overhead view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "usb-c-cable": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "three-quarter overhead view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "three-quarter overhead view",
+      "prompt": "a white braided USB-C to USB-C charging cable, loosely coiled, with both connectors visible. Camera angle: three-quarter overhead view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "displayport-cable": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "three-quarter overhead view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "three-quarter overhead view",
+      "prompt": "a black DisplayPort video cable, loosely coiled, with both connectors visible. Camera angle: three-quarter overhead view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "ethernet-patch-cable": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "three-quarter overhead view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "three-quarter overhead view",
+      "prompt": "a blue Cat6 Ethernet patch cable, loosely coiled, with both RJ45 plugs visible. Camera angle: three-quarter overhead view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "toner-cartridge": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "three-quarter angle view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "three-quarter angle view",
+      "prompt": "a black laser printer toner cartridge, plain unbranded dark casing with a handle. Camera angle: three-quarter angle view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "a4-copy-paper": [
+    {
+      "file": "1.jpg",
+      "generated": true,
+      "model": "gemini-3.1-flash-lite-image",
+      "angle": "three-quarter angle view",
+      "photographer": "AI-generated (gemini-3.1-flash-lite-image)",
+      "page_url": "",
+      "tags": "three-quarter angle view",
+      "prompt": "a sealed ream of white A4 copy paper in plain white wrapping, 500 sheets. Camera angle: three-quarter angle view. Professional e-commerce product photo on a pure white seamless studio background, soft even lighting with a gentle contact shadow, the product centered and fully in frame with generous margin, square 1:1 composition, sharp focus, realistic. No text, no logos, no brand names, no watermark, no people, no hands."
+    }
+  ],
+  "power-bank": [
+    {
+      "file": "1.jpg",
+      "pixabay_id": 1787271,
+      "photographer": "jjur",
+      "page_url": "https://pixabay.com/photos/power-banks-technology-city-energy-1787271/",
+      "tags": "power banks, technology, city, energy, travel, charging, power, electricity, gray energy, gray bank, xiaomi, powerbank, power bank, xiaomi, xiaomi, xiaomi, powerbank, powerbank, powerbank, powerbank, power bank, power bank, power bank, power bank, power bank",
+      "width": 5472,
+      "height": 3080
+    },
+    {
+      "file": "2.jpg",
+      "pixabay_id": 4874592,
+      "photographer": "C10Maj",
+      "page_url": "https://pixabay.com/photos/charging-phone-power-bank-charger-4874592/",
+      "tags": "charging phone, power bank, charger, charge, battery, cable, energy, smartphone, powerbank, cellphone, device, electric, equipment, gadget, mobile, phone, power, smart, technology, telephone, usb, charging, electricity, charging phone, power bank, power bank, power bank, charger, charger, charger, charger, charger, powerbank, powerbank, powerbank",
+      "width": 5000,
+      "height": 3333
+    },
+    {
+      "file": "3.jpg",
+      "pixabay_id": 925569,
+      "photographer": "StockSnap",
+      "page_url": "https://pixabay.com/photos/power-bank-battery-technology-925569/",
+      "tags": "power bank, battery, technology, brown technology, brown bank, brown power, power bank, power bank, power bank, power bank, power bank",
+      "width": 3872,
+      "height": 2592
+    }
+  ],
+  "vga-cable": [
+    {
+      "file": "1.jpg",
+      "pixabay_id": 2202210,
+      "photographer": "WikimediaImages",
+      "page_url": "https://pixabay.com/photos/dvi-vga-adapter-2202210/",
+      "tags": "dvi, vga, adapter, dvi, dvi, dvi, dvi, dvi",
+      "width": 2240,
+      "height": 1700
+    }
+  ]
+}

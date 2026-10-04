@@ -82,6 +82,12 @@ body {
 /*
  ---break---
  */
+/* Product preview dialog leaves its full-screen mobile layout at this
+   width (see DialogContent's mobileFullScreen) -- narrower than sm. */
+@theme {
+  --breakpoint-dlg: 500px;
+}
+
 @theme inline {
   --font-heading:        var(--font-sans);
   --font-sans:        var(--font-sans);

@@ -27,9 +27,11 @@ import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { storageDownloadUrl } from "@/lib/firebase/storage";
 import {
   findBarcodeConflict,
+  getBarcodeUnitCounts,
   getProductDeleteBlockers,
   productDeleteBlockReason,
   type ProductDeleteBlockers,
+  type BarcodeUnitCount,
 } from "@/lib/firebase/products";
 import {
   findQuantityReductionConflicts,
@@ -54,6 +56,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AvailabilityDatePicker } from "@/components/portal/AvailabilityDatePicker";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -367,6 +370,11 @@ export default function ProductsPage() {
   // Transient text for the "type/paste a barcode" input in the Add/Edit
   // dialog — not part of form state since it's cleared on every add.
   const [barcodeInput, setBarcodeInput] = useState("");
+  // Units per barcode for the product being edited (null until loaded, or in
+  // Add mode, where nothing has been issued against a new product yet).
+  const [barcodeUnits, setBarcodeUnits] = useState<Record<string, BarcodeUnitCount> | null>(null);
+  // A saved barcode the admin clicked x on and hasn't confirmed removing yet.
+  const [pendingRemoval, setPendingRemoval] = useState<string | null>(null);
   // Builds the same "who's affected, what to do about it" message Stock
   // Out's own conflict alert uses, as a plain string for this form's single
   // bottom error slot. Checked on Save, same as every other validation on
@@ -434,6 +442,8 @@ export default function ProductsPage() {
     setEditing(null);
     setForm(EMPTY_FORM);
     setInitialForm(null);
+    setBarcodeUnits(null);
+    setPendingRemoval(null);
     setBarcodeInput("");
     setError("");
     setShowModal(true);
@@ -464,6 +474,11 @@ export default function ProductsPage() {
     // from it — see formsEqual/isUnchanged.
     setInitialForm(next);
     setBarcodeInput("");
+    setBarcodeUnits(null);
+    setPendingRemoval(null);
+    // Unit counts per barcode load in behind the dialog (bubbles appear when
+    // they land); removal re-fetches if they haven't.
+    getBarcodeUnitCounts(p.id.toString()).then(setBarcodeUnits).catch(() => setBarcodeUnits(null));
     setError("");
     setShowModal(true);
   }
@@ -483,6 +498,40 @@ export default function ProductsPage() {
 
   function removeBarcode(code: string) {
     setForm((f) => ({ ...f, barcodes: f.barcodes.filter((b) => b !== code) }));
+  }
+
+  const outstandingBlockMessage = (code: string, n: number) =>
+    `Can't remove "${code}": ${n} unit${n === 1 ? "" : "s"} issued under this barcode still need${n === 1 ? "s" : ""} to be returned. Process the return${n === 1 ? "" : "s"} first.`;
+
+  // x on a barcode chip. A barcode added in this same edit hasn't been saved,
+  // so no unit can carry it yet and it just comes off. A saved barcode may
+  // have units issued under it: if any still need returning it is refused
+  // outright (the Returns screen matches a scan against the barcode the item
+  // left with, so it would become unreturnable); otherwise the admin gets a
+  // warning with the unit count to confirm first.
+  async function requestRemoveBarcode(code: string) {
+    const saved = editing ? productBarcodes(editing) : [];
+    if (!saved.includes(code)) {
+      removeBarcode(code);
+      return;
+    }
+    let counts = barcodeUnits;
+    if (!counts) {
+      try {
+        counts = await getBarcodeUnitCounts(editing!.id.toString());
+        setBarcodeUnits(counts);
+      } catch {
+        setError("Couldn't check where this barcode is in use. Try again.");
+        return;
+      }
+    }
+    const n = counts[code]?.outstanding ?? 0;
+    if (n > 0) {
+      setError(outstandingBlockMessage(code, n));
+      return;
+    }
+    setError("");
+    setPendingRemoval(code);
   }
 
   async function copyBarcode(code: string) {
@@ -586,6 +635,22 @@ export default function ProductsPage() {
     // double-click on Save could otherwise slip through before the
     // debounced check has resolved.
     if (editing) {
+      // Re-checked against fresh data (not the counts loaded when the dialog
+      // opened): a barcode with units still to be returned can't come off.
+      const removed = productBarcodes(editing).filter((b) => !form.barcodes.includes(b));
+      if (removed.length > 0) {
+        try {
+          const counts = await getBarcodeUnitCounts(editing.id.toString());
+          const blocked = removed.find((b) => (counts[b]?.outstanding ?? 0) > 0);
+          if (blocked) {
+            setError(outstandingBlockMessage(blocked, counts[blocked].outstanding));
+            return;
+          }
+        } catch {
+          setError("Couldn't check whether the removed barcodes still have units to return. Try again.");
+          return;
+        }
+      }
       const offenders = await findQuantityReductionConflicts(editing.id.toString(), Number(form.quantity_on_hand));
       if (offenders.length > 0) {
         setError(formatQuantityConflictError(offenders));
@@ -1102,12 +1167,16 @@ export default function ProductsPage() {
                     />
                   </div>
                 </div>
-                <div className="grid gap-1.5">
+                {/* On wide screens the left column is stretched to the height of
+                    the right one (Availability + Photos), and the Description
+                    takes up all the spare height so its bottom edge lines up
+                    with the bottom of the photo list. */}
+                <div className="grid gap-1.5 md:flex-1 md:grid-rows-[auto_minmax(0,1fr)]">
                   <Label htmlFor="p-description">Description</Label>
                   <Textarea
                     id="p-description"
                     rows={2}
-                    className="max-h-24 resize-none overflow-y-auto"
+                    className="max-h-24 resize-none overflow-y-auto md:field-sizing-fixed md:h-full md:max-h-none md:min-h-24"
                     value={form.description}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, description: e.target.value }))
@@ -1126,18 +1195,6 @@ export default function ProductsPage() {
                     }
                   />
                 </div>
-                <div className="grid gap-1.5">
-                  <Label>Photos</Label>
-                  <MultiImageUploader
-                    images={form.images}
-                    max={MAX_IMAGES}
-                    disabled={!isAdmin}
-                    onImagesChange={(images) => setForm((f) => ({ ...f, images }))}
-                    urlFormatter={(image) =>
-                      image.file ? image.url : storageDownloadUrl(image.url)
-                    }
-                  />
-                </div>
               </div>
 
               {/* Right column: Product availability */}
@@ -1148,13 +1205,12 @@ export default function ProductsPage() {
                 <div className="grid grid-cols-2 items-start gap-3">
                   <div className="grid gap-1.5">
                     <Label htmlFor="p-lend-from">Available From</Label>
-                    <Input
+                    <AvailabilityDatePicker
                       id="p-lend-from"
-                      type="date"
+                      className="w-full"
                       min={todayDateStr()}
                       value={form.lend_from}
-                      onChange={(e) => {
-                        const nextLendFrom = e.target.value
+                      onChange={(nextLendFrom) => {
                         setForm((f) => ({
                           ...f,
                           lend_from: nextLendFrom,
@@ -1170,14 +1226,14 @@ export default function ProductsPage() {
                   </div>
                   <div className="grid gap-1.5">
                     <Label htmlFor="p-lend-to">Available To</Label>
-                    <Input
+                    <AvailabilityDatePicker
                       id="p-lend-to"
-                      type="date"
+                      className="w-full"
                       min={form.lend_from || todayDateStr()}
                       value={form.lend_to}
                       disabled={!form.lend_from}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, lend_to: e.target.value }))
+                      onChange={(next) =>
+                        setForm((f) => ({ ...f, lend_to: next }))
                       }
                     />
                     {!form.lend_from && (
@@ -1281,6 +1337,20 @@ export default function ProductsPage() {
                     )
                   })()}
                 </div>
+                <div className="grid gap-1.5">
+                  <h3 className="text-sm font-semibold text-muted-foreground">
+                    Photos
+                  </h3>
+                  <MultiImageUploader
+                    images={form.images}
+                    max={MAX_IMAGES}
+                    disabled={!isAdmin}
+                    onImagesChange={(images) => setForm((f) => ({ ...f, images }))}
+                    urlFormatter={(image) =>
+                      image.file ? image.url : storageDownloadUrl(image.url)
+                    }
+                  />
+                </div>
               </div>
             </div>
             <h3 className="text-sm font-semibold text-muted-foreground">
@@ -1338,11 +1408,34 @@ export default function ProductsPage() {
                                     Primary
                                   </Badge>
                                 )}
+                                {/* How many units carry this barcode, counted
+                                    from the barcodes scanned at Stock In / Out /
+                                    Return. Saved barcodes only -- one added in
+                                    this edit can't be on a unit yet. */}
+                                {editing && barcodeUnits && productBarcodes(editing).includes(code) && (
+                                  <>
+                                    <Badge
+                                      className="bg-sky-100 text-[10px] text-sky-800"
+                                      title={`${barcodeUnits[code]?.total ?? 0} unit(s) carry this barcode: ${barcodeUnits[code]?.inStock ?? 0} in stock, ${barcodeUnits[code]?.outstanding ?? 0} issued and not yet returned. Counted from recorded scans only.`}
+                                    >
+                                      {barcodeUnits[code]?.total ?? 0} {(barcodeUnits[code]?.total ?? 0) === 1 ? "unit" : "units"}
+                                    </Badge>
+                                    {(barcodeUnits[code]?.outstanding ?? 0) > 0 && (
+                                      <Badge className="bg-amber-100 text-[10px] text-amber-800">
+                                        {barcodeUnits[code].outstanding} out
+                                      </Badge>
+                                    )}
+                                  </>
+                                )}
                                 <button
                                   type="button"
-                                  onClick={() => removeBarcode(code)}
-                                  className="text-muted-foreground hover:text-red-600"
-                                  title="Remove barcode"
+                                  onClick={() => requestRemoveBarcode(code)}
+                                  className={`text-muted-foreground hover:text-red-600 ${editing && (barcodeUnits?.[code]?.outstanding ?? 0) > 0 && productBarcodes(editing).includes(code) ? "cursor-not-allowed opacity-40 hover:text-muted-foreground" : ""}`}
+                                  title={
+                                    editing && (barcodeUnits?.[code]?.outstanding ?? 0) > 0 && productBarcodes(editing).includes(code)
+                                      ? `${barcodeUnits![code].outstanding} unit(s) issued under this barcode still need to be returned — it can't be removed`
+                                      : "Remove barcode"
+                                  }
                                 >
                                   <X className="size-3" />
                                 </button>
@@ -1484,6 +1577,54 @@ export default function ProductsPage() {
               onClick={confirmDelete}
             >
               {deleteBusy ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm removing a SAVED barcode (one with nothing left to return --
+          if units are still out, requestRemoveBarcode refuses before this). */}
+      <Dialog open={pendingRemoval !== null} onOpenChange={(open) => { if (!open) setPendingRemoval(null); }}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Remove barcode?</DialogTitle>
+          </DialogHeader>
+          {pendingRemoval && (() => {
+            const c = barcodeUnits?.[pendingRemoval];
+            const n = c?.total ?? 0;
+            return (
+              <div className="grid gap-3 text-sm">
+                <p className="break-all font-mono text-xs">{pendingRemoval}</p>
+                <Alert className="border-amber-300 bg-amber-50 text-amber-900">
+                  <AlertDescription>
+                    {n > 0 ? (
+                      <>
+                        <strong>{n} unit{n === 1 ? "" : "s"}</strong> of this product currently carry this barcode
+                        {c ? ` (${c.inStock} in stock, ${c.outstanding} issued)` : ""}. Replace the label on
+                        {n === 1 ? " that unit" : <> all <strong>{n}</strong> units</>} with another barcode of this
+                        product. Once it is removed, anything still labelled with it will no longer scan.
+                      </>
+                    ) : (
+                      <>
+                        No units are recorded under this barcode, but stock received before barcodes were captured
+                        isn&apos;t counted. Make sure no unit still carries this label — once removed it will no
+                        longer scan.
+                      </>
+                    )}
+                  </AlertDescription>
+                </Alert>
+                <p className="text-xs text-muted-foreground">The barcode is only removed once you save the product.</p>
+              </div>
+            );
+          })()}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPendingRemoval(null)}>Cancel</Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => { if (pendingRemoval) removeBarcode(pendingRemoval); setPendingRemoval(null); }}
+            >
+              Remove barcode
             </Button>
           </DialogFooter>
         </DialogContent>

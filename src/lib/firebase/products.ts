@@ -16,6 +16,7 @@ import {
   type ReservationHolder,
 } from './loanRequests'
 import { loadWaivedByTxn, waivedQty } from './waivers'
+import { openBarcodeQuantities } from '../transactionLines'
 
 export async function findProductByBarcode(code: string): Promise<(Product & { id: string }) | null> {
   const trimmed = code.trim()
@@ -121,6 +122,74 @@ export async function getOutstandingHolders(productId: string): Promise<Outstand
     }
   })
   return holders
+}
+
+// How many physical units of a product carry each of its barcodes, worked out
+// from the barcodes recorded on Stock In / Stock Out / Return lines:
+//   outstanding -- issued under the barcode and not yet returned or written off
+//                  (a lost-label return counts against the barcode it was
+//                  ISSUED under)
+//   inStock     -- received under it (or returned wearing it) and not issued
+//   total       -- inStock + outstanding: every unit that bears this label
+// Only scans that recorded a barcode are counted, so stock received before
+// barcodes were captured isn't in here -- treat the numbers as a floor.
+export interface BarcodeUnitCount {
+  inStock: number
+  outstanding: number
+  total: number
+}
+
+export async function getBarcodeUnitCounts(productId: string): Promise<Record<string, BarcodeUnitCount>> {
+  const linesSnap = await getDocs(query(collection(db, 'transaction_lines'), where('product_id', '==', productId)))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lines = linesSnap.docs.map(d => d.data() as any)
+  if (lines.length === 0) return {}
+
+  const txnIds = Array.from(new Set(lines.map(l => l.transaction_id as string)))
+  const txnSnaps = await Promise.all(txnIds.map(id => getDoc(doc(db, 'transactions', id))))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const txnById = new Map<string, any>()
+  txnSnaps.forEach(s => { if (s.exists()) txnById.set(s.id, { id: s.id, ...s.data() }) })
+
+  const received = new Map<string, number>()
+  const issued = new Map<string, number>()
+  const returnedAs = new Map<string, number>()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const outLinesByTxn = new Map<string, any[]>()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const returnLinesByOut = new Map<string, any[]>()
+  const bump = (m: Map<string, number>, k: string, q: number) => m.set(k, (m.get(k) ?? 0) + q)
+
+  for (const l of lines) {
+    const t = txnById.get(l.transaction_id)
+    if (!t) continue
+    const q = l.quantity || 0
+    const code = typeof l.barcode === 'string' && l.barcode ? l.barcode : null
+    if (t.transaction_type === 'IN' && code) bump(received, code, q)
+    else if (t.transaction_type === 'OUT') {
+      if (code) bump(issued, code, q)
+      ;(outLinesByTxn.get(t.id) ?? outLinesByTxn.set(t.id, []).get(t.id)!).push(l)
+    } else if (t.transaction_type === 'RETURN') {
+      if (code) bump(returnedAs, code, q)
+      if (t.linked_txn_id) (returnLinesByOut.get(t.linked_txn_id) ?? returnLinesByOut.set(t.linked_txn_id, []).get(t.linked_txn_id)!).push(l)
+    }
+  }
+
+  const waivedByTxn = await loadWaivedByTxn()
+  const outstanding = new Map<string, number>()
+  outLinesByTxn.forEach((outLines, txnId) => {
+    const open = openBarcodeQuantities(outLines, returnLinesByOut.get(txnId) ?? [], waivedQty(waivedByTxn, txnId, productId))
+    open.forEach(o => bump(outstanding, o.barcode, o.quantity))
+  })
+
+  const result: Record<string, BarcodeUnitCount> = {}
+  const codes = new Set<string>([...received.keys(), ...issued.keys(), ...returnedAs.keys(), ...outstanding.keys()])
+  codes.forEach(code => {
+    const out = outstanding.get(code) ?? 0
+    const inStock = Math.max(0, (received.get(code) ?? 0) + (returnedAs.get(code) ?? 0) - (issued.get(code) ?? 0))
+    result[code] = { inStock, outstanding: out, total: inStock + out }
+  })
+  return result
 }
 
 export interface ProductDeleteBlockers {

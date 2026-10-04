@@ -100,7 +100,7 @@ async function upsertProduct(spec) {
     // below, which treats it as authoritative and keeps subtracting from
     // whatever's already there.
     await ref.set(payload, { merge: true })
-    return { id: ref.id, name: spec.name }
+    return { id: ref.id, name: spec.name, barcode: spec.barcode }
   }
   const ref = await db.collection('products').add({
     ...payload,
@@ -108,7 +108,7 @@ async function upsertProduct(spec) {
     created_at: now,
     images: [],
   })
-  return { id: ref.id, name: spec.name }
+  return { id: ref.id, name: spec.name, barcode: spec.barcode }
 }
 
 // ---- Staff these scenarios belong to ---------------------------------------
@@ -173,6 +173,8 @@ async function issueOut({ staff, items, lendFrom, lendTo, issuedAt }) {
       quantity: item.quantity,
       unit_cost: 0,
       product_name: item.product.name,
+      // Scanned at Stock Out in the real app; required to return it later.
+      barcode: item.product.barcode ?? null,
       created_at: issuedAt,
     })
     await db.collection('products').doc(item.product.id).update({

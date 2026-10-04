@@ -116,12 +116,12 @@ async function upsertProduct(spec) {
     // seed-outstanding.mjs — treat whatever's already there as authoritative.
     await ref.set(payload, { merge: true })
     const snap = await ref.get()
-    return { id: ref.id, name: spec.name, quantity_on_hand: snap.data()?.quantity_on_hand ?? spec.quantity_on_hand }
+    return { id: ref.id, name: spec.name, barcode: spec.barcode, quantity_on_hand: snap.data()?.quantity_on_hand ?? spec.quantity_on_hand }
   }
   const ref = await db.collection('products').add({
     ...payload, quantity_on_hand: spec.quantity_on_hand, created_at: now, images: [],
   })
-  return { id: ref.id, name: spec.name, quantity_on_hand: spec.quantity_on_hand }
+  return { id: ref.id, name: spec.name, barcode: spec.barcode, quantity_on_hand: spec.quantity_on_hand }
 }
 
 // Same three writes handleConfirm() makes in stock-out/page.tsx (transaction
@@ -141,7 +141,9 @@ async function issueOut({ staff, items, lendFrom, lendTo, issuedAt }) {
   for (const item of items) {
     await db.collection('transaction_lines').add({
       transaction_id: txnRef.id, product_id: item.product.id, quantity: item.quantity,
-      unit_cost: 0, product_name: item.product.name, created_at: issuedAt,
+      unit_cost: 0, product_name: item.product.name,
+      barcode: item.product.barcode ?? null, // scanned at Stock Out; required to return it later
+      created_at: issuedAt,
     })
     await db.collection('products').doc(item.product.id).update({
       quantity_on_hand: item.product.quantity_on_hand - item.quantity, updated_at: new Date().toISOString(),

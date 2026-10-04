@@ -1,5 +1,6 @@
 import 'server-only'
 import { adminDb } from '@/lib/firebase/admin'
+import { collapseLinesByProduct } from '@/lib/transactionLines'
 
 // Server-only twin of what used to live in lib/firebase/availability.ts —
 // moved here after the portal Browse page tripped a firestore.rules
@@ -61,7 +62,7 @@ export async function getExpectedReturnDates(
   })
 
   outTxns.forEach((t) => {
-    ;(linesByTxn[t.id] || []).forEach((l: any) => {
+    collapseLinesByProduct(linesByTxn[t.id] || []).forEach((l: any) => {
       if (!idSet.has(l.product_id)) return
       const issued = l.quantity || 0
       const returned = returnedByTxn[t.id]?.[l.product_id] ?? 0
