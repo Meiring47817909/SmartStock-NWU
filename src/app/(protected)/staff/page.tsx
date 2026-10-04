@@ -4,11 +4,11 @@ import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
 import { toast } from 'sonner'
 import { Search, Plus, Pencil, CreditCard, Mail, ChevronDown } from 'lucide-react'
-import { db } from '@/lib/firebase/config'
-import { collection, query, where, getDocs, addDoc, updateDoc, doc, orderBy } from 'firebase/firestore'
-import { logAudit } from '@/lib/firebase/audit'
-import { normalizeEmail, findStaffEmailConflict, postStaffAdmin } from '@/lib/firebase/staff'
-import { loadWaivers, createReturnWaiver } from '@/lib/firebase/waivers'
+import { normalizeEmail, postStaffAdmin } from '@/lib/firebase/staff'
+import {
+  createStaff, findStaffEmailConflict, listStaff, loadStaffHoldings, resolveHeldItem, setStaffActive, updateStaff,
+  type HeldItem as LentItem,
+} from '@/lib/api/staff'
 import { formatDateOnly, sentenceCase, todayDateStr } from '@/lib/utils'
 import { useAuth } from '@/context/AuthContext'
 import { useRole } from '@/context/RoleContext'
@@ -29,30 +29,15 @@ import {
 } from '@/components/ui/dialog'
 import { useTable, type SortingState } from '@tanstack/react-table'
 import { SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead } from '@/components/data-table-helpers'
-import type { StaffMember, ReturnWaiver } from '@/types/database'
-import { collapseLinesByProduct } from '@/lib/transactionLines'
+import type { StaffMember } from '@/types/database'
 
 // One item a staff member currently holds — an OUT line with a remaining
-// balance, or one that's been written off via Resolve. Mirrors the
-// Dashboard's Outstanding Returns columns (Product / Qty / Expected /
-// Status) minus the Staff column, which is the row you expanded from.
-interface LentItem {
-  key: string
-  // Kept alongside the display fields so an outstanding row can be resolved
-  // right here — same (transaction, product) pair the Dashboard's Resolve
-  // button writes a waiver against.
-  txn_id: string
-  product_id: string
-  product_name: string
-  qty: number
-  expected_date: string | null
-  // Written off already (via this page or the Dashboard): Selouna agreed
-  // the staff member keeps it. Kept visible here on purpose — this list is
-  // the record that replaces her having to write the item down somewhere.
-  // Never gets a Resolve button — there's nothing left to resolve.
-  waived: boolean
-}
-
+// balance, or one that's been written off via Resolve (Selouna agreed the
+// staff member keeps it; it stays listed, never gets a Resolve button). The
+// server works these out from the ledger (see getStaffHoldings); an outstanding
+// row keeps its (transaction, product) pair so it can be resolved right here —
+// same pair the Dashboard's Resolve button writes a waiver against. Shown in
+// the same shape as the Dashboard's Outstanding Returns rows.
 // Same urgency labels as the Dashboard's Outstanding Returns table, plus the
 // terminal written-off state that only exists on this page.
 function lentItemStatus(item: LentItem): { label: string; className: string } {
@@ -158,9 +143,9 @@ type FormData = {
 const EMPTY_FORM: FormData = { name: '', surname: '', email: '', department: '', card_uid: '' }
 
 export default function StaffPage() {
-  const { user, profile } = useAuth()
+  const { user } = useAuth()
   const { isAdmin } = useRole()
-  const [staff, setStaff] = useState<StaffMember[]>([])
+  const [allStaff, setAllStaff] = useState<StaffMember[]>([])
   const [search, setSearch] = useState('')
   // Active/Deactivated/Lending — the same three values the Status column
   // badges — as a multi-select rather than the Active/Deactivated-only tab
@@ -197,146 +182,47 @@ export default function StaffPage() {
 
   async function load() {
     setLoading(true)
-    const staffRef = collection(db, 'staff')
-    const snap = await getDocs(query(staffRef, orderBy('full_name')))
-
-    let data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[]
-    // Selouna's own self-service record (created via My Profile, so she can
-    // be picked as a Stock Out borrower) isn't a staff member to manage
-    // here -- exclude it rather than showing it as a confusing extra row.
-    data = data.filter(st => !st.is_admin_account)
-
-    const s = search.toLowerCase()
-    if (s) {
-      data = data.filter(st =>
-        (st.full_name && st.full_name.toLowerCase().includes(s)) ||
-        (st.department && st.department.toLowerCase().includes(s))
-      )
+    try {
+      // Selouna's own self-service record (created via My Profile, so she can
+      // be picked as a Stock Out borrower) isn't a staff member to manage
+      // here -- the server leaves it out unless asked for.
+      setAllStaff(await listStaff())
+    } catch (err) {
+      console.error(err)
     }
-
-    setStaff(data as StaffMember[])
     setLoading(false)
   }
 
-  // A staff member counts as "Lending" if they have at least one OUT line
-  // whose issued quantity hasn't been fully returned yet — the same
-  // correctly-scoped issued-vs-returned logic used on the Dashboard and
-  // Returns page (a return must be matched to its specific originating OUT
+  // Searching narrows what's already loaded -- no re-read per keystroke.
+  const needle = search.toLowerCase()
+  const staff = needle
+    ? allStaff.filter(st =>
+        (st.full_name && st.full_name.toLowerCase().includes(needle)) ||
+        (st.department && st.department.toLowerCase().includes(needle))
+      )
+    : allStaff
+
+  // A staff member counts as "Lending" if they hold at least one item: an OUT
+  // line whose issued quantity hasn't been fully returned yet, or one that's
+  // been written off (still in their possession). The server works this out
+  // from the ledger -- a return is matched to its specific originating OUT
   // transaction via linked_txn_id, not lumped into a flat per-product total
-  // — see returns/page.tsx's returnedByTxn comment for why that matters).
-  // Independent of the search box, so it's loaded once on mount rather than
-  // re-run on every keystroke like load() above.
+  // (see getStaffHoldings in src/server/data/staff.ts) -- and only lists staff
+  // who hold something. Independent of the search box, so it's loaded once on
+  // mount rather than re-run on every keystroke.
   async function loadLendingStatus() {
-    const waivers = await loadWaivers()
-    const outSnap = await getDocs(query(collection(db, 'transactions'), where('transaction_type', '==', 'OUT')))
-    const returnSnap = await getDocs(query(collection(db, 'transactions'), where('transaction_type', '==', 'RETURN')))
-    const outTxns = outSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
-    const returnTxns = returnSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
-
-    const relevantTxnIds = new Set([...outTxns.map(t => t.id), ...returnTxns.map(t => t.id)])
-    const linesSnap = await getDocs(collection(db, 'transaction_lines'))
-    const linesByTxn: Record<string, any[]> = {}
-    linesSnap.forEach(d => {
-      const l = d.data()
-      if (relevantTxnIds.has(l.transaction_id)) (linesByTxn[l.transaction_id] ??= []).push(l)
-    })
-
-    const returnedByTxn: Record<string, Record<string, number>> = {}
-    returnTxns.forEach(t => {
-      if (!t.linked_txn_id) return
-      const bucket = (returnedByTxn[t.linked_txn_id] ??= {})
-      ;(linesByTxn[t.id] || []).forEach((l: any) => {
-        bucket[l.product_id] = (bucket[l.product_id] ?? 0) + (l.quantity || 0)
-      })
-    })
-
-    // Written-off quantities, keyed [OUT txn][product] exactly like returns.
-    const waivedByTxn: Record<string, Record<string, number>> = {}
-    waivers.forEach((w: ReturnWaiver) => {
-      if (!w.transaction_id) return
-      const bucket = (waivedByTxn[w.transaction_id] ??= {})
-      const pid = String(w.product_id)
-      bucket[pid] = (bucket[pid] ?? 0) + (w.quantity || 0)
-    })
-
-    const lending = new Set<string>()
-    const byStaff: Record<string, LentItem[]> = {}
-    outTxns.forEach(t => {
-      if (!t.staff_id) return
-      const staffKey = t.staff_id.toString()
-      const lines = collapseLinesByProduct(linesByTxn[t.id] || [])
-      lines.forEach((l: any) => {
-        const issued = l.quantity || 0
-        const returned = returnedByTxn[t.id]?.[l.product_id] ?? 0
-        const waived = waivedByTxn[t.id]?.[String(l.product_id)] ?? 0
-        const remaining = issued - returned - waived
-        const bucket = (byStaff[staffKey] ??= [])
-
-        // Still owed back — this is what the Dashboard's Outstanding
-        // Returns keys off, and (along with the resolved/written-off case
-        // below) one of two things that make this row count as "Lending".
-        if (remaining > 0) {
-          bucket.push({
-            key: `${t.id}_${l.product_id}_open`,
-            txn_id: t.id,
-            product_id: String(l.product_id),
-            product_name: l.product_name ?? 'Unknown',
-            qty: remaining,
-            expected_date: t.lend_to ?? null,
-            waived: false,
-          })
-          lending.add(staffKey)
-        }
-
-        // Written off — no longer chased anywhere, but still in this
-        // person's possession, so it stays listed here. The Returns page
-        // no longer excludes waived quantity from what can be processed,
-        // so a written-off item CAN now actually come back — once a real
-        // return covers it, it needs to drop off this "No Return Due" row
-        // rather than sitting there forever. Any return beyond what the
-        // non-waived portion already accounts for (issued − waived) must
-        // have come out of the waived quantity, so subtract that overflow
-        // before deciding how much (if any) is still "written off".
-        const returnedBeyondOpenPortion = Math.max(0, returned - (issued - waived))
-        const effectiveWaived = Math.max(0, waived - returnedBeyondOpenPortion)
-        if (effectiveWaived > 0) {
-          bucket.push({
-            key: `${t.id}_${l.product_id}_waived`,
-            txn_id: t.id,
-            product_id: String(l.product_id),
-            product_name: l.product_name ?? 'Unknown',
-            qty: effectiveWaived,
-            expected_date: t.lend_to ?? null,
-            waived: true,
-          })
-          // A resolved item is still physically with the staff member —
-          // Resolve only stops it being CHASED, it doesn't hand the item
-          // back — so the roster row's Status should still read "Lending"
-          // even when every item they hold has been resolved, not fall
-          // back to "Active" as if they're holding nothing at all.
-          lending.add(staffKey)
-        }
-      })
-    })
-
-    // Same ordering as the Dashboard: most urgent first, undated after
-    // those, written-off last (nothing to chase, so it's reference only).
-    Object.values(byStaff).forEach(items => {
-      items.sort((a, b) => {
-        if (a.waived !== b.waived) return a.waived ? 1 : -1
-        if (!a.expected_date && !b.expected_date) return 0
-        if (!a.expected_date) return 1
-        if (!b.expected_date) return -1
-        return a.expected_date.localeCompare(b.expected_date)
-      })
-    })
-
-    setLendingStaffIds(lending)
-    setLentByStaff(byStaff)
+    try {
+      const holdings = await loadStaffHoldings()
+      const byStaff: Record<string, LentItem[]> = {}
+      for (const [staffId, holding] of Object.entries(holdings)) byStaff[staffId] = holding.items
+      setLendingStaffIds(new Set(Object.keys(byStaff)))
+      setLentByStaff(byStaff)
+    } catch (err) {
+      console.error(err)
+    }
   }
 
   useEffect(() => { load(); loadLendingStatus() }, [])
-  useEffect(() => { load() }, [search])
 
   function openAdd() {
     setEditing(null)
@@ -364,9 +250,9 @@ export default function StaffPage() {
     const name = form.name.trim()
     const surname = form.surname.trim()
     // Normalize once, up front — every place that stores or compares this
-    // email (this check, the Auth-sync call, the Firestore payload) has to
+    // email (this check, the Auth-sync call, the saved record) has to
     // agree on the same casing, or a duplicate could slip past by casing
-    // alone. See findStaffEmailConflict in src/lib/firebase/staff.ts.
+    // alone. See findStaffEmailConflict in src/lib/api/staff.ts.
     const normalizedEmail = form.email.trim() ? normalizeEmail(form.email) : null
 
     try {
@@ -382,7 +268,6 @@ export default function StaffPage() {
       const payload = {
         name,
         surname,
-        full_name: `${name} ${surname}`.trim(),
         email: normalizedEmail,
         department: form.department.trim() || null,
         card_uid: form.card_uid.trim() || null,
@@ -392,7 +277,7 @@ export default function StaffPage() {
         // If this record already has a linked login account and the email
         // actually changed, the Auth account's email has to be updated to
         // match — same account, same uid, never a second account. Do this
-        // BEFORE writing Firestore, and only proceed to the Firestore write
+        // BEFORE saving the staff record, and only proceed to the save
         // if it succeeds, so the two can never drift out of sync.
         const previousEmail = editing.email ? normalizeEmail(editing.email) : null
         let authEmailSynced = false
@@ -405,33 +290,13 @@ export default function StaffPage() {
           authEmailSynced = true
         }
 
-        const updated = { ...payload, updated_at: new Date().toISOString() }
-        await updateDoc(doc(db, 'staff', editing.id.toString()), updated)
-        logAudit({
-          userId: user?.uid, userName: profile?.full_name ?? user?.email,
-          action: 'update', entityType: 'staff', entityId: editing.id.toString(),
-          before: {
-            name: editing.name, surname: editing.surname, full_name: editing.full_name,
-            email: editing.email, department: editing.department, card_uid: editing.card_uid,
-          },
-          // Flags that this edit also re-pointed the linked login account,
-          // which decides where future password-reset links are delivered
-          // — a materially different act from editing a contact detail.
-          after: authEmailSynced ? { ...updated, auth_email_synced: true } : updated,
-        })
+        // The server writes the audit entry; auth_email_synced flags that this
+        // edit also re-pointed the linked login account, which decides where
+        // future password-reset links are delivered — a materially different
+        // act from editing a contact detail.
+        await updateStaff(editing.id.toString(), { ...payload, auth_email_synced: authEmailSynced })
       } else {
-        const created = {
-          ...payload,
-          is_active: true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }
-        const staffRef = await addDoc(collection(db, 'staff'), created)
-        logAudit({
-          userId: user?.uid, userName: profile?.full_name ?? user?.email,
-          action: 'create', entityType: 'staff', entityId: staffRef.id,
-          before: null, after: created,
-        })
+        await createStaff(payload)
       }
       setShowModal(false)
       load()
@@ -443,24 +308,10 @@ export default function StaffPage() {
 
   async function toggleActive(s: StaffMember) {
     try {
-      const nextActive = !s.is_active
-      await updateDoc(doc(db, 'staff', s.id.toString()), {
-        is_active: nextActive,
-        updated_at: new Date().toISOString()
-      })
-      // Include who this actually was, not just the boolean flip — a bare
-      // "is_active: true → false" in the Audit Log tells Selouna nothing
-      // about which staff member it was. name/surname/email are identical
-      // before and after (only is_active changes), so the generic FieldDiff
-      // view would filter them out as "unchanged"; audit-log/page.tsx's
-      // StaffStatusSummary reads them straight off `after` instead of
-      // diffing, specifically for this activate/deactivate case.
-      logAudit({
-        userId: user?.uid, userName: profile?.full_name ?? user?.email,
-        action: nextActive ? 'activate' : 'deactivate', entityType: 'staff', entityId: s.id.toString(),
-        before: { is_active: s.is_active, name: s.name, surname: s.surname, full_name: s.full_name, email: s.email },
-        after: { is_active: nextActive, name: s.name, surname: s.surname, full_name: s.full_name, email: s.email },
-      })
+      // The server writes the activate/deactivate audit entry, including who
+      // this actually was (not just the boolean flip) — audit-log/page.tsx's
+      // StaffStatusSummary reads name/surname/email straight off `after`.
+      await setStaffActive(s.id.toString(), !s.is_active)
       load()
     } catch (e) {
       console.error(e)
@@ -486,28 +337,8 @@ export default function StaffPage() {
         '/api/staff/send-reset-email', user, { staffId: s.id.toString() },
       )
       toast.success(`Login email sent to ${res.email}.`)
-      // Audit EVERY send, not only the first. Re-issuing a password-reset
-      // link into someone's inbox is a sensitive act and used to leave no
-      // trace at all. `res.linked` is the server's own answer to "did this
-      // call attach a new Auth account?" — more reliable than checking
-      // s.uid here, which misses re-provisioning after the linked account
-      // was deleted (the uid is set, but the account is gone and a new one
-      // is created).
-      const context = {
-        full_name: s.full_name,
-        email: res.email,
-        uid: res.uid,
-      }
-      logAudit({
-        userId: user.uid, userName: profile?.full_name ?? user.email,
-        action: res.linked ? 'grant_access' : 'resend_access',
-        entityType: 'staff', entityId: s.id.toString(),
-        // Identifying context, not a diff — the same shape the
-        // activate/deactivate entry uses, so the summary can read it
-        // straight off `after` instead of relying on what changed.
-        before: context,
-        after: context,
-      })
+      // The route audits EVERY send (grant_access when this call attached a
+      // new Auth account, resend_access otherwise), not only the first.
       if (res.linked) {
         load() // refresh so the row picks up the newly-linked uid
       }
@@ -844,16 +675,11 @@ export default function StaffPage() {
                 if (!resolving) return
                 setResolveBusy(true)
                 try {
-                  await createReturnWaiver({
+                  await resolveHeldItem(resolving.staffId, {
                     transactionId: resolving.item.txn_id,
                     productId: resolving.item.product_id,
-                    productName: resolving.item.product_name,
-                    staffId: Number(resolving.staffId),
-                    staffName: resolving.staffName,
                     quantity: resolving.item.qty,
                     reason: resolveReason.trim() || null,
-                    actorUid: user?.uid,
-                    actorName: profile?.full_name ?? user?.email,
                   })
                   toast.success(`${resolving.item.product_name} resolved — no return due.`)
                   setResolving(null)

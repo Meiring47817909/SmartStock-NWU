@@ -3,13 +3,13 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { updatePassword } from 'firebase/auth'
-import { auth, db } from '@/lib/firebase/config'
+import { auth } from '@/lib/firebase/config'
 import { newPasswordProblem } from '@/lib/firebase/passwordRules'
 import { confirmCurrentPassword } from '@/lib/firebase/reauth'
 import { requestEmailChange } from '@/lib/firebase/accountEmails'
-import { collection, query, where, getDocs, addDoc, updateDoc, doc, limit } from 'firebase/firestore'
 import { useAuth } from '@/context/AuthContext'
-import { postStaffAdmin } from '@/lib/firebase/staff'
+import { loadMe } from '@/lib/api/me'
+import { syncOwnEmail, updateOwnDetails } from '@/lib/api/staff'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Input } from '@/components/ui/input'
@@ -19,7 +19,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { nameInitials, avatarColorClass } from '@/lib/utils'
 import type { StaffMember } from '@/types/database'
 
-// Selouna's own record in the `staff` collection -- not a "real" staff
+// Selouna's own record in the `staff` table -- not a "real" staff
 // member, just what lets her show up as a borrower in Stock Out (which
 // reads exclusively from `staff`, see stock-out/page.tsx). Marked
 // is_admin_account so the Staff management page filters it back out.
@@ -43,9 +43,9 @@ function MyDetailsCard({
 
   async function load() {
     setLoadingDoc(true)
-    const snap = await getDocs(query(collection(db, 'staff'), where('uid', '==', uid), limit(1)))
-    if (!snap.empty) {
-      const d = { id: snap.docs[0].id, ...snap.docs[0].data() } as unknown as StaffMember
+    // The signed-in user's own staff row (the one whose uid is theirs), if any.
+    const { staff: d } = await loadMe()
+    if (d) {
       setStaffDoc(d)
       setName(d.name ?? '')
       setSurname(d.surname ?? '')
@@ -56,12 +56,11 @@ function MyDetailsCard({
   }
 
   useEffect(() => {
-    // Loads this admin's own `staff` record from Firestore on mount -- an
+    // Loads this admin's own `staff` record from the API on mount -- an
     // external system read, not state derivable from props, so it can't be
     // a lazy useState initializer.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid])
 
   async function handleSubmit(e: React.FormEvent) {
@@ -75,35 +74,18 @@ function MyDetailsCard({
     }
     setSaving(true)
     try {
-      const fullName = `${trimmedName} ${trimmedSurname}`.trim()
-      const payload = {
+      // The server saves the row (creating Selouna's own borrower record the
+      // first time) and keeps profiles.full_name -- what the sidebar footer
+      // and every transaction/audit-log entry attribute to her as "operator
+      // name" -- in sync with what she just typed here.
+      await updateOwnDetails({
         name: trimmedName,
         surname: trimmedSurname,
-        full_name: fullName,
         department: department.trim() || null,
         card_uid: cardUid.trim() || null,
-        updated_at: new Date().toISOString(),
-      }
-      if (staffDoc) {
-        await updateDoc(doc(db, 'staff', staffDoc.id.toString()), payload)
-      } else {
-        await addDoc(collection(db, 'staff'), {
-          ...payload,
-          email: authEmail || null,
-          uid,
-          is_admin_account: true,
-          is_active: true,
-          created_at: new Date().toISOString(),
-        })
-      }
-      // profiles/{uid}.full_name is what the sidebar footer and every
-      // transaction/audit-log entry attribute to her as "operator name" --
-      // firestore.rules blocks writing it from the client entirely, so this
-      // Admin SDK route keeps it in sync with what she just typed here.
-      if (auth.currentUser) {
-        await postStaffAdmin('/api/admin/update-name', auth.currentUser, { fullName })
-        onNameSynced()
-      }
+        email: authEmail || null,
+      })
+      onNameSynced()
       await load()
       toast.success('Details updated.')
     } catch (err) {
@@ -422,14 +404,11 @@ export default function AdminProfilePage() {
   async function handleEmailChanged(newEmail: string) {
     setEmail(newEmail)
     // Keep her own `staff` record's email in sync too, same "Auth first,
-    // then Firestore" ordering the Staff page uses when an admin changes
+    // then the database" ordering the Staff page uses when an admin changes
     // someone ELSE's linked email (see /api/staff/update-email) -- here
     // it's her own account, so the client SDK update above already
-    // succeeded before this Firestore write runs.
-    const snap = await getDocs(query(collection(db, 'staff'), where('uid', '==', user!.uid), limit(1)))
-    if (!snap.empty) {
-      await updateDoc(doc(db, 'staff', snap.docs[0].id), { email: newEmail, updated_at: new Date().toISOString() })
-    }
+    // succeeded before this save runs.
+    await syncOwnEmail(newEmail)
   }
 
   return (

@@ -1,7 +1,8 @@
 import 'server-only'
 import type { NextRequest } from 'next/server'
 import { eq } from 'drizzle-orm'
-import { VerifierUnavailableError, getRouteDb, verifyToken, type VerifiedToken } from '@/server/context'
+import { VerifierUnavailableError, getRouteDb, loadCaller, verifyToken, type Ctx, type VerifiedToken } from '@/server/context'
+import { findStaffOwningUid } from '@/server/data/staff'
 import { profiles } from '@/server/db/schema'
 
 // Shared helpers for the /api/staff/* routes (send-reset-email,
@@ -77,19 +78,20 @@ export async function assertAdmin(uid: string, message = 'Only admins can manage
   }
 }
 
-// Does any `staff` document already have this Firebase Auth UID linked?
+// Does any `staff` row already have this Firebase Auth UID linked?
 // Excludes `excludeStaffId` (the record currently being acted on) so a
 // record checking against its own already-linked UID doesn't flag itself.
 export async function findStaffDocOwningUid(
   uid: string,
   excludeStaffId?: string,
 ): Promise<{ id: string; full_name: string } | null> {
-  // Loaded on demand so importing this module never initialises Firebase Admin (Task 7 moves this lookup to PostgreSQL).
-  const { adminDb } = await import('@/lib/firebase/admin')
-  const snap = await adminDb.collection('staff').where('uid', '==', uid).get()
-  for (const d of snap.docs) {
-    if (d.id === excludeStaffId) continue
-    return { id: d.id, full_name: (d.data().full_name as string) ?? 'Unknown' }
-  }
-  return null
+  return findStaffOwningUid(getRouteDb(), uid, excludeStaffId)
+}
+
+// The data-layer context for a caller the route has already verified (see
+// requireAdmin / requireSignedIn): the same Ctx route() builds, for the
+// /api/staff/* and /api/admin/* routes that keep their own handler shape.
+export async function routeCtx(uid: string): Promise<Ctx> {
+  const db = getRouteDb()
+  return { db, caller: await loadCaller(db, uid), now: () => new Date() }
 }

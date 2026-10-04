@@ -46,3 +46,11 @@ export async function getMe(ctx: Ctx): Promise<{ profile: Profile | null; staff:
       : null,
   }
 }
+
+/** Set the caller's own `profiles.full_name` (the name the sidebar, transactions and audit entries show). Null when they have no profile. */
+export async function setOwnProfileName(ctx: Ctx, fullName: string): Promise<string | null> {
+  const uid = ctx.caller.uid
+  if (!uid) return null
+  const [row] = await ctx.db.update(profiles).set({ full_name: fullName }).where(eq(profiles.uid, uid)).returning({ full_name: profiles.full_name })
+  return row?.full_name ?? null
+}

@@ -1,9 +1,12 @@
 import 'server-only'
 import { NextRequest, NextResponse } from 'next/server'
-import { adminAuth, adminDb } from '@/lib/firebase/admin'
+import { adminAuth } from '@/lib/firebase/admin'
 import { auth as clientAuth } from '@/lib/firebase/config'
 import { sendPasswordResetEmail } from 'firebase/auth'
-import { ApiError, requireAdmin, findStaffDocOwningUid } from '@/lib/server/staffAdmin'
+import { ApiError, requireAdmin, findStaffDocOwningUid, routeCtx } from '@/lib/server/staffAdmin'
+import { DataError, type Ctx } from '@/server/context'
+import { getStaff, linkStaffLogin, logResendAccess } from '@/server/data/staff'
+import { staffUidConflictMessage } from '@/lib/staffRules'
 import { isMailEnabled, sendMail, MailUnreachableError, MailConfigError } from '@/lib/server/mailer'
 import { loginEmail } from '@/lib/server/emailTemplates'
 import { systemFromAddress } from '@/lib/server/notificationDelivery'
@@ -33,17 +36,31 @@ async function deliverLoginEmail(email: string, name: string): Promise<void> {
   }
 }
 
+// The email already went out, so an audit failure must not turn the response into an error (same as the old
+// fire-and-forget logAudit); it is logged instead.
+async function auditResend(ctx: Ctx, staffId: string, email: string, uid: string): Promise<void> {
+  try {
+    await logResendAccess(ctx, staffId, { email, uid })
+  } catch (err) {
+    console.error('send-reset-email: could not write the resend_access audit entry:', err)
+  }
+}
+
 /**
  * Provisions (if needed) and (re)sends a "set your password" email for a
  * staff member's lending-portal login. Safe to call any number of times —
  * see the handout ("Staff login — resolved auth model") for the full
  * decision tree this implements.
  *
- * Body: { staffId: string } — the Firestore document ID in `staff`.
+ * Body: { staffId: string } — the `staff.id`.
+ *
+ * Also writes the audit entry for the send (grant_access when this call linked
+ * an account, resend_access otherwise) — the Staff page no longer does.
  */
 export async function POST(request: NextRequest) {
   try {
-    await requireAdmin(request)
+    const { uid: adminUid } = await requireAdmin(request)
+    const ctx = await routeCtx(adminUid)
 
     const body = await request.json().catch(() => null)
     const staffId = typeof body?.staffId === 'string' ? body.staffId : null
@@ -51,12 +68,10 @@ export async function POST(request: NextRequest) {
       throw new ApiError(400, 'Missing staffId.')
     }
 
-    const staffRef = adminDb.collection('staff').doc(staffId)
-    const staffSnap = await staffRef.get()
-    if (!staffSnap.exists) {
+    const staffData = await getStaff(ctx, staffId)
+    if (!staffData) {
       throw new ApiError(404, 'Staff record not found.')
     }
-    const staffData = staffSnap.data()!
     const existingUid: string | undefined = staffData.uid || undefined
     const displayName: string = staffData.name || staffData.full_name || 'there'
 
@@ -75,6 +90,7 @@ export async function POST(request: NextRequest) {
       }
       if (linkedUser?.email) {
         await deliverLoginEmail(linkedUser.email, displayName)
+        await auditResend(ctx, staffId, linkedUser.email, linkedUser.uid)
         return NextResponse.json({ linked: false, email: linkedUser.email, uid: linkedUser.uid })
       }
     }
@@ -97,7 +113,8 @@ export async function POST(request: NextRequest) {
       // 3. No account exists for this email — create one. No password is
       // ever set; the reset email IS the "set your password" step.
       const created = await adminAuth.createUser({ email })
-      await staffRef.update({ uid: created.uid, updated_at: new Date().toISOString() })
+      // Saved (and audited) before the email goes out: a mail failure never undoes the link.
+      await linkStaffLogin(ctx, staffId, created.uid, email)
       await deliverLoginEmail(email, displayName)
       return NextResponse.json({ linked: true, email, uid: created.uid })
     }
@@ -106,21 +123,16 @@ export async function POST(request: NextRequest) {
     // needs the ownership check before touching anything.
     const conflict = await findStaffDocOwningUid(authUser.uid, staffId)
     if (conflict) {
-      throw new ApiError(
-        409,
-        `This email is already linked to another staff record (${conflict.full_name}). Fix the email or contact support before sending a login email.`,
-      )
+      throw new ApiError(409, staffUidConflictMessage(conflict.full_name))
     }
 
     // No other staff record claims this account (or this one already
     // does) — safe to (re)link and send.
-    if (staffData.uid !== authUser.uid) {
-      await staffRef.update({ uid: authUser.uid, updated_at: new Date().toISOString() })
-    }
+    await linkStaffLogin(ctx, staffId, authUser.uid, email)
     await deliverLoginEmail(email, displayName)
     return NextResponse.json({ linked: true, email, uid: authUser.uid })
   } catch (err) {
-    if (err instanceof ApiError) {
+    if (err instanceof ApiError || err instanceof DataError) {
       return NextResponse.json({ error: err.message }, { status: err.status })
     }
     console.error('send-reset-email failed:', err)
