@@ -494,6 +494,17 @@ export async function getRequestLines(requestId: string): Promise<LoanRequestLin
   return snap.docs.map((d) => ({ id: d.id, ...d.data() })) as unknown as LoanRequestLine[]
 }
 
+// Accepted, not-yet-fulfilled requests of one staff member: Stock Out's "pending
+// pickups". Broad read + client-side filter, same convention as the rest of this
+// file (see getReservedQuantity). Moved here from stock-out/page.tsx so the page
+// no longer imports firebase/firestore; the loan-request task replaces it.
+export async function getAcceptedPickups(staffId: string): Promise<LoanRequest[]> {
+  const snap = await getDocs(query(collection(db, 'loan_requests'), where('staff_id', '==', staffId)))
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as LoanRequest)
+    .filter((r) => r.status === 'accepted' && r.fulfilled_txn_id === null)
+}
+
 // No ActorInfo parameter, deliberately: this transition has no actor. It
 // is driven by a date passing, and fires on whichever page runs the lazy
 // pass first. Accepting an actor here and ignoring it would invite a

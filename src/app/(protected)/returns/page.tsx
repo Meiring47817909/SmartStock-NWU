@@ -1,14 +1,12 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { genRef, formatDateOnly, sentenceCase, todayDateStr } from '@/lib/utils'
+import { formatDateOnly, sentenceCase, todayDateStr } from '@/lib/utils'
 import { CreditCard, CheckCircle, Users, Search, RotateCcw, Barcode, Minus, Plus, AlertTriangle } from 'lucide-react'
-import { db } from '@/lib/firebase/config'
 import { notifyAlertsChanged } from '@/lib/alertsBus'
-import { collection, query, where, getDocs, addDoc, updateDoc, doc, getDoc, orderBy } from 'firebase/firestore'
-import { logAudit } from '@/lib/firebase/audit'
-import { findProductByBarcode } from '@/lib/firebase/products'
-import { useAuth } from '@/context/AuthContext'
+import { findProductByBarcode } from '@/lib/api/catalog'
+import { listStaff } from '@/lib/api/staff'
+import { listOutstandingForStaff, recordReturn } from '@/lib/api/stock'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
@@ -126,7 +124,6 @@ function groupByProduct(entries: ReturnEntry[]): { product_id: string; product_n
 }
 
 export default function ReturnsPage() {
-  const { user, profile } = useAuth()
   const [step, setStep] = useState<Step>('staff')
   const [staff, setStaff] = useState<StaffMember | null>(null)
   const [manualOverride, setManualOverride] = useState(false)
@@ -185,9 +182,9 @@ export default function ReturnsPage() {
 
   async function lookupUID(uid: string) {
     setError(''); setLoading(true)
-    const snap = await getDocs(query(collection(db, 'staff'), where('card_uid', '==', uid), where('is_active', '==', true)))
-    if (snap.empty) { setError('Card not registered. Use "Select manually".'); setLoading(false); return }
-    const data = { id: snap.docs[0].id, ...snap.docs[0].data() } as unknown as StaffMember
+    // The admin's own borrower record is included: she can be picked here.
+    const data = (await listStaff({ includeAdminAccount: true })).find(s => s.card_uid === uid && s.is_active)
+    if (!data) { setError('Card not registered. Use "Select manually".'); setLoading(false); return }
     await loadOpenItems(data, false)
     setLoading(false)
   }
@@ -198,134 +195,16 @@ export default function ReturnsPage() {
     setLoading(true)
     setError('')
 
-    const outTxnsSnap = await getDocs(query(
-      collection(db, 'transactions'),
-      where('staff_id', '==', s.id),
-      where('transaction_type', '==', 'OUT')
-    ))
-
-    if (outTxnsSnap.empty) {
-      setLines([]); linesRef.current = []
-      setUnscannable([])
-      setStep('items')
-      setLoading(false)
-      return
-    }
-
-    const returnTxnsSnap = await getDocs(query(
-      collection(db, 'transactions'),
-      where('staff_id', '==', s.id),
-      where('transaction_type', '==', 'RETURN')
-    ))
-
-    // transaction_lines is its own collection now (not an embedded array) —
-    // fetch it once and group by transaction_id.
-    const relevantTxnIds = new Set([
-      ...outTxnsSnap.docs.map(d => d.id),
-      ...returnTxnsSnap.docs.map(d => d.id),
-    ])
-    const linesSnap = await getDocs(collection(db, 'transaction_lines'))
-    const linesByTxn: Record<string, any[]> = {}
-    linesSnap.forEach(d => {
-      const l = d.data()
-      if (relevantTxnIds.has(l.transaction_id)) {
-        (linesByTxn[l.transaction_id] ??= []).push(l)
-      }
-    })
-
-    // Keyed by [originating OUT transaction id][product_id][barcode]. Scoped to
-    // the OUT transaction because a staff member can hold the same product from
-    // several Stock Outs, and a return against one must not shrink another.
-    // Scoped to the barcode because a Return line now carries the exact barcode
-    // that was scanned back, so units come off the matching barcode only.
-    // Returns recorded before barcodes existed carry none; those go in
-    // `legacyReturned` and are applied to the earliest slots below.
-    const returnedExact: Record<string, Record<string, Record<string, number>>> = {}
-    const legacyReturned: Record<string, Record<string, number>> = {}
-    returnTxnsSnap.forEach(doc => {
-      const txn = doc.data()
-      const linkedTxnId = txn.linked_txn_id as string | undefined
-      if (!linkedTxnId) return
-      const rlines = linesByTxn[doc.id] || []
-      rlines.forEach((l: any) => {
-        const q = l.quantity || 0
-        // A relabelled unit comes back under its NEW barcode but relieves the
-        // barcode it was ISSUED under, recorded as issued_barcode.
-        const relieves = (typeof l.issued_barcode === 'string' && l.issued_barcode) ? l.issued_barcode : l.barcode
-        if (typeof relieves === 'string' && relieves) {
-          const byProduct = (returnedExact[linkedTxnId] ??= {})
-          const byBarcode = (byProduct[l.product_id] ??= {})
-          byBarcode[relieves] = (byBarcode[relieves] ?? 0) + q
-        } else {
-          const bucket = (legacyReturned[linkedTxnId] ??= {})
-          bucket[l.product_id] = (bucket[l.product_id] ?? 0) + q
-        }
-      })
-    })
-
-    // Lines Selouna has written off (Dashboard → Resolve) are NOT
-    // excluded here. A write-off just means she's stopped chasing the
-    // item and it's no longer flagged as outstanding elsewhere (Dashboard,
-    // Staff page) — it doesn't mean the item can never physically come
-    // back. If it does turn up, it must still be processable as a normal
-    // return, so this page deliberately ignores waived quantity and bases
-    // returnable purely on what hasn't actually been returned yet.
-    const openLines: OpenLine[] = []
-    const noBarcode: UnscannableLine[] = []
-    outTxnsSnap.forEach(doc => {
-      const txn = doc.data()
-      const olines = linesByTxn[doc.id] || []
-
-      // Collapse this transaction's lines to product -> { barcode -> issued },
-      // keeping first-seen order; barcode-less units are tallied separately.
-      const byProduct = new Map<string, { name: string; issued: Map<string, number>; legacyIssued: number }>()
-      olines.forEach((l: any) => {
-        const entry = byProduct.get(l.product_id) ?? { name: l.product_name ?? 'Unknown', issued: new Map<string, number>(), legacyIssued: 0 }
-        const q = l.quantity || 0
-        if (typeof l.barcode === 'string' && l.barcode) entry.issued.set(l.barcode, (entry.issued.get(l.barcode) ?? 0) + q)
-        else entry.legacyIssued += q
-        byProduct.set(l.product_id, entry)
-      })
-
-      byProduct.forEach((entry, productId) => {
-        // Barcode-less returns first cancel barcode-less issues; any surplus
-        // is taken off the barcode slots in issue order.
-        const legacyRet = legacyReturned[doc.id]?.[productId] ?? 0
-        const legacyOpen = Math.max(0, entry.legacyIssued - legacyRet)
-        let surplus = Math.max(0, legacyRet - entry.legacyIssued)
-        if (legacyOpen > 0) noBarcode.push({ txn_ref: txn.reference_no ?? '', product_name: entry.name, quantity: legacyOpen })
-
-        entry.issued.forEach((issued, barcode) => {
-          const exact = returnedExact[doc.id]?.[productId]?.[barcode] ?? 0
-          const fromSurplus = Math.min(surplus, Math.max(0, issued - exact))
-          surplus -= fromSurplus
-          const alreadyReturned = exact + fromSurplus
-          const returnable = issued - alreadyReturned
-          if (returnable <= 0) return
-          openLines.push({
-            txn_id: doc.id,
-            txn_ref: txn.reference_no ?? '',
-            linked_request_id: (txn.linked_request_id as string | null) ?? null,
-            linked_request_ref: (txn.linked_request_ref as string | null) ?? null,
-            txn_date: txn.created_at ?? '',
-            line_id: `${doc.id}|${productId}|${barcode}`,
-            product_id: productId,
-            product_name: entry.name,
-            barcode,
-            issued_qty: issued,
-            already_returned: alreadyReturned,
-            returnable,
-            returning: 0,
-            relabels: [],
-            expected_date: txn.lend_to ?? null,
-          })
-        })
-      })
-    })
-
-    // Oldest Stock Out first, so a scan of a barcode held on two transactions
-    // settles the oldest one first.
-    openLines.sort((a, b) => a.txn_date.localeCompare(b.txn_date))
+    // What this staff member still has out, per Stock Out, product and barcode,
+    // oldest Stock Out first (so a scan of a barcode held on two transactions
+    // settles the oldest one first). The server replays the ledger: issued on
+    // an OUT line minus returned against that same OUT, per barcode, with
+    // barcode-less (legacy) units reported separately as `unscannable`.
+    // Written-off (waived) quantity is deliberately NOT excluded: a write-off
+    // (Dashboard -> Resolve) only means Selouna has stopped chasing the item;
+    // if it does turn up it must still be processable as a normal return.
+    const { lines: outstanding, unscannable: noBarcode } = await listOutstandingForStaff(s.id.toString())
+    const openLines: OpenLine[] = outstanding.map(l => ({ ...l, returning: 0, relabels: [] }))
     setLines(openLines); linesRef.current = openLines
     setUnscannable(noBarcode)
     setBarcodeInput('')
@@ -334,7 +213,7 @@ export default function ReturnsPage() {
   }
 
   // Fetched once per dialog-open, not per keystroke — previously this
-  // re-queried Firestore with `limit(20)` on every character typed, so a
+  // re-queried the database with `limit(20)` on every character typed, so a
   // staff member outside the first 20 active staff (alphabetically) could
   // never be found by typing their name. Now the full active roster is
   // fetched once and every keystroke just filters that in-memory list, so
@@ -343,8 +222,7 @@ export default function ReturnsPage() {
 
   async function loadAllStaff() {
     setStaffLoading(true)
-    const snap = await getDocs(query(collection(db, 'staff'), where('is_active', '==', true), orderBy('full_name')))
-    const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as StaffMember[]
+    const data = (await listStaff({ includeAdminAccount: true })).filter(st => st.is_active)
     setStaffAll(data)
     setStaffList(data)
     setStaffLoading(false)
@@ -478,97 +356,32 @@ export default function ReturnsPage() {
 
     const refs: string[] = []
     try {
+      // One RETURN per originating Stock Out, saved one after the other. The
+      // server writes each one's transaction, lines, stock increments and
+      // audit entry in one database transaction, so every RETURN is saved whole
+      // or not at all; if a later one fails, the earlier ones stay saved and
+      // the error is shown (see src/server/data/stock.ts).
       for (const [txnId, items] of Object.entries(byTxn)) {
-        const ref = genRef()
-
-        // Transaction header + one transaction_lines doc per line item —
-        // see stock-out/page.tsx for why this replaced the old embedded array.
-        const txnPayload = {
-          transaction_type: 'RETURN',
-          reference_no: ref,
-          staff_id: staff!.id,
-          staff_name: staff!.full_name,
-          // Who performed this movement. staff_id/staff_name is the
-          // borrower; this is the operator, and on a Stock In it is the
-          // only person involved at all.
-          user_id: user?.uid ?? null,
-          operator_name: profile?.full_name ?? user?.email ?? null,
-          linked_txn_id: txnId,
-          // Inherited from the Stock Out being returned against, so a
-          // return row reaches its loan request directly instead of
-          // requiring a second hop through the originating transaction.
-          linked_request_id: items[0]?.linked_request_id ?? null,
-          linked_request_ref: items[0]?.linked_request_ref ?? null,
-          manual_override: manualOverride,
+        const result = await recordReturn({
+          staffId: staff!.id.toString(),
+          linkedTxnId: txnId,
+          // One item per (product, barcode) that comes back. A unit with a
+          // replacement barcode is its own item (barcodes = the replacement,
+          // issuedBarcode = the one it left with).
+          items: entriesOf(items).map(e => ({
+            productId: e.product_id,
+            quantity: e.quantity,
+            barcodes: [e.barcode],
+            ...(e.issued_barcode ? { issuedBarcode: e.issued_barcode } : {}),
+          })),
+          manualOverride,
           notes: `Return of ${[...new Set(items.map(i => i.product_name))].join(', ')}` +
             (() => {
               const swaps = entriesOf(items).filter(e => e.issued_barcode).map(e => `${e.issued_barcode} → ${e.barcode} ×${e.quantity}`)
               return swaps.length > 0 ? `. Barcode lost, returned as: ${swaps.join(', ')}` : ''
             })(),
-          created_at: new Date().toISOString()
-        }
-        const txnRef = await addDoc(collection(db, 'transactions'), txnPayload)
-        logAudit({
-          userId: user?.uid, userName: profile?.full_name ?? user?.email,
-          action: 'create', entityType: 'transaction', entityId: txnRef.id,
-          before: null,
-          // Product lines are frozen into the audit entry, not just counted.
-          // They live in transaction_lines, which the audit log has to join
-          // to at display time - and a CSV export can't join. Without this a
-          // stock movement exports as "3 lines - 7 units" with no products,
-          // making any product-level audit question unanswerable. Frozen
-          // rather than joined so the entry also stays true to the names and
-          // quantities as they were at the time.
-          after: {
-            ...txnPayload,
-            line_count: groupByProduct(entriesOf(items)).length,
-            total_qty: items.reduce((s, i) => s + i.returning, 0),
-            // One entry per product; barcodes is always an array of every
-            // distinct barcode scanned back for it (exactly the ones issued).
-            lines: groupByProduct(entriesOf(items)).map((g) => ({
-              product_id: g.product_id,
-              product_name: g.product_name,
-              quantity: g.quantity,
-              barcodes: g.barcodes,
-              barcode_quantities: g.barcodeQuantities,
-              // Only present when a unit lost its barcode: from = the barcode
-              // it was issued under, to = the replacement now on it.
-              ...(g.relabelled.length > 0 ? { relabelled: g.relabelled } : {}),
-            })),
-          },
         })
-
-        // One transaction_lines document per (product, barcode).
-        for (const e of entriesOf(items)) {
-          await addDoc(collection(db, 'transaction_lines'), {
-            transaction_id: txnRef.id,
-            product_id: e.product_id,
-            quantity: e.quantity,
-            unit_cost: 0,
-            product_name: e.product_name,
-            barcode: e.barcode,
-            // Set only for a replacement-barcode unit: the barcode it was
-            // issued under, so the Stock Out line it settles can be found.
-            issued_barcode: e.issued_barcode,
-            created_at: new Date().toISOString()
-          })
-        }
-
-        refs.push(ref)
-      }
-
-      // Update stock quantities — fetch each product doc directly by ID
-      // rather than scanning the whole products collection per item.
-      // Once per PRODUCT across every scanned barcode row and transaction.
-      for (const g of groupByProduct(entriesOf(toReturn))) {
-        const pRef = doc(db, 'products', g.product_id)
-        const pSnap = await getDoc(pRef)
-        if (pSnap.exists()) {
-          await updateDoc(pRef, {
-            quantity_on_hand: (pSnap.data().quantity_on_hand || 0) + g.quantity,
-            updated_at: new Date().toISOString()
-          })
-        }
+        refs.push(result.reference_no)
       }
 
       setReferences(refs)

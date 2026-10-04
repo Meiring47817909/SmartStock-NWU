@@ -1,14 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import { genRef } from '@/lib/utils'
 import { CheckCircle, X, Minus, Plus, Barcode } from 'lucide-react'
-import { db } from '@/lib/firebase/config'
 import { notifyAlertsChanged } from '@/lib/alertsBus'
-import { collection, addDoc, updateDoc, doc } from 'firebase/firestore'
-import { logAudit } from '@/lib/firebase/audit'
-import { findProductByBarcode } from '@/lib/firebase/products'
-import { useAuth } from '@/context/AuthContext'
+import { findProductByBarcode } from '@/lib/api/catalog'
+import { recordStockIn } from '@/lib/api/stock'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
@@ -19,7 +15,7 @@ import type { Product } from '@/types/database'
 import { groupRowsByProduct, totalForProduct, type ScanRow } from '@/lib/scanCart'
 
 // One row per (product, barcode): the same product scanned via two different
-// barcodes is two rows, each becoming its own transaction_lines document.
+// barcodes is two rows, each becoming its own transaction_lines row.
 type StockInRow = ScanRow & { barcode: string }
 
 function rowKey(i: StockInRow): string {
@@ -27,7 +23,6 @@ function rowKey(i: StockInRow): string {
 }
 
 export default function StockInPage() {
-  const { user, profile } = useAuth()
   const [cart, setCart] = useState<StockInRow[]>([])
   const [barcodeInput, setBarcodeInput] = useState('')
   const [notes, setNotes] = useState('')
@@ -53,75 +48,16 @@ export default function StockInPage() {
     e.preventDefault()
     if (cart.length === 0) return
     setLoading(true); setError('')
-    const ref = genRef()
     try {
-      // Transaction header + one transaction_lines doc per line item — see
-      // stock-out/page.tsx for why this replaced the old embedded array.
-      const txnPayload = {
-        transaction_type: 'IN',
-        reference_no: ref,
-        // Who performed this movement. staff_id/staff_name is the
-        // borrower; this is the operator, and on a Stock In it is the
-        // only person involved at all.
-        user_id: user?.uid ?? null,
-        operator_name: profile?.full_name ?? user?.email ?? null,
-        // Stock arriving on the shelf is never against a loan request.
-        // Written explicitly so the field exists on every transaction and
-        // an empty CSV cell means "not applicable", not "not recorded".
-        linked_request_id: null,
-        linked_request_ref: null,
+      // The server writes the transaction, its lines, the stock increments and
+      // the audit entry in one go (see src/server/data/stock.ts), and says who
+      // the operator is from the signed-in admin. One item per (product,
+      // barcode) row.
+      const result = await recordStockIn({
+        items: cart.map(item => ({ productId: String(item.product.id), quantity: item.quantity, barcodes: [item.barcode] })),
         notes,
-        created_at: new Date().toISOString()
-      }
-      const txnRef = await addDoc(collection(db, 'transactions'), txnPayload)
-      logAudit({
-        userId: user?.uid, userName: profile?.full_name ?? user?.email,
-        action: 'create', entityType: 'transaction', entityId: txnRef.id,
-        before: null,
-        // Product lines are frozen into the audit entry, not just counted.
-        // They live in transaction_lines, which the audit log has to join
-        // to at display time - and a CSV export can't join. Without this a
-        // stock movement exports as "3 lines - 7 units" with no products,
-        // making any product-level audit question unanswerable. Frozen
-        // rather than joined so the entry also stays true to the names and
-        // quantities as they were at the time.
-        after: {
-          ...txnPayload,
-          line_count: groupRowsByProduct(cart).length,
-          total_qty: cart.reduce((s, i) => s + i.quantity, 0),
-          // One entry per product; barcodes is always an array (every
-          // distinct barcode scanned for it, one entry when only one was).
-          lines: groupRowsByProduct(cart).map((g) => ({
-            product_id: g.product.id,
-            product_name: g.product.name,
-            quantity: g.quantity,
-            barcodes: g.barcodes,
-            barcode_quantities: g.barcodeQuantities,
-          })),
-        },
       })
-
-      // One transaction_lines document per (product, barcode) row.
-      for (const item of cart) {
-        await addDoc(collection(db, 'transaction_lines'), {
-          transaction_id: txnRef.id,
-          product_id: item.product.id,
-          quantity: item.quantity,
-          unit_cost: 0,
-          product_name: item.product.name,
-          barcode: item.barcode,
-          created_at: new Date().toISOString()
-        })
-      }
-      // Stock is incremented once per PRODUCT, not per row: rows for the
-      // same product would each start from the same stale quantity_on_hand.
-      for (const g of groupRowsByProduct(cart)) {
-        await updateDoc(doc(db, 'products', g.product.id.toString()), {
-          quantity_on_hand: g.product.quantity_on_hand + g.quantity,
-          updated_at: new Date().toISOString()
-        })
-      }
-      setReference(ref)
+      setReference(result.reference_no)
       notifyAlertsChanged()
       setDone(true)
     } catch (err: any) {

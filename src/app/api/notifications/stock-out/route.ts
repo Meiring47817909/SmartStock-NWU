@@ -1,7 +1,12 @@
 import 'server-only'
 import { NextRequest, NextResponse } from 'next/server'
+import { asc, eq } from 'drizzle-orm'
 import { adminDb } from '@/lib/firebase/admin'
-import { requireAdmin, ApiError } from '@/lib/server/staffAdmin'
+import { requireAdmin, routeCtx, ApiError } from '@/lib/server/staffAdmin'
+import { DataError, type Ctx } from '@/server/context'
+import { getProduct } from '@/server/data/catalog'
+import { getStaff } from '@/server/data/staff'
+import { transactionLines, transactions } from '@/server/db/schema'
 import { isMailEnabled, sendMail, MailUnreachableError, MailConfigError } from '@/lib/server/mailer'
 import {
   stockOutConfirmationEmail, lowStockEmail, type StockOutEmailLine, type LowStockProduct,
@@ -17,7 +22,7 @@ interface TransactionDoc {
   transaction_type?: string
   reference_no: string
   staff_id?: unknown
-  staff_name?: string
+  staff_name?: string | null
   lend_from?: string | null
   lend_to?: string | null
 }
@@ -48,15 +53,16 @@ function skipped(reason: SkipReason | 'not_out'): StepResult {
 
 // The staff member's confirmation. Throws on a failed send.
 async function sendConfirmation(
+  ctx: Ctx,
   txn: TransactionDoc,
   lines: TransactionLineDoc[],
 ): Promise<StepResult> {
   // Missing or any non-false value means on, matching DEFAULT_NOTIFICATION_SETTINGS.
+  // (The notification settings still live in Firestore until the settings task moves them.)
   const settingsSnap = await adminDb.collection('settings').doc('notifications').get()
   if (settingsSnap.data()?.stock_out_confirmation === false) return skipped('toggle_off')
 
-  const staffSnap = txn.staff_id == null ? null : await adminDb.collection('staff').doc(String(txn.staff_id)).get()
-  const staffData = staffSnap?.data()
+  const staffData = txn.staff_id == null ? null : await getStaff(ctx, String(txn.staff_id))
   const staffEmail = typeof staffData?.email === 'string' ? staffData.email.trim() : ''
   if (!staffEmail) return skipped('no_email')
 
@@ -75,7 +81,7 @@ async function sendConfirmation(
 // above its reorder threshold to at/below it (including to zero). `after` is the
 // product's current on-hand (the page has already saved the decrement), so the
 // level before is after + issued.
-async function sendLowStock(transactionId: string, lines: TransactionLineDoc[]): Promise<StepResult> {
+async function sendLowStock(ctx: Ctx, transactionId: string, lines: TransactionLineDoc[]): Promise<StepResult> {
   const issued = new Map<string, { qty: number; fallbackName: string }>()
   for (const l of lines) {
     const key = String(l.product_id)
@@ -86,12 +92,12 @@ async function sendLowStock(transactionId: string, lines: TransactionLineDoc[]):
 
   const crossed: LowStockProduct[] = []
   for (const [productId, { qty, fallbackName }] of issued) {
-    const data = (await adminDb.collection('products').doc(productId).get()).data()
-    if (!data) continue
-    const after = Number(data.quantity_on_hand ?? 0)
-    const threshold = Number(data.reorder_threshold ?? 0)
+    const product = await getProduct(ctx, productId)
+    if (!product) continue
+    const after = Number(product.quantity_on_hand ?? 0)
+    const threshold = Number(product.reorder_threshold ?? 0)
     if (after + qty > threshold && after <= threshold) {
-      crossed.push({ name: data.name ?? fallbackName, onHand: after, threshold })
+      crossed.push({ name: product.name ?? fallbackName, onHand: after, threshold })
     }
   }
   if (crossed.length === 0) return { sent: false }
@@ -109,12 +115,11 @@ async function sendLowStock(transactionId: string, lines: TransactionLineDoc[]):
  * Emails after a Stock Out has been saved: a confirmation to the staff member,
  * and a low-stock alert to the admin inbox when the Stock Out took products
  * down to or below their reorder threshold. Called in the background by the
- * Stock Out page once the transaction and its lines are written; the Stock Out
- * never depends on this succeeding. Admin only: firestore.rules lets only
- * admins create transactions, so only an admin can have just completed a Stock
- * Out. Read-only: no document is modified.
+ * Stock Out page once the transaction and its lines are saved (the emails go out
+ * after that commit, never inside it); the Stock Out never depends on this
+ * succeeding. Admin only: only admins can record a Stock Out. Read-only: nothing is modified.
  *
- * Body: { transactionId: string } — the Firestore document ID in `transactions`.
+ * Body: { transactionId: string } — the id of the row in `transactions`.
  * Response: { sent, reason?, lowStock: { sent, reason? } } where `sent`/`reason`
  * describe the confirmation. `mail_disabled` and `not_out` return without
  * `lowStock`. The two emails are independent: one failing does not stop the
@@ -122,7 +127,7 @@ async function sendLowStock(transactionId: string, lines: TransactionLineDoc[]):
  */
 export async function POST(request: NextRequest) {
   try {
-    await requireAdmin(request)
+    const { uid } = await requireAdmin(request)
 
     const body = await request.json().catch(() => null)
     const transactionId = typeof body?.transactionId === 'string' ? body.transactionId : null
@@ -133,26 +138,30 @@ export async function POST(request: NextRequest) {
     // Cheapest check first: with the mailer off (production) nothing is read.
     if (!isMailEnabled()) return NextResponse.json(skipped('mail_disabled'))
 
-    const txnSnap = await adminDb.collection('transactions').doc(transactionId).get()
-    if (!txnSnap.exists) {
+    const ctx = await routeCtx(uid)
+    const [txn] = await ctx.db.select().from(transactions).where(eq(transactions.id, transactionId)).limit(1)
+    if (!txn) {
       throw new ApiError(404, 'Transaction not found.')
     }
-    const txn = txnSnap.data() as TransactionDoc
     if (txn.transaction_type !== 'OUT') return NextResponse.json(skipped('not_out'))
 
-    const linesSnap = await adminDb.collection('transaction_lines').where('transaction_id', '==', transactionId).get()
-    const lines = linesSnap.docs.map((d) => d.data() as TransactionLineDoc)
+    // In scan order, so "first-seen order" in the emails is the order the items were scanned.
+    const lines: TransactionLineDoc[] = await ctx.db
+      .select({ product_id: transactionLines.product_id, product_name: transactionLines.product_name, quantity: transactionLines.quantity })
+      .from(transactionLines)
+      .where(eq(transactionLines.transaction_id, transactionId))
+      .orderBy(asc(transactionLines.created_at), asc(transactionLines.line_no), asc(transactionLines.id))
 
     let firstError: unknown = null
     let confirmation: StepResult = { sent: false }
     let lowStock: StepResult = { sent: false }
     try {
-      confirmation = await sendConfirmation(txn, lines)
+      confirmation = await sendConfirmation(ctx, txn, lines)
     } catch (err) {
       firstError = err
     }
     try {
-      lowStock = await sendLowStock(transactionId, lines)
+      lowStock = await sendLowStock(ctx, transactionId, lines)
     } catch (err) {
       firstError ??= err
     }
@@ -160,7 +169,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ...confirmation, lowStock })
   } catch (err) {
-    if (err instanceof ApiError) {
+    if (err instanceof ApiError || err instanceof DataError) {
       return NextResponse.json({ error: err.message }, { status: err.status })
     }
     if (err instanceof MailUnreachableError) {

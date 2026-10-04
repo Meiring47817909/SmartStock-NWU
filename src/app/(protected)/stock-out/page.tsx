@@ -1,16 +1,15 @@
 'use client'
 
 import { Fragment, useEffect, useState, useRef, useCallback } from 'react'
-import { genRef, cn, todayDateStr, formatDateOnly, formatLendWindow } from '@/lib/utils'
+import { cn, todayDateStr, formatDateOnly, formatLendWindow } from '@/lib/utils'
 import { CreditCard, Barcode, CheckCircle, X, Plus, Minus, Users, Search, Info } from 'lucide-react'
-import { db } from '@/lib/firebase/config'
 import { notifyAlertsChanged } from '@/lib/alertsBus'
-import { collection, query, where, getDocs, getDoc, addDoc, updateDoc, doc, orderBy } from 'firebase/firestore'
-import { logAudit } from '@/lib/firebase/audit'
-import { findProductByBarcode } from '@/lib/firebase/products'
+import { findProductByBarcode, getProduct } from '@/lib/api/catalog'
+import { listStaff } from '@/lib/api/staff'
+import { recordStockOut } from '@/lib/api/stock'
 import { postStaffAdmin } from '@/lib/firebase/staff'
 import { toast } from 'sonner'
-import { getReservationHolders, reservationStatusLabel, resolutionInstruction, requestAuditSnapshot, OPEN_ENDED_TO, type ReservationHolder } from '@/lib/firebase/loanRequests'
+import { getReservationHolders, reservationStatusLabel, resolutionInstruction, getAcceptedPickups, getRequestLines, OPEN_ENDED_TO, type ReservationHolder } from '@/lib/firebase/loanRequests'
 import { useAuth } from '@/context/AuthContext'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
@@ -24,12 +23,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { ClipboardList } from 'lucide-react'
-import type { StaffMember, Product, CartItem, LoanRequest, LoanRequestLine } from '@/types/database'
+import type { StaffMember, Product, CartItem, LoanRequest } from '@/types/database'
 import { totalForProduct, groupRowsByProduct } from '@/lib/scanCart'
 
 // One row per (product, barcode) -- scanning a product via two different
 // barcodes gives two rows, each with its own quantity, and each becomes one
-// transaction_lines document. A row sourced from an accepted loan request
+// transaction_lines row. A row sourced from an accepted loan request
 // carries the id of the request it fulfils, so handleConfirm knows which
 // request to mark fulfilled. Those rows start with barcode null ("awaiting
 // scan") holding the offered quantity: every unit still has to be scanned, and
@@ -49,7 +48,7 @@ const STEPS: Step[] = ['staff', 'items', 'confirm']
 const STEP_LABELS = ['Identify Staff', 'Scan Items', 'Confirm']
 
 export default function StockOutPage() {
-  const { user, profile } = useAuth()
+  const { user } = useAuth()
   const [step, setStep] = useState<Step>('staff')
   const [staff, setStaff] = useState<StaffMember | null>(null)
   const [manualOverride, setManualOverride] = useState(false)
@@ -165,9 +164,9 @@ export default function StockOutPage() {
 
   async function lookupUID(uid: string) {
     setError(''); setLoading(true)
-    const snap = await getDocs(query(collection(db, 'staff'), where('card_uid', '==', uid), where('is_active', '==', true)))
-    if (snap.empty) { setError('Card not registered. Use "Select manually" to find this staff member.'); setLoading(false); return }
-    const data = { id: snap.docs[0].id, ...snap.docs[0].data() } as unknown as StaffMember
+    // The admin's own borrower record is included: she can be picked here.
+    const data = (await listStaff({ includeAdminAccount: true })).find(s => s.card_uid === uid && s.is_active)
+    if (!data) { setError('Card not registered. Use "Select manually" to find this staff member.'); setLoading(false); return }
     setStaff(data)
     setManualOverride(false)
     await loadPendingPickups(data)
@@ -175,14 +174,10 @@ export default function StockOutPage() {
     setLoading(false)
   }
 
-  // Broad read + client-side filter, same convention as the rest of this
-  // app's Firestore usage (see loanRequests.ts's getReservedQuantity).
+  // Loan requests still live in Firestore until the loan-request task moves
+  // them, so this read stays on loanRequests.ts (see getAcceptedPickups).
   async function loadPendingPickups(s: StaffMember) {
-    const snap = await getDocs(query(collection(db, 'loan_requests'), where('staff_id', '==', s.id.toString())))
-    const requests = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() }) as LoanRequest)
-      .filter((r) => r.status === 'accepted' && r.fulfilled_txn_id === null)
-    setPendingPickups(requests)
+    setPendingPickups(await getAcceptedPickups(s.id.toString()))
   }
 
   // Selecting a request populates the cart from its lines using
@@ -192,15 +187,13 @@ export default function StockOutPage() {
   // drive the fulfillment write in handleConfirm.
   async function selectRequest(r: LoanRequest) {
     setError(''); setLoading(true)
-    const linesSnap = await getDocs(query(collection(db, 'loan_request_lines'), where('request_id', '==', r.id)))
-    const lines = linesSnap.docs.map((d) => d.data() as LoanRequestLine).filter((l) => l.offered_quantity > 0)
+    const lines = (await getRequestLines(r.id)).filter((l) => l.offered_quantity > 0)
 
     const missing: string[] = []
     const items: StockOutCartItem[] = []
     for (const line of lines) {
-      const productSnap = await getDoc(doc(db, 'products', line.product_id))
-      if (!productSnap.exists()) { missing.push(line.product_name); continue }
-      const product = { id: productSnap.id, ...productSnap.data() } as unknown as Product
+      const product = await getProduct(line.product_id)
+      if (!product) { missing.push(line.product_name); continue }
       items.push({ product, quantity: Math.min(line.offered_quantity, product.quantity_on_hand), sourceRequestId: r.id, barcode: null })
     }
     if (missing.length > 0) setError(`Some items on this request no longer exist: ${missing.join(', ')}.`)
@@ -220,7 +213,7 @@ export default function StockOutPage() {
   }
 
   // Fetched once per dialog-open, not per keystroke — previously this
-  // re-queried Firestore with `limit(20)` on every character typed, so a
+  // re-queried the database with `limit(20)` on every character typed, so a
   // staff member outside the first 20 active staff (alphabetically) could
   // never be found by typing their name. Now the full active roster is
   // fetched once and every keystroke just filters that in-memory list, so
@@ -229,8 +222,7 @@ export default function StockOutPage() {
 
   async function loadAllStaff() {
     setStaffLoading(true)
-    const snap = await getDocs(query(collection(db, 'staff'), where('is_active', '==', true), orderBy('full_name')))
-    const data = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as StaffMember[]
+    const data = (await listStaff({ includeAdminAccount: true })).filter(st => st.is_active)
     setStaffAll(data)
     setStaffList(data)
     setStaffLoading(false)
@@ -306,112 +298,34 @@ export default function StockOutPage() {
     // value as "before the from date" and blocks the issue.
     if (lendTo && lendTo < lendFrom) { setError("Return (To) date can't be before the From date."); return }
     setLoading(true); setError('')
-    const ref = genRef()
     try {
-      // Create the transaction header first, then one transaction_lines
-      // document per line item (mirrors the original relational schema —
-      // a real flat, joinable table rather than an embedded array, which
-      // is what external BI tools like Looker Studio need).
-      const txnPayload = {
-        transaction_type: 'OUT',
-        reference_no: ref,
-        staff_id: staff.id,
-        staff_name: staff.full_name,
-        // Who performed this movement. staff_id/staff_name is the
-        // borrower; this is the operator, and on a Stock In it is the
-        // only person involved at all.
-        user_id: user?.uid ?? null,
-        operator_name: profile?.full_name ?? user?.email ?? null,
-        manual_override: manualOverride,
+      // The server writes the transaction header, one transaction_lines row
+      // per (product, barcode) row, the stock decrements, the audit entry
+      // and, when this Stock Out fulfils a loan request, marks that request
+      // fulfilled with its own audit entry, all in one database transaction
+      // (see src/server/data/stock.ts). Nothing is saved if any step fails,
+      // e.g. "Not enough stock for X." if the stock was taken meanwhile.
+      const result = await recordStockOut({
+        staffId: staff.id.toString(),
+        // Every row has been scanned (checked above), so barcode is set.
+        items: cart.map(item => ({ productId: String(item.product.id), quantity: item.quantity, barcodes: [item.barcode as string] })),
+        lendFrom,
+        lendTo: lendTo || null,
+        manualOverride,
         notes: manualOverride ? 'Staff selected manually (no card scan)' : '',
-        lend_from: lendFrom,
-        lend_to: lendTo || null,
-        linked_request_id: activeRequest?.id ?? null,
-        linked_request_ref: activeRequest?.reference_no ?? null,
-        created_at: new Date().toISOString()
-      }
-      const txnRef = await addDoc(collection(db, 'transactions'), txnPayload)
-      logAudit({
-        userId: user?.uid, userName: profile?.full_name ?? user?.email,
-        action: 'create', entityType: 'transaction', entityId: txnRef.id,
-        before: null,
-        // Product lines are frozen into the audit entry, not just counted.
-        // They live in transaction_lines, which the audit log has to join
-        // to at display time - and a CSV export can't join. Without this a
-        // stock movement exports as "3 lines - 7 units" with no products,
-        // making any product-level audit question unanswerable. Frozen
-        // rather than joined so the entry also stays true to the names and
-        // quantities as they were at the time.
-        after: {
-          ...txnPayload,
-          line_count: groupRowsByProduct(cart).length,
-          total_qty: cart.reduce((s, i) => s + i.quantity, 0),
-          // One entry per product; barcodes is always an array (every
-          // distinct barcode scanned for it, one entry when only one was).
-          lines: groupRowsByProduct(cart).map((g) => ({
-            product_id: g.product.id,
-            product_name: g.product.name,
-            quantity: g.quantity,
-            barcodes: g.barcodes,
-            barcode_quantities: g.barcodeQuantities,
-          })),
-        },
+        linkedRequestId: activeRequest?.id ?? null,
       })
-
-      // One transaction_lines document per (product, barcode) row.
-      for (const item of cart) {
-        await addDoc(collection(db, 'transaction_lines'), {
-          transaction_id: txnRef.id,
-          product_id: item.product.id,
-          quantity: item.quantity,
-          unit_cost: 0,
-          product_name: item.product.name,
-          barcode: item.barcode,
-          created_at: new Date().toISOString()
-        })
-      }
-      // Stock is decremented once per PRODUCT: several rows for the same
-      // product would each start from the same stale quantity_on_hand and
-      // the last write would win.
-      for (const g of groupRowsByProduct(cart)) {
-        await updateDoc(doc(db, 'products', g.product.id.toString()), {
-          quantity_on_hand: g.product.quantity_on_hand - g.quantity,
-          updated_at: new Date().toISOString()
-        })
-      }
-
-      if (activeRequest) {
-        const now = new Date().toISOString()
-        await updateDoc(doc(db, 'loan_requests', activeRequest.id), {
-          status: 'fulfilled', fulfilled_txn_id: txnRef.id, updated_at: now,
-        })
-        logAudit({
-          userId: user?.uid, userName: profile?.full_name ?? user?.email,
-          action: 'update', entityType: 'loan_request', entityId: activeRequest.id,
-          // Same full snapshot every other loan_request transition writes,
-          // so the fulfilled row lines up with the rest in the CSV export.
-          before: await requestAuditSnapshot(activeRequest),
-          after: await requestAuditSnapshot(activeRequest, {
-            status: 'fulfilled',
-            fulfilled_txn_id: txnRef.id,
-            // The transaction's own reference too: fulfilled_txn_id is a
-            // Firestore id, which is not something anyone can look up by
-            // eye. This is the half of the join a person can actually use.
-            fulfilled_txn_ref: ref,
-          }),
-        })
-      }
 
       // Notification emails: a confirmation to the staff member and, when a product
       // dropped to or below its reorder threshold, a low-stock alert to the admin
       // inbox. Background and best-effort: it never blocks or fails the Stock Out,
       // which is already saved above.
       if (user) {
-        postStaffAdmin('/api/notifications/stock-out', user, { transactionId: txnRef.id })
+        postStaffAdmin('/api/notifications/stock-out', user, { transactionId: result.id })
           .catch(() => toast.error("Stock Out saved, but the notification emails couldn't be sent."))
       }
 
-      setReference(ref)
+      setReference(result.reference_no)
       notifyAlertsChanged()
       setStep('done')
     } catch (err: any) {
