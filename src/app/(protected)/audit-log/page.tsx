@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
 import { formatDate, formatDateOnly, formatLendWindow, sentenceCase, todayDateStr } from '@/lib/utils'
 import { LENDING_INTERVALS } from '@/lib/loanRequestRules'
+import { toast } from 'sonner'
 import { loadAuditLog } from '@/lib/api/auditLog'
 import { useTable, type SortingState } from '@tanstack/react-table'
 import {
@@ -1001,7 +1002,14 @@ export default function AuditLogPage() {
         setLines(result.transactionLines)
         setLoanLines(result.loanRequestLines)
       } catch (err) {
+        if (cancelled) return
+        // Don't leave the previous range's rows on screen (and in the exports)
+        // under a date filter they don't answer.
         console.error('Failed to load the audit log', err)
+        setEntries([])
+        setLines({})
+        setLoanLines({})
+        toast.error(err instanceof Error ? err.message : 'Something went wrong.')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -1125,6 +1133,7 @@ export default function AuditLogPage() {
             redundant before snapshot (already the previous row's after)
             on every line. */}
         <ExportCsvButton
+          disabled={loading}
           filename={`audit-log-${todayDateStr()}.csv`}
           rows={sorted}
           columns={[
@@ -1140,6 +1149,7 @@ export default function AuditLogPage() {
         {/* Same entries and columns as the CSV, as a PDF table under an
             "Audit Log Report" title, with the Details column free of pipes. */}
         <ExportPdfButton
+          disabled={loading}
           filename={`audit-log-${todayDateStr()}.pdf`}
           title="Audit Log Report"
           subtitle={[
