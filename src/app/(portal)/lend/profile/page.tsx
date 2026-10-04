@@ -2,13 +2,10 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import {
-  EmailAuthProvider,
-  reauthenticateWithCredential,
-  updatePassword,
-} from 'firebase/auth'
+import { updatePassword } from 'firebase/auth'
 import { auth } from '@/lib/firebase/config'
 import { newPasswordProblem } from '@/lib/firebase/passwordRules'
+import { confirmCurrentPassword } from '@/lib/firebase/reauth'
 import { requestPasswordReset } from '@/lib/firebase/accountEmails'
 import { useStaffPortal } from '@/context/StaffPortalContext'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -60,8 +57,8 @@ function ChangePasswordCard({ email }: { email: string }) {
       // change its own password — reauthenticating with the current
       // password right here is what satisfies that, rather than sending
       // the staff member back through the login page first.
-      await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(email, currentPassword))
-      await updatePassword(auth.currentUser, newPassword)
+      const signedIn = await confirmCurrentPassword(currentPassword)
+      await updatePassword(signedIn, newPassword)
       toast.success('Password updated.')
       setCurrentPassword('')
       setNewPassword('')

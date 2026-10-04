@@ -2,13 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import {
-  EmailAuthProvider,
-  reauthenticateWithCredential,
-  updatePassword,
-} from 'firebase/auth'
+import { updatePassword } from 'firebase/auth'
 import { auth, db } from '@/lib/firebase/config'
 import { newPasswordProblem } from '@/lib/firebase/passwordRules'
+import { confirmCurrentPassword } from '@/lib/firebase/reauth'
 import { requestEmailChange } from '@/lib/firebase/accountEmails'
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, limit } from 'firebase/firestore'
 import { useAuth } from '@/context/AuthContext'
@@ -192,8 +189,8 @@ function ChangeEmailCard({ currentEmail, onEmailChanged }: { currentEmail: strin
     try {
       // Firebase requires a recent sign-in before it'll let the account
       // change its own email, same as the password change below.
-      await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(currentEmail, currentPassword))
-      await requestEmailChange(auth.currentUser, normalized)
+      const signedIn = await confirmCurrentPassword(currentPassword)
+      await requestEmailChange(signedIn, normalized)
       setPendingEmail(normalized)
       toast.success(`Confirmation link sent to ${normalized}.`)
       setNewEmail('')
@@ -305,7 +302,7 @@ function ChangeEmailCard({ currentEmail, onEmailChanged }: { currentEmail: strin
   )
 }
 
-function ChangePasswordCard({ email }: { email: string }) {
+function ChangePasswordCard() {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -329,8 +326,8 @@ function ChangePasswordCard({ email }: { email: string }) {
     if (!auth.currentUser) return
     setSaving(true)
     try {
-      await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(email, currentPassword))
-      await updatePassword(auth.currentUser, newPassword)
+      const signedIn = await confirmCurrentPassword(currentPassword)
+      await updatePassword(signedIn, newPassword)
       toast.success('Password updated.')
       setCurrentPassword('')
       setNewPassword('')
@@ -463,7 +460,7 @@ export default function AdminProfilePage() {
 
         <div className="flex flex-col gap-6 md:w-[480px]">
           <ChangeEmailCard currentEmail={email} onEmailChanged={handleEmailChanged} />
-          {email && <ChangePasswordCard email={email} />}
+          {email && <ChangePasswordCard />}
         </div>
       </div>
     </div>
