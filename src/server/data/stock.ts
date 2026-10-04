@@ -36,10 +36,14 @@ import type { ReturnWaiver, TxnType } from '@/types/database'
 // at all. Transactions, lines, waivers and audit entries are append-only; nothing here updates or deletes them.
 //
 // Locking, so two people working at once can't over-issue or over-return:
-//   - products being changed are locked FOR UPDATE in id order, and the stock check is made on the locked rows;
+//   - products being changed are locked in id order, and the stock check is made on the locked rows;
 //   - a Return or a waiver locks the OUT transaction row it settles before working out what is still outstanding;
 //   - a Stock Out against a loan request locks the request row.
-// Lock order is always: OUT transaction row, then products (by id), then the loan request.
+// Lock order is always: OUT transaction row, loan request, then products (by id).
+// All of them are FOR NO KEY UPDATE, not FOR UPDATE: nothing here changes a key column, and FOR UPDATE would conflict with
+// the FOR KEY SHARE lock Postgres takes on the parent row for every foreign-key check (a loan request's lines, a waiver
+// or a transaction line pointing at a product), which can deadlock against a plain insert that locks products in another
+// order. NO KEY UPDATE still conflicts with itself, so two saves on the same row still queue.
 
 const NOT_FOUND_STAFF = 'Staff record not found.'
 const NOTHING_TO_RESOLVE = 'Nothing outstanding to resolve for this item.'
@@ -82,9 +86,15 @@ function cleanItems(items: StockItemInput[] | undefined): CleanItem[] {
   })
 }
 
+function isRealDate(value: string): boolean {
+  const d = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value
+}
+
 function dateOrNull(value: unknown, label: string): string | null {
   if (value === undefined || value === null || value === '') return null
-  if (typeof value !== 'string' || !DATE_PATTERN.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
+  // Round-trip, so a shape-valid but impossible date (2026-02-30) is a 400 here and not a database error.
+  if (typeof value !== 'string' || !DATE_PATTERN.test(value) || !isRealDate(value)) {
     throw new DataError(400, `${label} must be a date (YYYY-MM-DD).`)
   }
   return value
@@ -98,10 +108,10 @@ function textOrNull(value: unknown): string | null {
 
 type ProductRow = typeof products.$inferSelect
 
-/** The products an item list touches, locked FOR UPDATE in id order. 404 when any is missing. */
+/** The products an item list touches, locked FOR NO KEY UPDATE in id order. 404 when any is missing. */
 async function lockProducts(c: Ctx, items: CleanItem[]): Promise<Map<string, ProductRow>> {
   const ids = [...new Set(items.map((i) => i.productId))]
-  const rows = await c.db.select().from(products).where(inArray(products.id, ids)).orderBy(asc(products.id)).for('update')
+  const rows = await c.db.select().from(products).where(inArray(products.id, ids)).orderBy(asc(products.id)).for('no key update')
   if (rows.length !== ids.length) throw new DataError(404, 'Product not found.')
   return new Map(rows.map((r) => [r.id, r]))
 }
@@ -117,12 +127,15 @@ async function registeredBarcodes(c: Ctx, productIds: string[]): Promise<Map<str
   return map
 }
 
-/** `quantity` units over `codes` (the first ones take the remainder), at least one unit per barcode used. */
+/**
+ * `quantity` units over the barcodes the caller named (the first ones take the remainder). Every barcode needs at least
+ * one unit: naming more barcodes than units is a 400, not a silent drop of the extra barcodes.
+ */
 function spread(codes: string[], quantity: number): { barcode: string; quantity: number }[] {
-  const n = Math.min(codes.length, quantity)
-  const base = Math.floor(quantity / n)
-  const extra = quantity - base * n
-  return codes.slice(0, n).map((barcode, i) => ({ barcode, quantity: base + (i < extra ? 1 : 0) }))
+  if (quantity < codes.length) throw new DataError(400, 'Each barcode needs at least one unit; give a larger quantity or fewer barcodes.')
+  const base = Math.floor(quantity / codes.length)
+  const extra = quantity - base * codes.length
+  return codes.map((barcode, i) => ({ barcode, quantity: base + (i < extra ? 1 : 0) }))
 }
 
 /** One transaction_lines row to write (one per product and barcode). */
@@ -147,7 +160,8 @@ function scanLines(item: CleanItem, product: ProductRow, registered: string[]): 
     return spread(item.barcodes, item.quantity).map((s) => ({ ...base, barcode: s.barcode, quantity: s.quantity }))
   }
   if (registered.length === 0) return [{ ...base, barcode: null, quantity: item.quantity }]
-  return spread(registered, item.quantity).map((s) => ({ ...base, barcode: s.barcode, quantity: s.quantity }))
+  // No barcodes named: the product's own, as many as there are units (a product with more barcodes than units uses the first).
+  return spread(registered.slice(0, item.quantity), item.quantity).map((s) => ({ ...base, barcode: s.barcode, quantity: s.quantity }))
 }
 
 /** Net change per product, in the order products first appear. */
@@ -226,6 +240,7 @@ async function writeMovement(c: Ctx, m: MovementArgs): Promise<StockMovementResu
   await c.db.insert(transactionLines).values(
     m.lines.map((l, i) => ({
       id: newId(),
+      line_no: i, // scan order within the transaction
       transaction_id: id,
       product_id: l.productId,
       product_name: l.productName,
@@ -233,9 +248,7 @@ async function writeMovement(c: Ctx, m: MovementArgs): Promise<StockMovementResu
       issued_barcode: l.issuedBarcode,
       quantity: l.quantity,
       unit_cost: l.unitCost,
-      // A millisecond apart, in the order the lines were scanned, so "issue order" (the first barcode issued, the
-      // first unit still out) is well defined when lines are read back ordered by created_at.
-      created_at: new Date(now.getTime() + i),
+      created_at: now,
     })),
   )
   for (const [productId, delta] of m.deltas) {
@@ -400,15 +413,10 @@ export async function recordStockOut(ctx: Ctx, input: StockOutInput): Promise<St
     const [holder] = await c.db.select().from(staff).where(eq(staff.id, staffId)).limit(1)
     if (!holder) throw new DataError(404, NOT_FOUND_STAFF)
 
-    const rows = await lockProducts(c, items)
-    const registered = await registeredBarcodes(c, [...rows.keys()])
-    const lines = items.flatMap((i) => scanLines(i, rows.get(i.productId) as ProductRow, registered.get(i.productId) ?? []))
-    const deltas = deltasOf(lines, -1)
-    assertEnoughStock(rows, deltas)
-
+    // The request row is locked before the products, the same order a request transition takes its locks in.
     let request: RequestRow | null = null
     if (linkedRequestId) {
-      const [found] = await c.db.select().from(loanRequests).where(eq(loanRequests.id, linkedRequestId)).for('update')
+      const [found] = await c.db.select().from(loanRequests).where(eq(loanRequests.id, linkedRequestId)).for('no key update')
       request = found ?? null
       if (!request) throw new DataError(404, 'Loan request not found.')
       if (request.staff_id !== staffId) throw new DataError(400, 'This loan request belongs to a different staff member.')
@@ -416,6 +424,13 @@ export async function recordStockOut(ctx: Ctx, input: StockOutInput): Promise<St
         throw new DataError(409, 'This loan request can no longer be fulfilled.')
       }
     }
+
+    const rows = await lockProducts(c, items)
+    const registered = await registeredBarcodes(c, [...rows.keys()])
+    const lines = items.flatMap((i) => scanLines(i, rows.get(i.productId) as ProductRow, registered.get(i.productId) ?? []))
+    const deltas = deltasOf(lines, -1)
+    assertEnoughStock(rows, deltas)
+
     const linkedRequestRef = request?.reference_no ?? null
 
     const result = await writeMovement(c, {
@@ -492,7 +507,7 @@ export async function recordReturn(ctx: Ctx, input: ReturnInput): Promise<StockM
   const manualOverride = input.manualOverride === true
 
   return inTx(ctx, async (c) => {
-    const [found] = await c.db.select().from(transactions).where(eq(transactions.id, linkedTxnId)).for('update')
+    const [found] = await c.db.select().from(transactions).where(eq(transactions.id, linkedTxnId)).for('no key update')
     const out = found ?? null
     if (!out || out.transaction_type !== 'OUT') throw new DataError(404, 'Stock Out not found.')
     if (out.staff_id !== staffId) throw new DataError(400, 'That Stock Out was not issued to this staff member.')
@@ -508,7 +523,7 @@ export async function recordReturn(ctx: Ctx, input: ReturnInput): Promise<StockM
       .select()
       .from(transactionLines)
       .where(and(eq(transactionLines.transaction_id, out.id), inArray(transactionLines.product_id, productIds)))
-      .orderBy(asc(transactionLines.created_at), asc(transactionLines.id))
+      .orderBy(asc(transactionLines.created_at), asc(transactionLines.line_no), asc(transactionLines.id))
     const returnLines = await c.db
       .select({
         product_id: transactionLines.product_id,
@@ -639,7 +654,7 @@ export async function createReturnWaiver(ctx: Ctx, input: CreateReturnWaiverInpu
       if (!holder) throw new DataError(404, NOT_FOUND_STAFF)
       holderName = holder.full_name
     }
-    const [found] = await c.db.select().from(transactions).where(eq(transactions.id, transactionId)).for('update')
+    const [found] = await c.db.select().from(transactions).where(eq(transactions.id, transactionId)).for('no key update')
     const out = found ?? null
     if (!out || out.transaction_type !== 'OUT' || (staffId !== null && out.staff_id !== staffId)) {
       throw new DataError(409, NOTHING_TO_RESOLVE)
@@ -647,7 +662,7 @@ export async function createReturnWaiver(ctx: Ctx, input: CreateReturnWaiverInpu
 
     const issued = await c.db
       .select({
-        name: sql<string>`(array_agg(${transactionLines.product_name} order by ${transactionLines.created_at}, ${transactionLines.id}))[1]`,
+        name: sql<string>`(array_agg(${transactionLines.product_name} order by ${transactionLines.created_at}, ${transactionLines.line_no}, ${transactionLines.id}))[1]`,
         total: sql<number>`sum(${transactionLines.quantity})::int`,
       })
       .from(transactionLines)
@@ -754,7 +769,7 @@ export async function listOutstandingForStaff(ctx: Ctx, staffId: string): Promis
     .select()
     .from(transactionLines)
     .where(inArray(transactionLines.transaction_id, outIds))
-    .orderBy(asc(transactionLines.created_at), asc(transactionLines.id))
+    .orderBy(asc(transactionLines.created_at), asc(transactionLines.line_no), asc(transactionLines.id))
   const returnLines = await ctx.db
     .select({
       out_id: sql<string>`${transactions.linked_txn_id}`,

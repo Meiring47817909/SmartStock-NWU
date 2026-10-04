@@ -440,16 +440,16 @@ describe('getStaffHoldings', () => {
       { id: 'in1', transaction_type: 'IN', reference_no: 'R8', created_at: T(8) },
     ])
     await db.insert(transactionLines).values([
-      { id: 'l1', transaction_id: 'out1', product_id: 'p1', product_name: 'Projector', quantity: 3, created_at: T(1) },
-      { id: 'l2', transaction_id: 'out1', product_id: 'p1', product_name: 'Projector', quantity: 2, created_at: T(1) },
-      { id: 'l3', transaction_id: 'out1', product_id: 'p2', product_name: 'Cable', quantity: 1, created_at: T(1) },
-      { id: 'l4', transaction_id: 'out2', product_id: 'p1', product_name: 'Projector', quantity: 1, created_at: T(2) },
-      { id: 'l5', transaction_id: 'out3', product_id: 'p3', product_name: 'Laptop', quantity: 1, created_at: T(3) },
-      { id: 'l6', transaction_id: 'out4', product_id: 'p3', product_name: 'Laptop', quantity: 2, created_at: T(4) },
-      { id: 'l7', transaction_id: 'ret1', product_id: 'p1', product_name: 'Projector', quantity: 2, created_at: T(5) },
-      { id: 'l8', transaction_id: 'ret3', product_id: 'p3', product_name: 'Laptop', quantity: 1, created_at: T(6) },
-      { id: 'l9', transaction_id: 'ret4', product_id: 'p3', product_name: 'Laptop', quantity: 1, created_at: T(7) },
-      { id: 'l10', transaction_id: 'in1', product_id: 'p1', product_name: 'Projector', quantity: 9, created_at: T(8) },
+      { id: 'l1', transaction_id: 'out1', product_id: 'p1', product_name: 'Projector', line_no: 0, quantity: 3, created_at: T(1) },
+      { id: 'l2', transaction_id: 'out1', product_id: 'p1', product_name: 'Projector', line_no: 0, quantity: 2, created_at: T(1) },
+      { id: 'l3', transaction_id: 'out1', product_id: 'p2', product_name: 'Cable', line_no: 0, quantity: 1, created_at: T(1) },
+      { id: 'l4', transaction_id: 'out2', product_id: 'p1', product_name: 'Projector', line_no: 0, quantity: 1, created_at: T(2) },
+      { id: 'l5', transaction_id: 'out3', product_id: 'p3', product_name: 'Laptop', line_no: 0, quantity: 1, created_at: T(3) },
+      { id: 'l6', transaction_id: 'out4', product_id: 'p3', product_name: 'Laptop', line_no: 0, quantity: 2, created_at: T(4) },
+      { id: 'l7', transaction_id: 'ret1', product_id: 'p1', product_name: 'Projector', line_no: 0, quantity: 2, created_at: T(5) },
+      { id: 'l8', transaction_id: 'ret3', product_id: 'p3', product_name: 'Laptop', line_no: 0, quantity: 1, created_at: T(6) },
+      { id: 'l9', transaction_id: 'ret4', product_id: 'p3', product_name: 'Laptop', line_no: 0, quantity: 1, created_at: T(7) },
+      { id: 'l10', transaction_id: 'in1', product_id: 'p1', product_name: 'Projector', line_no: 0, quantity: 9, created_at: T(8) },
     ])
     await db.insert(returnWaivers).values([
       { id: 'w1', transaction_id: 'out1', product_id: 'p2', product_name: 'Cable', staff_id: 'staff-1', quantity: 1 },

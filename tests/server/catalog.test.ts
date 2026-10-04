@@ -431,6 +431,7 @@ async function addLine(
     transaction_id: txn,
     product_id: product,
     product_name: 'p',
+    line_no: 0,
     quantity,
     barcode,
     issued_barcode,

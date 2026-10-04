@@ -416,7 +416,7 @@ async function computeHoldings(ctx: Ctx, onlyStaffId?: string): Promise<StaffHol
       staff_id: transactions.staff_id,
       lend_to: transactions.lend_to,
       product_id: transactionLines.product_id,
-      product_name: sql<string>`(array_agg(${transactionLines.product_name} order by ${transactionLines.created_at}, ${transactionLines.id}))[1]`,
+      product_name: sql<string>`(array_agg(${transactionLines.product_name} order by ${transactionLines.created_at}, ${transactionLines.line_no}, ${transactionLines.id}))[1]`,
       qty: sql<number>`sum(${transactionLines.quantity})::int`,
     })
     .from(transactions)
@@ -429,7 +429,7 @@ async function computeHoldings(ctx: Ctx, onlyStaffId?: string): Promise<StaffHol
       ),
     )
     .groupBy(transactions.id, transactions.staff_id, transactions.lend_to, transactions.created_at, transactionLines.product_id)
-    .orderBy(asc(transactions.created_at), asc(transactions.id), sql`min(${transactionLines.created_at})`, sql`min(${transactionLines.id})`)
+    .orderBy(asc(transactions.created_at), asc(transactions.id), sql`min(${transactionLines.created_at})`, sql`min(${transactionLines.line_no})`, sql`min(${transactionLines.id})`)
 
   // A return is matched to the specific OUT transaction it came back against (linked_txn_id), never lumped per product.
   const returnedRows: Qty[] = await ctx.db

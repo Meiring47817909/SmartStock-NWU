@@ -192,6 +192,7 @@ export const transactionLines = pgTable(
     product_name: text('product_name').notNull(), // frozen at write time
     barcode: text('barcode'),
     issued_barcode: text('issued_barcode'),
+    line_no: integer('line_no').notNull(), // 0-based scan order within the transaction ("issue order" reads by created_at, line_no)
     quantity: integer('quantity').notNull(),
     unit_cost: numeric('unit_cost', { mode: 'number' }).notNull().default(0),
     created_at: timestamptz('created_at').notNull().defaultNow(),

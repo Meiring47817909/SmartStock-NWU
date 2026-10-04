@@ -84,6 +84,7 @@ describe('schema', () => {
       transaction_id: t.id,
       product_id: p.id,
       product_name: 'Laptop',
+      line_no: 0,
       quantity: 1,
       unit_cost: '12.50' as never,
     })

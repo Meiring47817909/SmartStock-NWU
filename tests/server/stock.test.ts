@@ -74,6 +74,37 @@ async function holdRowLock(on: Db, table: 'products' | 'transactions', id: strin
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** Wait until `count` database sessions are blocked waiting for a lock (polls pg_stat_activity; fails after `timeoutMs`). */
+async function waitForLockWaiters(count: number, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const res = await db.execute(
+      sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`,
+    )
+    const waiting = (res.rows[0] as { n: number }).n
+    if (waiting >= count) return
+    if (Date.now() > deadline) throw new Error(`Timed out: ${waiting} of ${count} sessions waiting on a lock.`)
+    await sleep(10)
+  }
+}
+
+/**
+ * Hold FOR UPDATE on a row from a third connection, start every attempt, wait until all of them are blocked on that lock,
+ * then release it and settle them. Without the row lock in the code under test the attempts never block, and this times out.
+ */
+async function raceBehindLock<T>(table: 'products' | 'transactions', id: string, attempts: (() => Promise<T>)[]) {
+  const held = await holdRowLock(dbC, table, id)
+  try {
+    const all = Promise.allSettled(attempts.map((a) => a()))
+    await waitForLockWaiters(attempts.length)
+    held.release()
+    await held.done
+    return await all
+  } finally {
+    held.release()
+  }
+}
+
 beforeAll(async () => {
   db = await resetTestDb()
   dbB = getDb(POOL_B_URL)
@@ -205,6 +236,35 @@ describe('recordStockIn', () => {
       ['P1C', 1],
     ])
     expect(await qty('p1')).toBe(8)
+  })
+
+  it('uses only as many of the product barcodes as there are units when none are named, and writes lines in scan order', async () => {
+    await recordStockIn(adminCtx(), { items: [{ productId: 'p1', quantity: 1 }], notes: '' })
+    expect((await db.select().from(transactionLines)).map((l) => [l.barcode, l.quantity])).toEqual([['P1A', 1]])
+
+    const res = await recordStockIn(adminCtx(), {
+      items: [
+        { productId: 'p1', quantity: 1, barcodes: ['P1C'] },
+        { productId: 'p2', quantity: 1, barcodes: ['C1'] },
+        { productId: 'p1', quantity: 1, barcodes: ['P1A'] },
+      ],
+      notes: '',
+    })
+    const lines = (await db.select().from(transactionLines).where(eq(transactionLines.transaction_id, res.id))).sort((a, b) => a.line_no - b.line_no)
+    expect(lines.map((l) => [l.line_no, l.barcode])).toEqual([[0, 'P1C'], [1, 'C1'], [2, 'P1A']])
+    // Every line carries the transaction's one instant; line_no alone orders them.
+    const [txn] = await db.select().from(transactions).where(eq(transactions.id, res.id))
+    expect(new Set(lines.map((l) => l.created_at.getTime()))).toEqual(new Set([txn.created_at.getTime()]))
+  })
+
+  it('naming more barcodes than units is a 400 (no barcode is silently dropped); nothing is written', async () => {
+    await expectDataError(
+      recordStockIn(adminCtx(), { items: [{ productId: 'p1', quantity: 1, barcodes: ['P1A', 'P1B'] }], notes: '' }),
+      400,
+      'Each barcode needs at least one unit; give a larger quantity or fewer barcodes.',
+    )
+    expect(await db.select().from(transactions)).toHaveLength(0)
+    expect(await qty('p1')).toBe(5)
   })
 
   it('refuses a barcode that is not registered to the product, an empty list and a bad quantity; nothing is written', async () => {
@@ -340,17 +400,23 @@ describe('recordStockOut', () => {
     expect(await qty('p1')).toBe(5)
   })
 
+  it('impossible calendar dates are a 400, not a database error', async () => {
+    const items = [{ productId: 'p1', quantity: 1, barcodes: ['P1A'] }]
+    await expectDataError(recordStockOut(adminCtx(), { staffId: 'staff-1', items, lendFrom: '2026-02-30' }), 400, 'From date must be a date (YYYY-MM-DD).')
+    await expectDataError(recordStockOut(adminCtx(), { staffId: 'staff-1', items, lendFrom: '2026-02-01', lendTo: '2026-13-01' }), 400, 'Return (To) date must be a date (YYYY-MM-DD).')
+    await expectDataError(recordStockOut(adminCtx(), { staffId: 'staff-1', items, lendFrom: '2026-4-1' }), 400)
+    const out = await recordStockOut(adminCtx(), { staffId: 'staff-1', items, lendFrom: '2028-02-29', lendTo: '2028-03-01' })
+    await expectDataError(recordReturn(adminCtx(), { staffId: 'staff-1', linkedTxnId: out.id, items, returnDate: '2026-06-31' }), 400, 'Return date must be a date (YYYY-MM-DD).')
+    expect(await db.select().from(transactions)).toHaveLength(1)
+    expect(await qty('p1')).toBe(4)
+  })
+
   it('two concurrent stock outs of the last unit: exactly one succeeds and the quantity is 0', async () => {
     await db.update(products).set({ quantity_on_hand: 1 }).where(eq(products.id, 'p1'))
-    // Both callers queue behind a lock on the product row, so they really are in flight together.
-    const held = await holdRowLock(dbC, 'products', 'p1')
     const attempt = (on: Db) =>
       recordStockOut(adminCtx(on), { staffId: 'staff-1', items: [{ productId: 'p1', quantity: 1, barcodes: ['P1A'] }], lendFrom: '2026-10-04' })
-    const both = Promise.allSettled([attempt(db), attempt(dbB)])
-    await sleep(200)
-    held.release()
-    await held.done
-    const results = await both
+    // Both callers are provably in flight (waiting on the lock held from a third connection) before it is released.
+    const results = await raceBehindLock('products', 'p1', [() => attempt(db), () => attempt(dbB)])
 
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
     const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
@@ -629,6 +695,16 @@ describe('recordReturn', () => {
     expect(await qty('p1')).toBe(4)
   })
 
+  it('naming more barcodes than units on a return is a 400', async () => {
+    const out = await issue()
+    await expectDataError(
+      recordReturn(adminCtx(), { staffId: 'staff-1', linkedTxnId: out.id, items: [{ productId: 'p1', quantity: 1, barcodes: ['P1A', 'P1B'] }] }),
+      400,
+      'Each barcode needs at least one unit; give a larger quantity or fewer barcodes.',
+    )
+    expect(await qty('p1')).toBe(2)
+  })
+
   it('refuses a linked transaction that is missing, not an OUT, or someone else\'s', async () => {
     const out = await issue()
     const items = [{ productId: 'p1', quantity: 1, barcodes: ['P1A'] }]
@@ -669,14 +745,10 @@ describe('recordReturn', () => {
       items: [{ productId: 'p2', quantity: 1, barcodes: ['C1'] }],
       lendFrom: '2026-10-04',
     })
-    const held = await holdRowLock(dbC, 'transactions', out.id)
     const attempt = (on: Db) =>
       recordReturn(adminCtx(on), { staffId: 'staff-1', linkedTxnId: out.id, items: [{ productId: 'p2', quantity: 1, barcodes: ['C1'] }] })
-    const both = Promise.allSettled([attempt(db), attempt(dbB)])
-    await sleep(200)
-    held.release()
-    await held.done
-    const results = await both
+    // Both callers are provably in flight (waiting on the lock held from a third connection) before it is released.
+    const results = await raceBehindLock('transactions', out.id, [() => attempt(db), () => attempt(dbB)])
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
     const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
     expect((rejected[0].reason as DataError).status).toBe(400)
@@ -786,13 +858,9 @@ describe('return waivers', () => {
       lendFrom: '2026-10-04',
     })
     await db.delete(auditLog)
-    const held = await holdRowLock(dbC, 'transactions', out.id)
     const attempt = (on: Db) => createReturnWaiver(adminCtx(on), { transactionId: out.id, productId: 'p2', quantity: 1 })
-    const both = Promise.allSettled([attempt(db), attempt(dbB)])
-    await sleep(200)
-    held.release()
-    await held.done
-    const results = await both
+    // Both callers are provably in flight (waiting on the lock held from a third connection) before it is released.
+    const results = await raceBehindLock('transactions', out.id, [() => attempt(db), () => attempt(dbB)])
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
     const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
     expect((rejected[0].reason as DataError).status).toBe(409)
@@ -806,13 +874,9 @@ describe('return waivers', () => {
       items: [{ productId: 'p2', quantity: 1, barcodes: ['C1'] }],
       lendFrom: '2026-10-04',
     })
-    const held = await holdRowLock(dbC, 'transactions', out.id)
     const attempt = (on: Db) => resolveHeldItem(adminCtx(on), 'staff-1', { transactionId: out.id, productId: 'p2', quantity: 1 })
-    const both = Promise.allSettled([attempt(db), attempt(dbB)])
-    await sleep(200)
-    held.release()
-    await held.done
-    const results = await both
+    // Both callers are provably in flight (waiting on the lock held from a third connection) before it is released.
+    const results = await raceBehindLock('transactions', out.id, [() => attempt(db), () => attempt(dbB)])
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
     expect(await db.select().from(returnWaivers)).toHaveLength(1)
   })
@@ -918,7 +982,7 @@ describe('listOutstandingForStaff', () => {
 
   it('reports units issued without a barcode as unscannable, and is admin-only', async () => {
     await db.insert(transactions).values({ id: 'old1', transaction_type: 'OUT', reference_no: 'TXN-OLD00001', staff_id: 'staff-1', created_at: NOW })
-    await db.insert(transactionLines).values({ id: 'ol1', transaction_id: 'old1', product_id: 'p1', product_name: 'Projector', barcode: null, quantity: 2 })
+    await db.insert(transactionLines).values({ id: 'ol1', transaction_id: 'old1', product_id: 'p1', product_name: 'Projector', barcode: null, line_no: 0, quantity: 2 })
     expect(await listOutstandingForStaff(adminCtx(), 'staff-1')).toEqual({
       lines: [],
       unscannable: [{ txn_ref: 'TXN-OLD00001', product_name: 'Projector', quantity: 2 }],
