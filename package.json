@@ -12,7 +12,6 @@
     "seed:demo": "tsx --conditions=react-server scripts/seed/demo.ts",
     "images:fetch": "node scripts/fetch-product-images.mjs",
     "images:generate": "node scripts/generate-product-images.mjs",
-    "seed:real-production": "node scripts/seed-real-production.mjs",
     "set:password-policy": "node scripts/set-password-policy.mjs",
     "mailpit": "node scripts/mailpit.mjs start",
     "mailpit:stop": "node scripts/mailpit.mjs stop",

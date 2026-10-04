@@ -498,9 +498,10 @@ describe('seed:demo wiring', () => {
     const retired = [
       'seed-demo.mjs', 'seed-emulator.mjs', 'seed-lending-portal.mjs', 'seed-staff-roster.mjs', 'seed-conflict-scenarios.mjs',
       'seed-outstanding.mjs', 'seed-products.mjs', 'seed-product-catalog.mjs', 'cleanup-borrower-test-data.mjs',
+      'seed-real-production.mjs',
     ]
     for (const file of retired) expect(existsSync(path.join(root, 'scripts', file)), file).toBe(false)
-    for (const name of ['seed:emulators', 'seed:lending', 'seed:products', 'seed:staff', 'seed:outstanding', 'seed:conflicts', 'seed:catalog', 'cleanup:borrower-test']) {
+    for (const name of ['seed:emulators', 'seed:lending', 'seed:products', 'seed:staff', 'seed:outstanding', 'seed:conflicts', 'seed:catalog', 'seed:real-production', 'cleanup:borrower-test']) {
       expect(scripts[name], name).toBeUndefined()
     }
     expect(scripts['images:fetch']).toBeDefined()
