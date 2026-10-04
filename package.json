@@ -15,6 +15,7 @@
     "seed:outstanding": "node scripts/seed-outstanding.mjs",
     "seed:conflicts": "node scripts/seed-conflict-scenarios.mjs",
     "seed:comprehensive": "node scripts/seed-comprehensive-demo.mjs",
+    "seed:demo": "node scripts/seed-demo.mjs",
     "seed:real-production": "node scripts/seed-real-production.mjs",
     "cleanup:borrower-test": "node scripts/cleanup-borrower-test-data.mjs",
     "set:password-policy": "node scripts/set-password-policy.mjs",
