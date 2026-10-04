@@ -1,8 +1,8 @@
 // The 20-product "real" demo catalog: one entry per product, with the number
 // of photos it should have (1, 2 or 3) and the Pixabay search phrases used to
-// find them. Shared by:
-//   - scripts/fetch-product-images.mjs   (downloads the photos + contact sheet)
-//   - scripts/seed-product-catalog.mjs   (creates the products + uploads them)
+// find them. Used by scripts/fetch-product-images.mjs (downloads the photos +
+// contact sheet into scripts/catalog-images/, which seed:comprehensive and
+// seed:demo upload as the product photos).
 //
 // Names are deliberately generic (no brand/model): the photos come from a
 // stock-photo library, so a specific model name would never match the picture.

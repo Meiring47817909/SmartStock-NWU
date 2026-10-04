@@ -19,6 +19,10 @@
 //   - Product images: every product gets 1-3 photos uploaded to the Storage emulator.
 //   - Audit Log: an entry for every entity_type/action combination a real code path produces.
 //
+// seed:demo (demo.ts) is this same seed with a different cast: `seedComprehensive({ ..., cast })` takes who the administrator
+// is and which staff act out which scenario (default: COMPREHENSIVE_CAST, the made-up staff of the spin video, which must
+// never change), and skips the scenarios the cast has no staff member for (OPTIONAL_SCENARIOS).
+//
 // Everything is written through the data layer (src/server/data/*) -- the same functions the API routes call -- with the
 // clock stopped at each scenario's historical moment (`seedCtx`), so history reads exactly as if it had happened then.
 // The only raw writes are listed at the foot of this comment:
@@ -97,17 +101,159 @@ import type { ProductInput } from '@/lib/catalogRules'
 import type { StockItemInput } from '@/lib/stockRules'
 import type { LendingInterval, LoanRequestStatus } from '@/types/database'
 
-const LOCATION = 'NWU - Potchefstroom, Building G4, Room 28'
+export const LOCATION = 'NWU - Potchefstroom, Building G4, Room 28'
 const DEPARTMENT = 'Computer Science and Information Systems'
-// The administrator's display name (profile + every audit entry attributed to them).
-const ADMIN_NAME = 'Jonathan Pritchard'
-const ADMIN_EMAIL = 'jonathan.pritchard@nwu.ac.za'
 // Settings -> Notifications: the system sending address (every email comes From it).
 const SYSTEM_FROM_EMAIL = 'noreply@smartstock-nwu.com'
-const ADMIN_UID = 'seed-admin'
 const PORTAL_BORROWER_UID = 'seed-demo-portallinked-uid'
 // When the catalogue, the staff roster and the settings were set up: before the oldest scenario (a request made 65 days ago).
 const SETUP = -70
+
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// The cast: who the administrator is and which staff act out the scenarios. seed:comprehensive uses COMPREHENSIVE_CAST (the
+// made-up staff of the spin video, which must never change); seed:demo (demo.ts) passes its own with real NWU staff. The
+// scenarios, products, categories, stock and audit history are the same either way.
+// ---------------------------------------------------------------------------------------------------------------------------
+
+/** One scenario staff member. `key` names the scenario they act out (see the scenarios below). */
+export interface SeedCastMember {
+  key: string
+  name: string
+  surname: string
+  email: string
+  department: string
+  /** What this person demonstrates (printed in the "who is who" legend). */
+  scenario: string
+  /** The department the record is created in, when a later edit (the staff "update" audit entry) moves them to `department`. */
+  startDepartment?: string
+  /** The card on file is `cardUidFor(cardIndex)`; null means no card on file. */
+  cardIndex: number | null
+  /** Whether this person gets a real Firebase Auth login (password123) and a login link. The PortalLinked member must. */
+  login: boolean
+}
+
+/** What a cast's `extras` hook is given, once the catalogue exists and before any stock moves. */
+export interface SeedExtrasHelpers {
+  db: Db
+  admin: Caller
+  /** Category id by category name (the 7 standard categories). */
+  categoryId: Record<string, string>
+  location: string
+}
+
+export interface SeedCast {
+  /** First line of the printed summary. */
+  title: string
+  admin: { uid: string; name: string; email: string }
+  /** In creation order. A scenario whose key is not in the list is not seeded (see OPTIONAL_SCENARIOS). */
+  staff: SeedCastMember[]
+  /** Anything the cast adds on top of the shared catalogue (seed:demo adds one product). */
+  extras?: (helpers: SeedExtrasHelpers) => Promise<void>
+  /** Paragraphs (lines) the summary prints just before the "who is who" legend. */
+  notes?: string[][]
+}
+
+/**
+ * The scenarios a cast may leave out: no other scenario depends on their staff member, so each is skipped when its key is
+ * missing. Every other key is required (other scenarios build on them).
+ */
+export const OPTIONAL_SCENARIOS = [
+  'CounteredSimple',
+  'NoShowLive',
+  'ExpiredRecorded',
+  'DeclinedPending',
+  'WithdrawnByStaff',
+  'ReturnNoDate',
+  'ReturnOverdue',
+  'ReturnDueToday',
+  'ReturnCompleted',
+  'ReturnPartial',
+] as const
+
+/** Card / login mix spread evenly over a 31-person roster (index mod 4): card + login, card only, login only, neither. */
+export const hasCardAt = (index: number): boolean => index % 4 === 0 || index % 4 === 1
+export const hasLoginAt = (index: number): boolean => index % 4 === 0 || index % 4 === 2
+
+type CastRow = [key: string, name: string, surname: string, email: string, department: string, scenario: string]
+
+// The departments the comprehensive cast is spread over.
+const D = {
+  phys: 'Physical and Chemical Sciences',
+  bio: 'Biological Sciences',
+  geo: 'Geo- and Spatial Sciences',
+  agri: 'Agricultural Sciences',
+  math: 'Mathematical and Statistical Sciences',
+  cs: 'Computer Science and Information Systems',
+  bmi: 'Business Mathematics and Informatics',
+}
+const COMPREHENSIVE_ROWS: CastRow[] = [
+  ['PendingFresh', 'Emma', 'Richardson', 'emma.richardson@gmail.com', D.cs, 'Pending loan request (fresh); staff create/update audit'],
+  ['PendingNearExpiry', 'Oliver', 'Bennett', 'oliver.bennett92@gmail.com', D.phys, 'Pending loan request, close to expiring'],
+  ['CounteredRich', 'Sophie', 'Hartley', 'sophie.hartley@gmail.com', D.bio, 'Counter-offer with removed line, messages and date change'],
+  ['CounteredSimple', 'James', 'Whitfield', 'james.whitfield@gmail.com', D.geo, 'Plain counter-offer'],
+  ['AcceptedOnSchedule', 'Charlotte', 'Ellis', 'charlotte.ellis88@gmail.com', D.agri, 'Accepted request, pickup on schedule'],
+  ['InsufficientCauseRecipient', 'Daniel', 'Mercer', 'daniel.mercer@gmail.com', D.math, 'Pickup short on stock, overdue return is the likely cause'],
+  ['OverdueHolderCause', 'Amelia', 'Hayes', 'amelia.hayes@gmail.com', D.bmi, 'Holds the overdue item behind the shortage above'],
+  ['InsufficientNoCauseRecipient', 'Benjamin', 'Carter', 'ben.carter.work@gmail.com', D.cs, 'Pickup short on stock, no overdue return to blame'],
+  ['NoShowLive', 'Grace', 'Thornton', 'grace.thornton@gmail.com', D.phys, 'Missed pickup -- flips to Not Picked Up live on first Dashboard load'],
+  ['NoShowRecorded', 'Samuel', 'Prescott', 'samuel.prescott@gmail.com', D.bio, 'Missed pickup, already recorded'],
+  ['ExpiredRecorded', 'Olivia', 'Sinclair', 'olivia.sinclair@gmail.com', D.geo, 'Expired request'],
+  ['FulfilledPickup', 'Henry', 'Caldwell', 'henry.caldwell@gmail.com', D.agri, 'Full pending -> countered -> accepted -> fulfilled history'],
+  ['DeclinedPending', 'Lily', 'Fraser', 'lily.fraser@gmail.com', D.math, 'Declined by admin from pending'],
+  ['DeclinedCounterRich', 'William', 'Ashford', 'william.ashford@gmail.com', D.bmi, 'Admin declined a rich counter-offer'],
+  ['DeclinedByStaff', 'Chloe', 'Winters', 'chloe.winters@gmail.com', D.cs, 'Declined by the staff member via the portal'],
+  ['WithdrawnByStaff', 'Thomas', 'Reeves', 'thomas.reeves@gmail.com', D.phys, 'Withdrawn by staff, no reason'],
+  ['WithdrawnByAdmin', 'Isabella', 'Crawford', 'isabella.crawford@gmail.com', D.bio, 'Admin cancelled an accepted pickup, with a reason'],
+  ['ReturnNoDate', 'Lucas', 'Hamilton', 'lucas.hamilton@gmail.com', D.geo, 'Outstanding return -- No Return Date'],
+  ['ReturnOverdue', 'Hannah', 'Wells', 'hannah.wells@gmail.com', D.agri, 'Outstanding return -- Overdue'],
+  ['ReturnDueToday', 'Nathan', 'Brooks', 'nathan.brooks@gmail.com', D.math, 'Outstanding return -- Due Today'],
+  ['ReturnNotDueYet', 'Victoria', 'Lang', 'victoria.lang@gmail.com', D.bmi, 'Outstanding return -- Not Due Yet'],
+  ['ReturnPartlyResolved', 'Joshua', 'Kerr', 'joshua.kerr@gmail.com', D.cs, 'Outstanding return -- Partly Resolved (one unit written off)'],
+  ['ReturnMixedHolder', 'Natalie', 'Pierce', 'natalie.pierce@gmail.com', D.phys, 'One holder, three return states at once'],
+  ['ReturnCompleted', 'Ethan', 'Marshall', 'ethan.marshall@gmail.com', D.bio, 'Fully returned'],
+  ['ReturnPartial', 'Rachel', 'Dawson', 'rachel.dawson@gmail.com', D.geo, 'Partially returned, the rest not due yet'],
+  ['MultiBarcodeFull', 'Adam', 'Sutton', 'adam.sutton@gmail.com', D.agri, 'Multi-product, multi-barcode Stock Out, fully returned'],
+  ['MultiBarcodePartial', 'Megan', 'Holloway', 'megan.holloway@gmail.com', D.math, 'Multi-product, multi-barcode Stock Out, partly returned (rest due today)'],
+  ['LostLabels', 'Ryan', 'Fletcher', 'ryan.fletcher@gmail.com', D.bmi, 'Lost-label Returns demo (relabel flow)'],
+  ['BadgeActive', 'Zoe', 'Mitchell', 'zoe.mitchell@gmail.com', D.cs, 'Staff badge activated (audit log); holds two items that are not due yet'],
+  ['BadgeDeactivated', 'Callum', 'Rhodes', 'callum.rhodes@gmail.com', D.phys, 'Deactivated staff badge (audit log, inactive card)'],
+  ['PortalLinked', 'Jessica', 'Moore', 'jessica.moore@gmail.com', D.bio, 'Portal borrower login -- owns the My Requests history'],
+]
+
+export const COMPREHENSIVE_CAST: SeedCast = {
+  title: 'Seeded comprehensive demo data:',
+  admin: { uid: 'seed-admin', name: 'Jonathan Pritchard', email: 'jonathan.pritchard@nwu.ac.za' },
+  staff: COMPREHENSIVE_ROWS.map(([key, name, surname, email, department, scenario], i) => ({
+    key,
+    name,
+    surname,
+    email,
+    department,
+    scenario,
+    // Emma starts in Mathematical and Statistical Sciences: moving her to Computer Science is the staff 'update' audit
+    // entry, so it is a real before/after.
+    ...(key === 'PendingFresh' ? { startDepartment: D.math } : {}),
+    cardIndex: hasCardAt(i) ? i : null,
+    login: hasLoginAt(i),
+  })),
+}
+
+/** Throws on a cast the scenarios cannot run with: an unknown key, a duplicate, or a missing required scenario. */
+function assertValidCast(cast: SeedCast): void {
+  const known = new Set(COMPREHENSIVE_ROWS.map((r) => r[0]))
+  const optional = new Set<string>(OPTIONAL_SCENARIOS)
+  const given = new Set<string>()
+  for (const m of cast.staff) {
+    if (!known.has(m.key)) throw new Error(`Seed cast: "${m.key}" is not a scenario.`)
+    if (given.has(m.key)) throw new Error(`Seed cast: "${m.key}" is listed twice.`)
+    given.add(m.key)
+  }
+  const missing = [...known].filter((k) => !given.has(k) && !optional.has(k))
+  if (missing.length > 0) throw new Error(`Seed cast: required scenario staff missing: ${missing.join(', ')}.`)
+  const login = cast.staff.find((m) => m.key === 'PortalLinked')
+  if (!login?.login) throw new Error('Seed cast: the PortalLinked member must have a login.')
+}
 
 export interface SeedDeps {
   db: Db
@@ -117,9 +263,13 @@ export interface SeedDeps {
   now?: Date
   /** Lets the seed run against a PostgreSQL that is not on this machine. Never set it by accident. */
   allowNonLocalDb?: boolean
+  /** Who the administrator and the scenario staff are (default: COMPREHENSIVE_CAST). */
+  cast?: SeedCast
 }
 
 export interface SeedSummary {
+  /** First line of the printed summary. */
+  title: string
   adminName: string
   adminEmail: string
   systemFromEmail: string
@@ -135,17 +285,21 @@ export interface SeedSummary {
   multiBarcodePartial: string
   lostLabels: { staff: string; monitor: string; webcam: string }
   declinedCounterRich: string
+  /** Whether the live "Not Picked Up" request (settled by the first Dashboard load) was seeded. */
+  liveNoShow: boolean
+  /** Extra paragraphs printed before the "who is who" legend. */
+  notes: string[][]
 }
 
 /** The text the CLI prints when the seed finishes. */
 export function summaryLines(s: SeedSummary): string[] {
   return [
-    'Seeded comprehensive demo data:\n',
+    `${s.title}\n`,
     'LOGINS:',
     `  BICS admin:      ${s.adminEmail} / ${s.password}               -> http://localhost:3000/login   (${s.adminName})`,
     `  Notifications:   administrator emails -> ${s.adminEmail}; sent from ${s.systemFromEmail}`,
     `  Portal borrower: ${s.portalBorrower.email} / ${s.password} -> http://localhost:3000/lend/login`,
-    '  Other staff with portal access (same password): ' + s.otherPortalEmails.join(', '),
+    ...(s.otherPortalEmails.length > 0 ? ['  Other staff with portal access (same password): ' + s.otherPortalEmails.join(', ')] : []),
     '',
     'DASHBOARD -> Outstanding Returns: No Date / Overdue / Due Today / Not Due Yet /',
     '  Partly Resolved / Mixed holder / the Insufficient-cause overdue OUT. Mostly Not',
@@ -154,9 +308,13 @@ export function summaryLines(s: SeedSummary): string[] {
     '',
     'DASHBOARD -> Incoming Pickups: On Schedule, Insufficient (x2 -- one with an',
     '  overdue "likely cause" bullet, one with the fallback "worth a stock check"',
-    '  message). One more accepted request has its whole pickup window already behind it:',
-    '  your first Dashboard load settles it as Not Picked Up (as the system, once) and it',
-    '  leaves the list; the others are already recorded.',
+    ...(s.liveNoShow
+      ? [
+          '  message). One more accepted request has its whole pickup window already behind it:',
+          '  your first Dashboard load settles it as Not Picked Up (as the system, once) and it',
+          '  leaves the list; the others are already recorded.',
+        ]
+      : ['  message), and Not Picked Up (already recorded).']),
     '',
     `DASHBOARD -> Low Stock Alerts: "${s.lowStockProductName}" (low) and "${s.outOfStockProductName}" (out of stock).`,
     '',
@@ -182,6 +340,7 @@ export function summaryLines(s: SeedSummary): string[] {
     `  barcode DEMO-LOSTLABEL-A; 2 x ${s.lostLabels.webcam}, barcode DEMO-LOSTPAIR-A). Scan A once, then click + twice and enter`,
     '  DEMO-LOSTLABEL-B / -C: every unit can be returned, lost labels included.',
     '',
+    ...s.notes.flatMap((paragraph) => [...paragraph, '']),
     'WHO IS WHO (each staff member demonstrates one scenario):',
     ...s.staff.map((m) => `  ${m.fullName.padEnd(20)} ${m.scenario}`),
     '',
@@ -249,6 +408,9 @@ interface SeedRequest {
 
 export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   const { db, auth, bucket } = deps
+  const cast = deps.cast ?? COMPREHENSIVE_CAST
+  assertValidCast(cast)
+  const { uid: ADMIN_UID, name: ADMIN_NAME, email: ADMIN_EMAIL } = cast.admin
   assertLocalDatabase(db, deps.allowNonLocalDb)
   await assertEmptyDatabase(db)
 
@@ -295,7 +457,8 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   await saveAddress(asSetup(), 'system_from_email', SYSTEM_FROM_EMAIL)
 
   // A portal-borrower login, linked to the Portal Linked staff record created in section 2 below.
-  const portalBorrowerUser = await upsertSeedUser(auth, 'jessica.moore@gmail.com', SEED_PASSWORD, PORTAL_BORROWER_UID)
+  const portalMember = cast.staff.find((m) => m.key === 'PortalLinked') as SeedCastMember
+  const portalBorrowerUser = await upsertSeedUser(auth, portalMember.email, SEED_PASSWORD, PORTAL_BORROWER_UID)
 
   // =====================================================================
   // 1. CATEGORIES -- the standard 7-category list, plus one dedicated pair to demonstrate a category 'create' and
@@ -324,68 +487,24 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   //    every list/sidebar.
   // =====================================================================
   const S: Record<string, SeedStaff> = {}
-  // [key, first name, surname, gmail, department, what this person demonstrates]
-  const D = {
-    phys: 'Physical and Chemical Sciences',
-    bio: 'Biological Sciences',
-    geo: 'Geo- and Spatial Sciences',
-    agri: 'Agricultural Sciences',
-    math: 'Mathematical and Statistical Sciences',
-    cs: 'Computer Science and Information Systems',
-    bmi: 'Business Mathematics and Informatics',
-  }
-  const staffSpecs: [string, string, string, string, string, string][] = [
-    ['PendingFresh', 'Emma', 'Richardson', 'emma.richardson@gmail.com', D.cs, 'Pending loan request (fresh); staff create/update audit'],
-    ['PendingNearExpiry', 'Oliver', 'Bennett', 'oliver.bennett92@gmail.com', D.phys, 'Pending loan request, close to expiring'],
-    ['CounteredRich', 'Sophie', 'Hartley', 'sophie.hartley@gmail.com', D.bio, 'Counter-offer with removed line, messages and date change'],
-    ['CounteredSimple', 'James', 'Whitfield', 'james.whitfield@gmail.com', D.geo, 'Plain counter-offer'],
-    ['AcceptedOnSchedule', 'Charlotte', 'Ellis', 'charlotte.ellis88@gmail.com', D.agri, 'Accepted request, pickup on schedule'],
-    ['InsufficientCauseRecipient', 'Daniel', 'Mercer', 'daniel.mercer@gmail.com', D.math, 'Pickup short on stock, overdue return is the likely cause'],
-    ['OverdueHolderCause', 'Amelia', 'Hayes', 'amelia.hayes@gmail.com', D.bmi, 'Holds the overdue item behind the shortage above'],
-    ['InsufficientNoCauseRecipient', 'Benjamin', 'Carter', 'ben.carter.work@gmail.com', D.cs, 'Pickup short on stock, no overdue return to blame'],
-    ['NoShowLive', 'Grace', 'Thornton', 'grace.thornton@gmail.com', D.phys, 'Missed pickup -- flips to Not Picked Up live on first Dashboard load'],
-    ['NoShowRecorded', 'Samuel', 'Prescott', 'samuel.prescott@gmail.com', D.bio, 'Missed pickup, already recorded'],
-    ['ExpiredRecorded', 'Olivia', 'Sinclair', 'olivia.sinclair@gmail.com', D.geo, 'Expired request'],
-    ['FulfilledPickup', 'Henry', 'Caldwell', 'henry.caldwell@gmail.com', D.agri, 'Full pending -> countered -> accepted -> fulfilled history'],
-    ['DeclinedPending', 'Lily', 'Fraser', 'lily.fraser@gmail.com', D.math, 'Declined by admin from pending'],
-    ['DeclinedCounterRich', 'William', 'Ashford', 'william.ashford@gmail.com', D.bmi, 'Admin declined a rich counter-offer'],
-    ['DeclinedByStaff', 'Chloe', 'Winters', 'chloe.winters@gmail.com', D.cs, 'Declined by the staff member via the portal'],
-    ['WithdrawnByStaff', 'Thomas', 'Reeves', 'thomas.reeves@gmail.com', D.phys, 'Withdrawn by staff, no reason'],
-    ['WithdrawnByAdmin', 'Isabella', 'Crawford', 'isabella.crawford@gmail.com', D.bio, 'Admin cancelled an accepted pickup, with a reason'],
-    ['ReturnNoDate', 'Lucas', 'Hamilton', 'lucas.hamilton@gmail.com', D.geo, 'Outstanding return -- No Return Date'],
-    ['ReturnOverdue', 'Hannah', 'Wells', 'hannah.wells@gmail.com', D.agri, 'Outstanding return -- Overdue'],
-    ['ReturnDueToday', 'Nathan', 'Brooks', 'nathan.brooks@gmail.com', D.math, 'Outstanding return -- Due Today'],
-    ['ReturnNotDueYet', 'Victoria', 'Lang', 'victoria.lang@gmail.com', D.bmi, 'Outstanding return -- Not Due Yet'],
-    ['ReturnPartlyResolved', 'Joshua', 'Kerr', 'joshua.kerr@gmail.com', D.cs, 'Outstanding return -- Partly Resolved (one unit written off)'],
-    ['ReturnMixedHolder', 'Natalie', 'Pierce', 'natalie.pierce@gmail.com', D.phys, 'One holder, three return states at once'],
-    ['ReturnCompleted', 'Ethan', 'Marshall', 'ethan.marshall@gmail.com', D.bio, 'Fully returned'],
-    ['ReturnPartial', 'Rachel', 'Dawson', 'rachel.dawson@gmail.com', D.geo, 'Partially returned, the rest not due yet'],
-    ['MultiBarcodeFull', 'Adam', 'Sutton', 'adam.sutton@gmail.com', D.agri, 'Multi-product, multi-barcode Stock Out, fully returned'],
-    ['MultiBarcodePartial', 'Megan', 'Holloway', 'megan.holloway@gmail.com', D.math, 'Multi-product, multi-barcode Stock Out, partly returned (rest due today)'],
-    ['LostLabels', 'Ryan', 'Fletcher', 'ryan.fletcher@gmail.com', D.bmi, 'Lost-label Returns demo (relabel flow)'],
-    ['BadgeActive', 'Zoe', 'Mitchell', 'zoe.mitchell@gmail.com', D.cs, 'Staff badge activated (audit log); holds two items that are not due yet'],
-    ['BadgeDeactivated', 'Callum', 'Rhodes', 'callum.rhodes@gmail.com', D.phys, 'Deactivated staff badge (audit log, inactive card)'],
-    ['PortalLinked', 'Jessica', 'Moore', 'jessica.moore@gmail.com', D.bio, 'Portal borrower login -- owns the My Requests history'],
-  ]
-  // Card / portal-access mix, spread evenly over the list (index mod 4): card + portal, card only, portal only, neither --
-  // so the Staff page's "Not linked" / "Not granted" badges sit next to real values. Portal access is a real Auth login
-  // (password123), not just a flag.
+  // Whether the cast has this scenario's staff member (the OPTIONAL_SCENARIOS are skipped without one).
+  const has = (key: string) => key in S
+  // Card / portal-access mix, set per member by the cast (for the comprehensive cast: spread evenly over the list, index mod
+  // 4 -- card + portal, card only, portal only, neither -- so the Staff page's "Not linked" / "Not granted" badges sit next
+  // to real values). Portal access is a real Auth login (password123), not just a flag: only members with `login` get one.
   const portalStaffKeys: string[] = []
   const loginUid: Record<string, string> = {}
-  for (const [i, [key, name, surname, email, department]] of staffSpecs.entries()) {
-    const hasCard = i % 4 === 0 || i % 4 === 1
-    const hasPortal = i % 4 === 0 || i % 4 === 2
-    if (hasPortal) {
+  for (const member of cast.staff) {
+    const { key, name, surname, email, department } = member
+    if (member.login) {
       loginUid[key] =
         key === 'PortalLinked'
           ? portalBorrowerUser.uid
           : (await upsertSeedUser(auth, email, SEED_PASSWORD, `seed-staff-${key.toLowerCase()}-uid`)).uid
       portalStaffKeys.push(key)
     }
-    // Emma starts in Mathematical and Statistical Sciences: moving her to Computer Science is the staff 'update' audit
-    // entry below, so it is a real before/after.
-    const startDepartment = key === 'PendingFresh' ? D.math : department
-    const card_uid = hasCard ? cardUidFor(i) : null
+    const startDepartment = member.startDepartment ?? department
+    const card_uid = member.cardIndex === null ? null : cardUidFor(member.cardIndex)
     const created = await createStaff(asSetup(), { name, surname, email, department: startDepartment, card_uid })
     S[key] = { id: created.id, name, surname, full_name: `${name} ${surname}`, email, department, card_uid, uid: null }
   }
@@ -583,6 +702,9 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // The Desktop PC was first stocked with 5 at a reorder level of 1 and a 1-week lending interval; then corrected.
   await reviseProduct(P.insufficientCause, { quantity_on_hand: 3, reorder_threshold: 2, lending_interval: 'week_2' }, -21)
 
+  // Whatever the cast adds on top of the shared catalogue.
+  await cast.extras?.({ db, admin, categoryId, location: LOCATION })
+
   // =====================================================================
   // Helpers for the stock and loan-request scenarios below.
   // =====================================================================
@@ -676,9 +798,15 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // 4. OUTSTANDING RETURNS (Dashboard tab) -- walk-in Stock Out activity, not tied to any loan request. Every badge
   //    variant, plus a Mixed holder with three at once.
   // =====================================================================
-  await movement({ type: 'OUT', staff: S.ReturnNoDate, items: [{ product: P.returnNoDate, quantity: 1 }], lendFrom: addDays(-5), lendTo: null, manualOverride: true, notes: 'Staff selected manually (no card scan)', dayOffset: -5 })
-  await movement({ type: 'OUT', staff: S.ReturnOverdue, items: [{ product: P.returnOverdue, quantity: 2 }], lendFrom: addDays(-15), lendTo: addDays(-3), dayOffset: -15 })
-  await movement({ type: 'OUT', staff: S.ReturnDueToday, items: [{ product: P.returnDueToday, quantity: 1 }], lendFrom: addDays(-7), lendTo: TODAY, dayOffset: -7 })
+  if (has('ReturnNoDate')) {
+    await movement({ type: 'OUT', staff: S.ReturnNoDate, items: [{ product: P.returnNoDate, quantity: 1 }], lendFrom: addDays(-5), lendTo: null, manualOverride: true, notes: 'Staff selected manually (no card scan)', dayOffset: -5 })
+  }
+  if (has('ReturnOverdue')) {
+    await movement({ type: 'OUT', staff: S.ReturnOverdue, items: [{ product: P.returnOverdue, quantity: 2 }], lendFrom: addDays(-15), lendTo: addDays(-3), dayOffset: -15 })
+  }
+  if (has('ReturnDueToday')) {
+    await movement({ type: 'OUT', staff: S.ReturnDueToday, items: [{ product: P.returnDueToday, quantity: 1 }], lendFrom: addDays(-7), lendTo: TODAY, dayOffset: -7 })
+  }
   await movement({ type: 'OUT', staff: S.ReturnNotDueYet, items: [{ product: P.returnNotDueYet, quantity: 3 }], lendFrom: addDays(-1), lendTo: addDays(14), dayOffset: -1 })
 
   const partlyResolvedTxn = await movement({ type: 'OUT', staff: S.ReturnPartlyResolved, items: [{ product: P.returnPartlyResolved, quantity: 1 }], lendFrom: addDays(-30), lendTo: null, dayOffset: -30 })
@@ -704,11 +832,15 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   await movement({ type: 'IN', items: [{ product: P.monthInterval, quantity: 5 }], notes: 'Emergency restock -- approved via email.', dayOffset: -18 })
   await movement({ type: 'ADJUST', direction: 1, items: [{ product: P.legacyNoInterval, quantity: 1 }], notes: 'Manual stock count correction -- found 1 extra unit during a physical audit.', dayOffset: -12 })
 
-  const fullReturnOut = await movement({ type: 'OUT', staff: S.ReturnCompleted, items: [{ product: P.fullReturnPair, quantity: 2 }], lendFrom: addDays(-20), lendTo: addDays(-10), dayOffset: -20 })
-  await movement({ type: 'RETURN', staff: S.ReturnCompleted, items: [{ product: P.fullReturnPair, quantity: 2 }], returnDate: addDays(-9), linkedTxnId: fullReturnOut.id, notes: 'Returned in good condition.', dayOffset: -9 })
+  if (has('ReturnCompleted')) {
+    const fullReturnOut = await movement({ type: 'OUT', staff: S.ReturnCompleted, items: [{ product: P.fullReturnPair, quantity: 2 }], lendFrom: addDays(-20), lendTo: addDays(-10), dayOffset: -20 })
+    await movement({ type: 'RETURN', staff: S.ReturnCompleted, items: [{ product: P.fullReturnPair, quantity: 2 }], returnDate: addDays(-9), linkedTxnId: fullReturnOut.id, notes: 'Returned in good condition.', dayOffset: -9 })
+  }
 
-  const partialReturnOut = await movement({ type: 'OUT', staff: S.ReturnPartial, items: [{ product: P.partialReturnPair, quantity: 4 }], lendFrom: addDays(-15), lendTo: addDays(9), dayOffset: -15 })
-  await movement({ type: 'RETURN', staff: S.ReturnPartial, items: [{ product: P.partialReturnPair, quantity: 2 }], returnDate: addDays(-4), linkedTxnId: partialReturnOut.id, notes: 'Only 2 of the 4 units back so far -- other 2 still out.', dayOffset: -4 })
+  if (has('ReturnPartial')) {
+    const partialReturnOut = await movement({ type: 'OUT', staff: S.ReturnPartial, items: [{ product: P.partialReturnPair, quantity: 4 }], lendFrom: addDays(-15), lendTo: addDays(9), dayOffset: -15 })
+    await movement({ type: 'RETURN', staff: S.ReturnPartial, items: [{ product: P.partialReturnPair, quantity: 2 }], returnDate: addDays(-4), linkedTxnId: partialReturnOut.id, notes: 'Only 2 of the 4 units back so far -- other 2 still out.', dayOffset: -4 })
+  }
 
   // ---- Multi-item, multi-barcode Stock In / Stock Out / Return -------------
   // Every transaction here has more than one product, and each product has more than one of its barcodes scanned.
@@ -808,7 +940,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   }
 
   // ---- countered (plain: one line reduced, no messages, no date change) ---
-  {
+  if (has('CounteredSimple')) {
     const req = await openRequest({
       staff: S.CounteredSimple, fromDate: addDays(1), toDate: null,
       lines: [{ product: P.indefinite, requested: 3, offered: 2 }],
@@ -858,7 +990,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // ---- Not Picked Up (live transition -- settles as no_show on the first Dashboard load, exactly like a real stale
   //      pickup would). Left 'accepted' here on purpose: nothing in the seed settles it. The window is 7 days (-10 to -3),
   //      the longest a 1-week product can be requested for; the old seed's 9-day window (to day -1) is one the app refuses. -----
-  {
+  if (has('NoShowLive')) {
     const req = await openRequest({
       staff: S.NoShowLive, fromDate: addDays(-10), toDate: addDays(-3),
       lines: [{ product: P.noShowFeeder, requested: 1, offered: 1 }],
@@ -881,7 +1013,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   }
 
   // ---- expired (already recorded -- blew past the 30-day SLA) -------------
-  {
+  if (has('ExpiredRecorded')) {
     const req = await openRequest({
       staff: S.ExpiredRecorded, fromDate: addDays(-10), toDate: addDays(-3),
       lines: [{ product: P.healthy, requested: 1, offered: 1 }],
@@ -931,7 +1063,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   }
 
   // ---- declined while still pending (administrator, simple) ----------------
-  {
+  if (has('DeclinedPending')) {
     const declineMsg = "Sorry, this model's been discontinued and we don't have replacement units -- happy to help you find an alternative if useful."
     const req = await openRequest({
       staff: S.DeclinedPending, fromDate: addDays(5), toDate: addDays(12),
@@ -968,7 +1100,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   }
 
   // ---- withdrawn by the staff member (no reason) ---------------------------
-  {
+  if (has('WithdrawnByStaff')) {
     const req = await openRequest({
       staff: S.WithdrawnByStaff, fromDate: addDays(6), toDate: addDays(13),
       lines: [{ product: P.healthy, requested: 1, offered: 1 }],
@@ -1214,6 +1346,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   )
 
   return {
+    title: cast.title,
     adminName: ADMIN_NAME,
     adminEmail: ADMIN_EMAIL,
     systemFromEmail: SYSTEM_FROM_EMAIL,
@@ -1222,18 +1355,20 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
     otherPortalEmails: otherPortalKeys.map((k) => S[k].email),
     lowStockProductName: P.lowStock.name,
     outOfStockProductName: P.outOfStock.name,
-    staff: staffSpecs.map(([key, , , , , scenario]) => ({ fullName: S[key].full_name, scenario })),
+    staff: cast.staff.map(({ key, scenario }) => ({ fullName: S[key].full_name, scenario })),
     multiBarcodeFull: S.MultiBarcodeFull.full_name,
     multiBarcodePartial: S.MultiBarcodePartial.full_name,
     lostLabels: { staff: S.LostLabels.full_name, monitor: P.lostLabel.name, webcam: P.lostLabelPair.name },
     declinedCounterRich: S.DeclinedCounterRich.full_name,
+    liveNoShow: has('NoShowLive'),
+    notes: cast.notes ?? [],
   }
 }
 
 // ---------------------------------------------------------------------------
-// Command line
+// Command line (shared with seed:demo, which passes its own seed function)
 // ---------------------------------------------------------------------------
-async function main() {
+export async function runSeedCli(seed: (deps: SeedDeps) => Promise<SeedSummary>): Promise<void> {
   const args = process.argv.slice(2)
   const url = process.env.DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/smartstock'
   const allowNonLocalDb = args.includes('--allow-non-local-db')
@@ -1251,7 +1386,7 @@ async function main() {
   try {
     if (args.includes('--reset')) await resetAppTables(db)
     await assertEmptyDatabase(db)
-    const summary = await seedComprehensive({ db, auth, bucket, allowNonLocalDb })
+    const summary = await seed({ db, auth, bucket, allowNonLocalDb })
     for (const line of summaryLines(summary)) console.log(line)
   } finally {
     await closeDb(url)
@@ -1260,7 +1395,7 @@ async function main() {
 
 // Run only when started as a script (not when a test imports this file).
 if (/[\\/]seed[\\/]comprehensive\.ts$/.test(process.argv[1] ?? '')) {
-  main()
+  runSeedCli(seedComprehensive)
     .then(() => process.exit(0))
     .catch((err) => {
       console.error('Seed failed:', err)

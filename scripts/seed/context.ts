@@ -1,4 +1,4 @@
-// Shared foundation for the PostgreSQL seeds (seed:comprehensive now, seed:demo next).
+// Shared foundation for the PostgreSQL seeds (seed:comprehensive and seed:demo).
 //
 // What lives here, so a second seed script only has to describe its own cast and scenarios:
 //   - the seed clock: `isoAt(dayOffset)` is `addDays(TODAY, offset)` at 09:00 Africa/Johannesburg, worked out with
@@ -77,6 +77,30 @@ export function seedClock(now: Date = new Date()): SeedClock {
 /** A data-layer context whose clock is stopped at `at`: every save made with it is stamped with that instant. */
 export function seedCtx(db: Db, at: Date, caller: Caller): Ctx {
   return { db, caller, now: () => at }
+}
+
+/**
+ * A context whose clock reads the given instants one after another, one per `now()` call, for a single save that stamps
+ * more than one row and has to show each its own historical moment (createProduct reads the clock once for the product and
+ * once for its audit entry). Asking for more instants than were given throws; `assertAllUsed()` throws if fewer were asked
+ * for, so a data-layer change to how often the clock is read fails loudly instead of silently shifting a timestamp.
+ */
+export function seedCtxSequence(db: Db, instants: Date[], caller: Caller): { ctx: Ctx; assertAllUsed(): void } {
+  let next = 0
+  const ctx: Ctx = {
+    db,
+    caller,
+    now: () => {
+      if (next >= instants.length) throw new Error(`Seed clock: now() was read ${next + 1} times but only ${instants.length} instants were given.`)
+      return instants[next++]
+    },
+  }
+  return {
+    ctx,
+    assertAllUsed() {
+      if (next !== instants.length) throw new Error(`Seed clock: now() was read ${next} times but ${instants.length} instants were given.`)
+    },
+  }
 }
 
 export function adminCaller(uid: string, name: string, staffId: string | null): Caller {
