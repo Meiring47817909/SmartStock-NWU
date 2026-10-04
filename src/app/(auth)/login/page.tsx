@@ -4,9 +4,10 @@ import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Image from 'next/image'
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth'
-import { auth, db } from '@/lib/firebase/config'
+import { auth } from '@/lib/firebase/config'
 import { requestPasswordReset } from '@/lib/firebase/accountEmails'
-import { doc, getDocFromServer, collection, query, where, getDocsFromServer } from 'firebase/firestore'
+import { withAuthRaceRetry } from '@/lib/firebase/authRace'
+import { loadMe } from '@/lib/api/me'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -41,8 +42,8 @@ function LoginPageInner() {
     setError('')
     setLoading(true)
     try {
-      const cred = await signInWithEmailAndPassword(auth, email, password)
-      await routeSignedInUser(cred.user.uid)
+      await signInWithEmailAndPassword(auth, email, password)
+      await routeSignedInUser()
     } catch (err) {
       // Firebase's own error.message ("Firebase: Error (auth/wrong-password).")
       // is raw SDK text, not something to show a staff member — map the
@@ -64,41 +65,38 @@ function LoginPageInner() {
   }
 
   // One shared login, two possible destinations — this account is either a
-  // BICS operator (has a profiles/{uid} doc) or a lending-portal borrower
+  // BICS operator (has a profile row) or a lending-portal borrower
   // (linked via staff.uid). Resolved with a direct one-shot check right
   // here, not by waiting on AuthContext/StaffPortalContext's own
   // onAuthStateChanged-driven state — those still independently re-verify
   // once the destination layout mounts (defense in depth), but routing
   // decisions shouldn't depend on two separate contexts' async loading
   // flags settling in the right order.
-  async function routeSignedInUser(uid: string) {
+  async function routeSignedInUser() {
     // Only an admin profile means BICS. A profile carrying role 'staff' is
     // a lending-portal borrower like any other, so it falls through to the
     // staff-record lookup below rather than being pushed at /dashboard and
     // immediately bounced back out by the (protected) layout's admin gate —
     // that round trip shows the user a visible flash of the BICS shell they
-    // aren't allowed into. The two lookups don't depend on each other, so
-    // they're fired together — sequential forced-server reads here made the
-    // "Signing in…" button sit for the sum of both round trips instead of
-    // the slower of the two.
-    const [profileSnap, staffSnap] = await Promise.all([
-      getDocFromServer(doc(db, 'profiles', uid)),
-      getDocsFromServer(query(collection(db, 'staff'), where('uid', '==', uid))),
-    ])
-    if (profileSnap.exists() && profileSnap.data()?.role === 'admin') {
+    // aren't allowed into. One GET /api/me returns both the profile and the
+    // linked staff record, so there is a single round trip. withAuthRaceRetry
+    // absorbs a 401 from the brief window right after sign-in when the fresh
+    // ID token is not yet accepted.
+    const { profile, staff } = await withAuthRaceRetry(() => loadMe())
+    if (profile?.role === 'admin') {
       router.push('/dashboard')
       router.refresh()
       return
     }
 
-    if (!staffSnap.empty) {
+    if (staff) {
       // Deactivated (Staff page → Deactivate) — the portal layout itself
       // also blocks this (see lend/layout.tsx's PortalShell), which is what
       // actually enforces it for every sign-in path. This
       // check is purely so the password-login path gets an immediate,
       // specific error right here instead of a "Loading…" flash before
       // landing on that dead-end screen.
-      if (staffSnap.docs[0].data().is_active === false) {
+      if (staff.is_active === false) {
         await signOut(auth)
         setError(`Your account has been deactivated. Please contact ${await fetchContactEmail()} for more information.`)
         setLoading(false)

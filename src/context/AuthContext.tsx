@@ -1,17 +1,17 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { auth, db } from '@/lib/firebase/config'
+import { auth } from '@/lib/firebase/config'
 import { onAuthStateChanged, User } from 'firebase/auth'
-import { doc, getDocFromServer } from 'firebase/firestore'
 import { withAuthRaceRetry } from '@/lib/firebase/authRace'
+import { loadMe } from '@/lib/api/me'
 import type { Profile } from '@/types/database'
 
 interface AuthContextValue {
   user: User | null
   profile: Profile | null
   loading: boolean
-  // Re-reads profiles/{uid} without waiting for another onAuthStateChanged
+  // Re-reads the signed-in user's profile without waiting for another onAuthStateChanged
   // firing. Needed after (protected)/profile updates full_name via the
   // Admin SDK (firestore.rules blocks a client write to `profiles`
   // entirely), which otherwise leaves this context's cached profile
@@ -26,21 +26,17 @@ const AuthContext = createContext<AuthContextValue>({
   refreshProfile: async () => {},
 })
 
-async function fetchProfile(currUser: User, setProfile: (p: Profile | null) => void) {
+async function fetchProfile(setProfile: (p: Profile | null) => void) {
   try {
-    const docRef = doc(db, 'profiles', currUser.uid)
-    // getDocFromServer, not getDoc: right after a fresh sign-in the
-    // persistent local-cache layer has no watch stream established for
-    // this path yet, and plain getDoc() can resolve from that empty
-    // cache before the server round-trip finishes — silently returning
-    // "does not exist" for an account that has a profile. This read
-    // decides BICS-vs-portal routing, so it needs the authoritative
-    // server answer, not a cache-tolerant one.
-    const docSnap = await withAuthRaceRetry(() => getDocFromServer(docRef))
-    if (docSnap.exists()) {
-      setProfile(docSnap.data() as Profile)
+    // GET /api/me reads PostgreSQL through the server, so there is no
+    // local cache to be stale. This read decides BICS-vs-portal routing.
+    // withAuthRaceRetry absorbs a 401 from the brief window right after
+    // sign-in when the fresh ID token is not yet accepted.
+    const me = await withAuthRaceRetry(() => loadMe())
+    if (me.profile) {
+      setProfile(me.profile)
     } else {
-      // No profiles/{uid} doc — this is exactly what a lending-portal
+      // No profile row — this is exactly what a lending-portal
       // borrower account looks like (see StaffPortalContext), among
       // other cases. Do NOT synthesize a default role:'staff' Profile
       // here: this app's Firebase Auth project is shared between BICS
@@ -81,14 +77,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // this fetch resolves — e.g. (protected)/layout.tsx redirecting to
       // /login?error=no-profile a moment before the real profile arrives.
       setLoading(true)
-      await fetchProfile(currUser, setProfile)
+      await fetchProfile(setProfile)
       setLoading(false)
     })
     return () => unsubscribe()
   }, [])
 
   async function refreshProfile() {
-    if (auth.currentUser) await fetchProfile(auth.currentUser, setProfile)
+    if (auth.currentUser) await fetchProfile(setProfile)
   }
 
   return (

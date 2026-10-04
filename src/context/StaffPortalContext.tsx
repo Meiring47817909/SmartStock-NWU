@@ -1,10 +1,10 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { auth, db } from '@/lib/firebase/config'
+import { auth } from '@/lib/firebase/config'
 import { onAuthStateChanged, User } from 'firebase/auth'
-import { collection, query, where, getDocsFromServer } from 'firebase/firestore'
 import { withAuthRaceRetry } from '@/lib/firebase/authRace'
+import { loadMe } from '@/lib/api/me'
 import type { StaffMember } from '@/types/database'
 
 interface StaffPortalContextValue {
@@ -45,20 +45,17 @@ export function StaffPortalProvider({ children }: { children: React.ReactNode })
       // not-yet-updated staffMember.
       setLoading(true)
       try {
-        // getDocsFromServer, not getDocs — same reasoning as AuthContext's
-        // profile lookup: right after a fresh sign-in this can otherwise
-        // resolve from an empty local cache before the server round-trip
-        // finishes, falsely reporting no linked staff record.
-        const snap = await withAuthRaceRetry(() =>
-          getDocsFromServer(query(collection(db, 'staff'), where('uid', '==', currUser.uid))),
-        )
-        // No StaffMember doc links to this Firebase Auth user — this is
+        // GET /api/me reads PostgreSQL through the server (same call as
+        // AuthContext's profile lookup), wrapped in withAuthRaceRetry to
+        // absorb a 401 right after a fresh sign-in.
+        const me = await withAuthRaceRetry(() => loadMe())
+        // No staff row links to this Firebase Auth user — this is
         // NOT the same situation as AuthContext's BICS profile lookup
         // synthesizing a fallback (which was the bug fixed there). Never
         // synthesize a fallback StaffMember either: an unlinked account
         // must show the portal layout's "not linked" dead-end, not
         // silently proceed as some default borrower.
-        setStaffMember(snap.empty ? null : ({ id: snap.docs[0].id, ...snap.docs[0].data() } as unknown as StaffMember))
+        setStaffMember(me.staff)
       } catch (e) {
         console.error('Error fetching staff record', e)
         setStaffMember(null)
