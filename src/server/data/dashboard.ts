@@ -4,6 +4,7 @@ import { assertAdmin, type Ctx } from '@/server/context'
 import { loanRequestLines, products, staff, transactions } from '@/server/db/schema'
 import { getReservedQuantity, listAcceptedPickups } from '@/server/data/loanRequests'
 import { listOutstandingTxnProducts } from '@/server/data/outstandingStock'
+import { appDayStart } from '@/server/data/dayRange'
 import { appCalendarDay } from '@/lib/utils'
 import { effectiveToDate, isNoShowCandidate } from '@/lib/loanRequestRules'
 import {
@@ -135,8 +136,6 @@ export async function loadDashboard(ctx: Ctx): Promise<DashboardData> {
   assertAdmin(ctx)
   const now = ctx.now()
   const today = appCalendarDay(now)
-  // SAST has no daylight saving, so midnight there is always 22:00 UTC the evening before.
-  const startOfToday = new Date(`${today}T00:00:00+02:00`)
 
   // The no-show pass writes, so it goes first; the reads after it see its result.
   const pickups = await incomingPickups(ctx, today)
@@ -146,7 +145,8 @@ export async function loadDashboard(ctx: Ctx): Promise<DashboardData> {
     ctx.db
       .select({ products: count(), stock: sql<number>`coalesce(sum(${products.quantity_on_hand}), 0)::int` })
       .from(products),
-    ctx.db.select({ n: count() }).from(transactions).where(gte(transactions.created_at, startOfToday)),
+    // From the start of today's Johannesburg day (the shared APP_TIME_ZONE rule; no fixed UTC offset).
+    ctx.db.select({ n: count() }).from(transactions).where(gte(transactions.created_at, appDayStart(today))),
     ctx.db.select({ n: count() }).from(staff).where(eq(staff.is_active, true)),
   ])
 

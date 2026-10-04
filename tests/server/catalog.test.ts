@@ -493,6 +493,23 @@ describe('outstanding holders, unit counts and delete blockers', () => {
     })
   })
 
+  it('getBarcodeUnitCounts reads an OUT\'s lines in scan order (created_at, line_no, id), not id order', async () => {
+    const p = await createProduct(adminCtx(), productInput({ barcodes: ['S1', 'S2'] }))
+    await addTxn('out1', 'OUT', { staffId: 'staff-1', staffName: 'Sam Staff' })
+    // Same timestamp, ids sorting opposite to line_no: S1 was scanned first.
+    const at = new Date('2026-10-01T08:00:00.000Z')
+    await db.insert(transactionLines).values([
+      { id: 'zz-first', transaction_id: 'out1', product_id: p.id, product_name: 'p', line_no: 0, quantity: 1, barcode: 'S1', created_at: at },
+      { id: 'aa-second', transaction_id: 'out1', product_id: p.id, product_name: 'p', line_no: 1, quantity: 1, barcode: 'S2', created_at: at },
+    ])
+    // A waiver (no barcode) relieves the first-issued barcode first, so S1 is the one written off.
+    await db.insert(returnWaivers).values({ id: 'w', transaction_id: 'out1', product_id: p.id, product_name: 'p', quantity: 1 })
+    expect(await getBarcodeUnitCounts(adminCtx(), p.id)).toEqual({
+      S1: { inStock: 0, outstanding: 0, total: 0 },
+      S2: { inStock: 0, outstanding: 1, total: 1 },
+    })
+  })
+
   it('getProductDeleteBlockers lists outstanding units and active reservations (every status that is still active)', async () => {
     const p = await createProduct(adminCtx(), productInput({ barcodes: ['R1'] }))
     expect(await getProductDeleteBlockers(adminCtx(), p.id)).toEqual({ outstanding: [], reservations: [] })

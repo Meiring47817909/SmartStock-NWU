@@ -14,7 +14,7 @@ import {
 } from '@/server/db/schema'
 import { writeAudit } from '@/server/data/audit'
 import { requestAuditSnapshot, type RequestRow } from '@/server/data/loanRequests'
-import { genRef } from '@/lib/utils'
+import { genRef, isRealDate } from '@/lib/utils'
 import {
   productBalance,
   type AdjustInput,
@@ -47,7 +47,6 @@ import type { ReturnWaiver, TxnType } from '@/types/database'
 
 const NOT_FOUND_STAFF = 'Staff record not found.'
 const NOTHING_TO_RESOLVE = 'Nothing outstanding to resolve for this item.'
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 
 /** Run `fn` in a transaction on the caller's connection (a savepoint when `ctx.db` is already a transaction). */
 function inTx<T>(ctx: Ctx, fn: (txCtx: Ctx) => Promise<T>): Promise<T> {
@@ -86,15 +85,10 @@ function cleanItems(items: StockItemInput[] | undefined): CleanItem[] {
   })
 }
 
-function isRealDate(value: string): boolean {
-  const d = new Date(`${value}T00:00:00Z`)
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value
-}
-
 function dateOrNull(value: unknown, label: string): string | null {
   if (value === undefined || value === null || value === '') return null
   // Round-trip, so a shape-valid but impossible date (2026-02-30) is a 400 here and not a database error.
-  if (typeof value !== 'string' || !DATE_PATTERN.test(value) || !isRealDate(value)) {
+  if (!isRealDate(value)) {
     throw new DataError(400, `${label} must be a date (YYYY-MM-DD).`)
   }
   return value

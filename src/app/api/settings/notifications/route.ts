@@ -1,6 +1,7 @@
 import { route } from '@/server/http'
 import { DataError } from '@/server/context'
 import { loadAddress, loadNotificationSettings, saveAddress, setNotificationSetting } from '@/server/data/settings'
+import { INVALID_ADDRESS_MESSAGE } from '@/lib/notificationSettingsRules'
 import type { NotificationSettingKey } from '@/types/database'
 
 // Notification settings (admin only).
@@ -32,7 +33,9 @@ export const POST = route<Body>('admin', async (ctx, body) => {
       return setNotificationSetting(ctx, body.key as NotificationSettingKey, body.value as boolean)
     case 'address': {
       if (body.field !== 'admin_notification_email' && body.field !== 'system_from_email') throw new DataError(400, 'Unknown setting.')
-      return { value: await saveAddress(ctx, body.field, typeof body.value === 'string' ? body.value : '') }
+      // Clearing an address sends ''; anything that is not a string (null, a number, an object) is not an address.
+      if (typeof body.value !== 'string') throw new DataError(400, INVALID_ADDRESS_MESSAGE)
+      return { value: await saveAddress(ctx, body.field, body.value) }
     }
     default:
       throw new DataError(400, 'Unknown action.')

@@ -8,8 +8,8 @@ import { returnWaivers, staff, transactionLines, transactions } from '@/server/d
 import { writeAudit } from '@/server/data/audit'
 import { createReturnWaiver } from '@/server/data/stock'
 import { setOwnProfileName } from '@/server/data/profiles'
-import { normalizeEmail } from '@/lib/firebase/staff'
 import {
+  normalizeEmail,
   staffCardConflictMessage,
   staffEmailConflictMessage,
   staffUidConflictMessage,

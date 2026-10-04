@@ -125,39 +125,14 @@ export function appCalendarDay(instant: Date | string = new Date()): string {
   return `${part('year')}-${part('month')}-${part('day')}`
 }
 
-// Converts a full ISO datetime string (e.g. a `created_at` timestamp) to a
-// YYYY-MM-DD string in the viewer's LOCAL timezone — for comparing against a
-// date-only field like lend_to. Deliberately doesn't just `.slice(0, 10)`
-// the ISO string: that reads the UTC calendar date, which can be a day
-// behind the LOCAL calendar date actually shown to the user (e.g. by
-// formatDate()) whenever the local time is far enough ahead of UTC to have
-// already crossed into the next day while the UTC clock hasn't yet.
-export function isoToLocalDateStr(iso: string): string {
-  return dateStrFromDate(new Date(iso))
-}
-
-// Is an ISO `created_at` timestamp inside a YYYY-MM-DD..YYYY-MM-DD range, as
-// picked in a pair of <input type="date"> filters? Either end may be '' for
-// open-ended. Compares on the LOCAL calendar date via isoToLocalDateStr, NOT
-// on the raw ISO string: created_at is written as new Date().toISOString(),
-// i.e. UTC, so a 00:01 SAST movement is stored under the PREVIOUS UTC day. A
-// naive `created_at >= `${from}T00:00:00`` therefore drops it out of the day
-// the store actually handled it, and lumps the previous day's late-evening
-// entries in instead — a two-hour slice wrong at both ends of the range, which
-// for an audit extract means a real stock movement simply missing from the day
-// it happened on. Shared by the Audit Log and the Reports date filters so the
-// two can't disagree about which day an entry belongs to.
-export function withinDateRange(
-  createdAt: string | null | undefined,
-  from: string,
-  to: string,
-): boolean {
-  if (!from && !to) return true
-  if (!createdAt) return false
-  const day = isoToLocalDateStr(createdAt)
-  if (from && day < from) return false
-  if (to && day > to) return false
-  return true
+// Is this a YYYY-MM-DD string naming a real calendar day? The shape alone lets 2026-02-30 through (and Date.parse
+// rolls it over to 2 March), so the day is round-tripped through UTC. Shared by every server check of a day-only
+// input (Stock Out lend dates, loan request dates, the Reports and Audit Log filters).
+const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/
+export function isRealDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !DAY_PATTERN.test(value)) return false
+  const d = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value
 }
 
 // Adds (or subtracts, with a negative `days`) whole days to a YYYY-MM-DD

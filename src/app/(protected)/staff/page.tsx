@@ -4,7 +4,8 @@ import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
 import { toast } from 'sonner'
 import { Search, Plus, Pencil, CreditCard, Mail, ChevronDown } from 'lucide-react'
-import { normalizeEmail, postStaffAdmin } from '@/lib/firebase/staff'
+import { postStaffAdmin } from '@/lib/firebase/staff'
+import { normalizeEmail } from '@/lib/staffRules'
 import {
   createStaff, findStaffEmailConflict, listStaff, loadStaffHoldings, resolveHeldItem, setStaffActive, updateStaff,
   type HeldItem as LentItem,

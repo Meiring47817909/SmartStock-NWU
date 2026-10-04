@@ -80,6 +80,15 @@ describe('/api/reports', () => {
     expect(await call(getReports, '/api/reports', 'admin-uid')).toEqual({ status: 400, body: { error: 'Unknown report.' } })
     expect(await call(getReports, '/api/reports?report=returns&from=x', 'admin-uid')).toEqual({ status: 400, body: { error: 'From must be a date (YYYY-MM-DD).' } })
   })
+
+  it('an impossible calendar day (2026-02-30) is a 400, not a 500 from the database', async () => {
+    for (const report of ['returns', 'issued-per-staff']) {
+      expect(await call(getReports, `/api/reports?report=${report}&from=2026-02-30`, 'admin-uid')).toEqual({ status: 400, body: { error: 'From must be a date (YYYY-MM-DD).' } })
+      expect(await call(getReports, `/api/reports?report=${report}&to=2026-04-31`, 'admin-uid')).toEqual({ status: 400, body: { error: 'To must be a date (YYYY-MM-DD).' } })
+    }
+    // A real leap day is fine.
+    expect((await call(getReports, '/api/reports?report=returns&from=2028-02-29', 'admin-uid')).status).toBe(200)
+  })
 })
 
 describe('/api/audit-log', () => {
@@ -107,5 +116,10 @@ describe('/api/audit-log', () => {
     const before = Buffer.from(JSON.stringify(['2026-10-01T22:30:00.000001Z', 'a0'])).toString('base64url')
     expect((await call(getAuditLog, `/api/audit-log?cursor=${before}`, 'admin-uid')).body.entries.map((e: { id: string }) => e.id)).toEqual(['a1'])
     expect(await call(getAuditLog, '/api/audit-log?cursor=junk', 'admin-uid')).toEqual({ status: 400, body: { error: 'Invalid cursor.' } })
+  })
+
+  it('an impossible calendar day (2026-02-30) is a 400, not a 500 from the database', async () => {
+    expect(await call(getAuditLog, '/api/audit-log?from=2026-02-30', 'admin-uid')).toEqual({ status: 400, body: { error: 'From must be a date (YYYY-MM-DD).' } })
+    expect(await call(getAuditLog, '/api/audit-log?to=2026-02-30', 'admin-uid')).toEqual({ status: 400, body: { error: 'To must be a date (YYYY-MM-DD).' } })
   })
 })

@@ -1,6 +1,12 @@
 // Pure staff helpers and shapes shared by the server (src/server/data/staff.ts) and the browser client
 // (src/lib/api/staff.ts). No Firebase, no database.
 
+// Firebase Auth treats email as case-insensitive, so every place that stores or compares a staff email needs to agree
+// on the same normalized form, or a duplicate could slip past the check by casing alone.
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase()
+}
+
 /** What the Staff page's Add / Edit form sends. Email, department and card UID are optional (blank → null). */
 export interface StaffInput {
   name: string
@@ -12,12 +18,11 @@ export interface StaffInput {
   auth_email_synced?: boolean
 }
 
-/** What My Profile → My details sends for the caller's own staff row. */
+/** What My Profile → My details sends for the admin's own staff row (admin-only). */
 export interface OwnDetailsInput {
   name: string
   surname: string
   department?: string | null
-  /** Honoured for admins only; a borrower can't re-point their own card. */
   card_uid?: string | null
   /** Used only when the row is created the first time (the admin's own borrower record). */
   email?: string | null

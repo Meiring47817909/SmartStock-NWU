@@ -139,7 +139,7 @@ export async function updateCategory(ctx: Ctx, id: string, input: CategoryInput)
   const payload = normalizeCategory(input)
   try {
     return await inTx(ctx, async (c) => {
-      const [existing] = await c.db.select().from(categories).where(eq(categories.id, id)).for('update')
+      const [existing] = await c.db.select().from(categories).where(eq(categories.id, id)).for('no key update')
       if (!existing) throw new DataError(404, 'Category not found.')
       // Like the Categories page today, this does not rewrite `category_name` on the products already using it.
       const [row] = await c.db.update(categories).set(payload).where(eq(categories.id, id)).returning()
@@ -394,7 +394,7 @@ export async function updateProduct(ctx: Ctx, id: string, input: ProductInput): 
   const clean = cleanProduct(input)
   try {
     return await inTx(ctx, async (c) => {
-      const [existing] = await c.db.select().from(products).where(eq(products.id, id)).for('update')
+      const [existing] = await c.db.select().from(products).where(eq(products.id, id)).for('no key update')
       if (!existing) throw new DataError(404, 'Product not found.')
       const existingCodes = await barcodesFor(c, id)
       await assertNoBarcodeConflict(c, clean.barcodes, id)
@@ -575,7 +575,7 @@ export async function getBarcodeUnitCounts(ctx: Ctx, productId: string): Promise
     .from(transactionLines)
     .innerJoin(transactions, eq(transactions.id, transactionLines.transaction_id))
     .where(eq(transactionLines.product_id, productId))
-    .orderBy(asc(transactions.created_at), asc(transactionLines.id))
+    .orderBy(asc(transactionLines.created_at), asc(transactionLines.line_no), asc(transactionLines.id))
   if (lines.length === 0) return {}
 
   type Line = (typeof lines)[number]

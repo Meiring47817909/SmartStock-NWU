@@ -388,6 +388,17 @@ export default function ReturnsPage() {
       notifyAlertsChanged()
       setStep('done')
     } catch (err: any) {
+      if (refs.length > 0) {
+        // A partial failure: the RETURNs before this one are already saved. Reload what is still outstanding so the
+        // list no longer offers those units (they can't be returned twice); loadOpenItems clears the error, so it is
+        // set after the reload.
+        notifyAlertsChanged()
+        try {
+          await loadOpenItems(staff!, manualOverride)
+        } catch {
+          // Keep the save error below; the next action reloads anyway.
+        }
+      }
       setError('Failed: ' + err.message)
     }
     setLoading(false)

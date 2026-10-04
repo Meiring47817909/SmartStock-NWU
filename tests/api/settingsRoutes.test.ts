@@ -95,6 +95,17 @@ describe('/api/settings/notifications', () => {
     expect(await db.select().from(auditLog)).toHaveLength(1)
   })
 
+  it('an address value that is not a string -> 400 with the inline message, nothing saved', async () => {
+    for (const value of [null, 42, { email: 'a@nwu.test' }, ['a@nwu.test'], undefined]) {
+      expect(await post({ action: 'address', field: 'admin_notification_email', value }, 'admin-uid')).toEqual({
+        status: 400,
+        body: { error: 'Enter a valid email address.' },
+      })
+    }
+    expect((await get('?kind=admin_notification_email', 'admin-uid')).body).toEqual({ value: '' })
+    expect(await db.select().from(auditLog)).toHaveLength(0)
+  })
+
   it("refusing to turn on an email that is not built yet keeps today's message", async () => {
     expect(await post({ action: 'toggle', key: 'overdue_return_alert', value: true }, 'admin-uid')).toEqual({
       status: 400,

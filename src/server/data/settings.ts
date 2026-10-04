@@ -16,6 +16,7 @@ import {
   validatedAddress,
   type AddressField,
 } from '@/lib/notificationSettingsRules'
+import { DEFAULT_SYSTEM_EMAIL } from '@/lib/notificationCatalog'
 import type { NotificationSettingKey } from '@/types/database'
 
 // The notification settings: one `settings` row, key 'notifications', holding the same flat object the old Firestore
@@ -110,7 +111,9 @@ export async function saveAddress(ctx: Ctx, field: AddressField, value: string):
       action: 'update',
       entityType: 'settings',
       entityId: NOTIFICATION_SETTINGS_KEY,
-      before: { [field]: storedAddress(before, field) || null, label },
+      // The old page audited what its field showed before the save: for the sender, the default address when nothing
+      // was stored (that is what emails used).
+      before: { [field]: storedAddress(before, field) || (field === 'system_from_email' ? DEFAULT_SYSTEM_EMAIL : null), label },
       after: { [field]: trimmed || null, label },
     })
   })

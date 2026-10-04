@@ -5,7 +5,7 @@ import { toIso, withTx, type Db } from '@/server/db/client'
 import { newId } from '@/server/db/ids'
 import { LOAN_REQUEST_STATUSES, loanRequestLines, loanRequests, products, staff } from '@/server/db/schema'
 import { writeAudit } from '@/server/data/audit'
-import { addDaysToDateStr, appCalendarDay, genRequestRef } from '@/lib/utils'
+import { addDaysToDateStr, appCalendarDay, genRequestRef, isRealDate } from '@/lib/utils'
 import {
   ACTIVE_STATUSES,
   ALL_TIME_FROM,
@@ -44,7 +44,6 @@ const NOT_FOUND = 'Loan request not found.'
 const NOT_FOUND_PRODUCT = 'Product not found.'
 const NOT_FOUND_STAFF = 'Staff record not found.'
 const NOT_YOURS = 'You can only do this for your own staff record.'
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 
 /**
  * Who an automatic expiry / no-show is recorded as: no user id, and the same name the audit log has always shown for it.
@@ -107,14 +106,9 @@ const toSnapshotLine = (l: Pick<LineRow, 'product_id' | 'product_name' | 'reques
   offered_quantity: l.offered_quantity,
 })
 
-function isRealDate(value: string): boolean {
-  const d = new Date(`${value}T00:00:00Z`)
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value
-}
-
 /** A YYYY-MM-DD string that is a real calendar date, or a 400. */
 function checkDate(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !DATE_PATTERN.test(value) || !isRealDate(value)) {
+  if (!isRealDate(value)) {
     throw new DataError(400, `${label} must be a date (YYYY-MM-DD).`)
   }
   return value

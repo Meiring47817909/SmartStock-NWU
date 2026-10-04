@@ -1,7 +1,7 @@
 // deliver() and its helpers (src/lib/server/notificationDelivery.ts). Port of the scratch harness check-delivery.mts: the
 // settings row and the sent_notifications markers are in the test PostgreSQL database, mail goes to a local SMTP sink.
 import { sql } from 'drizzle-orm'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setDbForTests } from '@/server/context'
 import type { Db } from '@/server/db/client'
 import { sentNotifications } from '@/server/db/schema'
@@ -182,9 +182,13 @@ describe('deliver', () => {
     setMailEnv({ MAIL_TRANSPORT: 'smtp', SMTP_PORT: String(dead) })
     await db.execute(sql`create function fail_marker_delete() returns trigger language plpgsql as $$ begin raise exception 'delete refused'; end $$`)
     await db.execute(sql`create trigger fail_marker_delete before delete on sent_notifications for each row execute function fail_marker_delete()`)
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
       await expect(deliver(opts())).rejects.toBeInstanceOf(MailUnreachableError)
+      // The failed release is logged, not thrown.
+      expect(consoleError).toHaveBeenCalledWith('could not remove notification marker', expect.any(String), expect.anything())
     } finally {
+      consoleError.mockRestore()
       await db.execute(sql`drop trigger fail_marker_delete on sent_notifications`)
       await db.execute(sql`drop function fail_marker_delete()`)
     }

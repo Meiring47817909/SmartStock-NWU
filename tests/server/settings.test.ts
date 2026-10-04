@@ -5,6 +5,7 @@ import type { Db } from '@/server/db/client'
 import { auditLog, settings } from '@/server/db/schema'
 import { getSettingsRow, loadAddress, loadNotificationSettings, saveAddress, setNotificationSetting } from '@/server/data/settings'
 import { DEFAULT_NOTIFICATION_SETTINGS } from '@/lib/notificationSettingsRules'
+import { DEFAULT_SYSTEM_EMAIL } from '@/lib/notificationCatalog'
 import { closeTestDb, resetTestDb } from '../helpers/db'
 import { putNotificationSettings } from '../helpers/settings'
 
@@ -204,8 +205,9 @@ describe('saveAddress', () => {
     await saveAddress(ctxFor(), 'system_from_email', 'system@nwu.test')
     expect(await loadAddress(ctxFor(), 'system_from_email')).toBe('system@nwu.test')
     expect(await loadAddress(ctxFor(), 'admin_notification_email')).toBe('selouna@nwu.test')
+    // Nothing stored yet: the audit's "before" is the default sender, as the old page showed and audited it.
     expect((await audits())[1]).toMatchObject({
-      before: { system_from_email: null, label: 'System sending email' },
+      before: { system_from_email: DEFAULT_SYSTEM_EMAIL, label: 'System sending email' },
       after: { system_from_email: 'system@nwu.test', label: 'System sending email' },
     })
   })

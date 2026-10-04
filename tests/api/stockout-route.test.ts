@@ -103,9 +103,10 @@ async function setup(opts: { settings?: Record<string, unknown>; env?: Record<st
     { id: 't2', transaction_type: 'RETURN', reference_no: 'RET-1', staff_id: 's1', created_at: T1 },
   ])
   await db.insert(transactionLines).values([
-    { id: 'l1', transaction_id: 't1', product_id: 'p1', product_name: 'USB-C Cable 1m', quantity: 2, barcode: 'A', line_no: 0, created_at: T1 },
-    { id: 'l2', transaction_id: 't1', product_id: 'p2', product_name: 'Wireless Mouse', quantity: 1, barcode: 'M', line_no: 1, created_at: T1 },
-    { id: 'l3', transaction_id: 't1', product_id: 'p1', product_name: 'USB-C Cable 1m', quantity: 1, barcode: 'B', line_no: 2, created_at: T1 },
+    // Ids sort opposite to the scan order (line_no): read by id, the Mouse would come first.
+    { id: 'l3', transaction_id: 't1', product_id: 'p1', product_name: 'USB-C Cable 1m', quantity: 2, barcode: 'A', line_no: 0, created_at: T1 },
+    { id: 'l1', transaction_id: 't1', product_id: 'p2', product_name: 'Wireless Mouse', quantity: 1, barcode: 'M', line_no: 1, created_at: T1 },
+    { id: 'l2', transaction_id: 't1', product_id: 'p1', product_name: 'USB-C Cable 1m', quantity: 1, barcode: 'B', line_no: 2, created_at: T1 },
   ])
   await putNotificationSettings(db, opts.settings ?? {})
   vi.mocked(getSettingsRow).mockClear()
@@ -177,7 +178,7 @@ describe('POST /api/notifications/stock-out', () => {
     expect(conf(await call({ transactionId: 't1' }))).toEqual({ sent: false, reason: 'no_email' })
   })
 
-  it('happy path: one email, product scanned under two barcodes is ONE line with the summed quantity', async () => {
+  it('happy path: one email, products in scan order, product scanned under two barcodes is ONE line with the summed quantity', async () => {
     await setup({ settings: { stock_out_confirmation: true } })
     const r = await call({ transactionId: 't1' })
     expect(conf(r)).toEqual({ sent: true })
@@ -188,6 +189,8 @@ describe('POST /api/notifications/stock-out', () => {
     expect(m.text).toContain('- USB-C Cable 1m × 3')
     expect(m.text).toContain('- Wireless Mouse × 1')
     expect((m.text?.match(/USB-C Cable 1m/g) ?? []).length, 'one line for the product').toBe(1)
+    const text = m.text ?? ''
+    expect(text.indexOf('- USB-C Cable 1m'), 'scan order (line_no), not id order').toBeLessThan(text.indexOf('- Wireless Mouse'))
     expect(m.text).toContain('14 October 2026')
   })
 
@@ -234,9 +237,9 @@ describe('POST /api/notifications/stock-out', () => {
 
     it('a product already at its threshold before the Stock Out stays quiet', async () => {
       await setup(withAdmin())
-      await db.delete(transactionLines).where(eq(transactionLines.id, 'l2'))
-      await db.delete(transactionLines).where(eq(transactionLines.id, 'l3'))
-      await db.update(transactionLines).set({ quantity: 1 }).where(eq(transactionLines.id, 'l1'))
+      await db.delete(transactionLines).where(eq(transactionLines.id, 'l1')) // the Mouse
+      await db.delete(transactionLines).where(eq(transactionLines.id, 'l2')) // the cable's second barcode
+      await db.update(transactionLines).set({ quantity: 1 }).where(eq(transactionLines.id, 'l3'))
       const r = await call({ transactionId: 't1' })
       expect(r.body.lowStock).toEqual({ sent: false })
       expect(lowMail()).toHaveLength(0)

@@ -1,17 +1,10 @@
-// Small helpers for the Staff and My Profile pages: the shared email
-// normalizer, and a fetch wrapper for the admin-only /api/staff/* routes
-// that call Firebase Auth (which need a Firebase ID token to prove the
-// caller is actually signed in as an admin — see src/lib/server/staffAdmin.ts).
-// Staff records themselves are read and written through src/lib/api/staff.ts.
+// A fetch wrapper for the admin-only /api/staff/* routes that call Firebase
+// Auth (which need a Firebase ID token to prove the caller is actually signed
+// in as an admin — see src/lib/server/staffAdmin.ts). Staff records
+// themselves are read and written through src/lib/api/staff.ts; the shared
+// email normalizer is normalizeEmail in src/lib/staffRules.ts.
 
 import type { User } from 'firebase/auth'
-
-// Firebase Auth treats email as case-insensitive, so every place that
-// stores or compares a staff email needs to agree on the same normalized
-// form, or a duplicate could slip past the check by casing alone.
-export function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase()
-}
 
 // Calls one of the admin-only /api/staff/* routes with the caller's
 // Firebase ID token attached, and throws with the server's error message
