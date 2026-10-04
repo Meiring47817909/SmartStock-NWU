@@ -24,7 +24,12 @@
     "set:password-policy": "node scripts/set-password-policy.mjs",
     "mailpit": "node scripts/mailpit.mjs start",
     "mailpit:stop": "node scripts/mailpit.mjs stop",
-    "dev:emulators": "cross-env NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 FIREBASE_ADMIN_PROJECT_ID=demo-smartstock-nwu MAIL_TRANSPORT=smtp SMTP_HOST=127.0.0.1 SMTP_PORT=1025 next dev"
+    "db": "node scripts/db.mjs start",
+    "db:stop": "node scripts/db.mjs stop",
+    "db:migrate": "drizzle-kit migrate",
+    "db:reset": "tsx scripts/db-reset.ts",
+    "test": "vitest run",
+    "dev:emulators": "cross-env NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIRESTORE_EMULATOR_HOST=127.0.0.1:8081 FIREBASE_ADMIN_PROJECT_ID=demo-smartstock-nwu MAIL_TRANSPORT=smtp SMTP_HOST=127.0.0.1 SMTP_PORT=1025 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/smartstock next dev"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -32,6 +37,7 @@
     "@tanstack/react-table": "^9.2.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.3",
     "embla-carousel-react": "^8.6.0",
     "firebase": "^12.17.1",
     "firebase-admin": "^14.2.0",
@@ -41,6 +47,7 @@
     "next": "16.3.0",
     "next-themes": "^0.4.6",
     "nodemailer": "^10.0.13",
+    "pg": "^8.23.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "server-only": "^0.0.1",
@@ -55,14 +62,18 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "cross-env": "^10.1.0",
+    "drizzle-kit": "^0.31.11",
     "esbuild": "^0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "firebase-tools": "^15.27.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^4.0.18"
   }
 }

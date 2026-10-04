@@ -1394,3 +1394,10 @@ Ten more emails now go through the Mailpit mailer (see the Mailpit handoff for h
 13. Change the Admin notification address under Settings, then reload the portal's Policy page (Enquiries) and try a deactivated login: they show the new address, with no person's name.
 14. Login page: type an existing staff email and click "Reset it". Mailpit shows "Reset your SmartStock NWU password" from the System email address, and its button opens SmartStock's "Choose a new password" page; save a new password there and sign in with it. Opening the same link again says it has already been used. Try an address with no account: the page still says it was sent and Mailpit shows nothing. Click "Reset it" again within a minute for the same address: still one email.
 15. My Profile (administrator), Change email: enter a new address and the current password. Mailpit shows "Confirm your new SmartStock NWU email" sent to the NEW address. Its button opens SmartStock's "Confirm your new email" page; press "Confirm new email", then go back to My Profile and press "Check again": the login email updates. The portal profile's "Forgot password?" sends the same reset email as step 14.
+
+## PostgreSQL locally
+
+The app is moving from Firestore to PostgreSQL. The database runs in Docker, so Docker Desktop must be running.
+- Start it: `npm run db` (first run downloads the image and creates the container; later runs reuse it). Stop it: `npm run db:stop` (your data is kept).
+- It listens on `127.0.0.1:5432` (user and password `postgres`) and holds two databases: `smartstock` (the app, `DATABASE_URL`) and `smartstock_test` (the automated tests, `TEST_DATABASE_URL`).
+- `npm test` runs the automated tests against `smartstock_test`; start the database first.
