@@ -6,6 +6,8 @@
 
 **Architecture:** A server data layer (`src/server/data/<area>.ts`) owns every query and save and runs multi-row saves in one database transaction. Thin route handlers (`src/app/api/...`) verify the Firebase ID token and call it. Pages call small typed client modules (`src/lib/api/<area>.ts`) that keep the names and return shapes of today's `src/lib/firebase/*.ts` functions, so page changes stay small.
 
+Areas move in the spec's order (catalog → staff → stock → loan requests → dashboard/reports → settings), but each area moves its reads and saves together so every page is rewritten once. Until Task 15 the local app has no PostgreSQL seed data; each task proves itself through its tests.
+
 **Tech Stack:** Next.js 16.3 (TypeScript), PostgreSQL 17 (Docker locally), Drizzle ORM + `pg`, drizzle-kit migrations, Vitest, tsx (seeds/importer), Firebase Admin (Auth + Storage only).
 
 **Spec:** `docs/superpowers/specs/2026-10-04-postgres-migration-design.md`
@@ -61,7 +63,7 @@
 
 **Files:**
 - Create: `scripts/db.mjs`, `vitest.config.ts`, `tests/helpers/empty.ts`, `tests/smoke.test.ts`, `drizzle.config.ts`
-- Modify: `package.json` (scripts + dependencies), `.gitignore` (nothing new expected), `handout.md` (short "PostgreSQL locally" section)
+- Modify: `package.json` (scripts + dependencies), `handout.md` (short "PostgreSQL locally" section)
 
 **Interfaces:**
 - Produces: `npm run db` / `db:stop` / `db:migrate` / `db:reset` / `test`; env `DATABASE_URL`, `TEST_DATABASE_URL`.
@@ -187,7 +189,7 @@
 
 **Files:**
 - Create: `src/server/data/stock.ts`, `src/app/api/stock/in/route.ts`, `src/app/api/stock/out/route.ts`, `src/app/api/stock/return/route.ts`, `src/app/api/stock/waivers/route.ts`, `src/app/api/stock/outstanding/route.ts`, `src/lib/api/stock.ts`, `tests/server/stock.test.ts`
-- Delete: `src/lib/firebase/waivers.ts` (after Task 9 wiring)
+- (`src/lib/firebase/waivers.ts` is deleted in Task 13, once the Staff, Dashboard and Reports pages no longer import it.)
 
 **Interfaces:**
 - Produces (each one `withTx`, locks affected `products` rows with `FOR UPDATE` in id order, writes transaction + lines + quantity changes + one `create` audit entry with the frozen `after.lines` shape used today):
@@ -231,7 +233,7 @@
 ### Task 11: Wire loan request pages
 
 **Files:**
-- Modify: `src/app/(protected)/loan-requests/page.tsx`, `src/app/(portal)/lend/cart/page.tsx`, `src/app/(portal)/lend/requests/page.tsx`, `src/app/(portal)/lend/layout.tsx`, `src/components/layout/Sidebar.tsx`, `src/app/(protected)/stock-out/page.tsx` (pickup lookup), `src/app/api/notifications/loan-request/route.ts`
+- Modify: `src/app/(protected)/loan-requests/page.tsx`, `src/app/(portal)/lend/cart/page.tsx`, `src/app/(portal)/lend/requests/page.tsx`, `src/app/(portal)/lend/layout.tsx`, `src/app/(portal)/lend/page.tsx`, `src/components/layout/Sidebar.tsx`, `src/components/products/ProductPreviewDialog.tsx`, `src/app/(protected)/stock-out/page.tsx` (pickup lookup), `src/app/(protected)/products/page.tsx`, `src/app/(protected)/dashboard/page.tsx` and `src/app/(protected)/audit-log/page.tsx` (pure-helper imports only), `src/app/api/notifications/loan-request/route.ts`
 - Delete: `src/lib/firebase/loanRequests.ts`
 
 - [ ] **Step 1: Replace** imports with `src/lib/loanRequestRules.ts` (pure) and `src/lib/api/loanRequests.ts`; `notifyLoanRequestEvent` calls stay after each successful transition.
@@ -258,6 +260,7 @@
 **Files:**
 - Create: `src/server/data/reports.ts`, `src/server/data/auditLog.ts` (read side), `src/app/api/reports/route.ts`, `src/app/api/audit-log/route.ts`, `src/lib/api/reports.ts`, `src/lib/api/auditLog.ts`, `tests/server/reports.test.ts`
 - Modify: `src/app/(protected)/reports/page.tsx`, `src/app/(protected)/audit-log/page.tsx`
+- Delete: `src/lib/firebase/waivers.ts` (verify with `grep -rn "lib/firebase/waivers" src` → nothing)
 
 **Interfaces:**
 - Produces: `loadReport(ctx, { report: 'stock-levels' | 'low-stock' | 'issued-per-staff' | 'transactions' | 'returns', from?, to?, staffId?, categoryId? })` returning the row shapes each report tab renders today; `listAuditLog(ctx, { from?, to?, entityType?, action?, userId? })` → `AuditLogEntry[]` newest first plus the line lookups the page uses (`transaction_lines`, `loan_request_lines` for listed entities).
