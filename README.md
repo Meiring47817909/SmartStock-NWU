@@ -42,6 +42,12 @@ Sign in after `seed:demo` as `selouna.visser@nwu.ac.za` / `password123` (adminis
 
 ## Deploying
 
-The app deploys to Vercel. Set `DATABASE_URL` (the Cloud SQL connection string) and the Firebase settings in the project's environment variables. The handout covers moving the live data over, and the PostgreSQL connection pool on Vercel.
+The app deploys to Vercel. In the project's environment variables, set the Firebase settings and, for the Production environment only (keep Preview deployments off the production database), the database settings:
+
+- `DATABASE_URL`: `postgres://<user>:<password>@<address>:5432/smartstock`, without `sslmode` (with this `pg` version `sslmode=require` means full host-name verification, which fails against Cloud SQL's certificate on an IP address).
+- `DATABASE_SSL_CA`: the Cloud SQL instance's server CA certificate (`server-ca.pem`) as PEM text, or one line with `\n` escapes. The app then connects with TLS and checks the certificate against this CA.
+- `DATABASE_POOL_MAX` (optional, default 5): pool size per running instance.
+
+Command-line work against Cloud SQL (`npm run db:migrate`, the importer) goes through the Cloud SQL Auth Proxy on `127.0.0.1:5433`, with no `sslmode`. Run `db:migrate` there before deploying code that adds a migration. The handout covers moving the live data over (including the write freeze on the old app), the PostgreSQL connection pool on Vercel and the deployment notes.
 
 Next.js in this repo has breaking changes from older versions: read the guides in `node_modules/next/dist/docs/` before changing routes or build settings.

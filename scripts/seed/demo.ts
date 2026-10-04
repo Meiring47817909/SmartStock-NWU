@@ -16,7 +16,7 @@
 // DROPPED scenarios (no staff member for them): CounteredSimple, NoShowLive, ExpiredRecorded, DeclinedPending,
 // WithdrawnByStaff, ReturnNoDate, ReturnOverdue, ReturnDueToday, ReturnCompleted, ReturnPartial.
 //
-// Run it with the emulators and PostgreSQL up, exactly like seed:comprehensive (same flags: --reset, --dry-auth,
+// Run it with the emulators and PostgreSQL up, exactly like seed:comprehensive (same flags: --reset, --force, --dry-auth,
 // --allow-non-local-db; same safety rails: local database only, emulators only, an empty database):
 //   npm run emulators
 //   npm run db   then   npm run db:migrate

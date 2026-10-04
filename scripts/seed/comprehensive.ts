@@ -41,7 +41,8 @@
 //   npm run seed:comprehensive
 //
 // It refuses to run against a database that already has data (the ledger and audit tables are append-only, so a second run
-// would pile a second batch on top): run `npm run db:reset` first, or pass `--reset` to clear the app tables for you. It
+// would pile a second batch on top): run `npm run db:reset` first, or pass `--reset` to clear the app tables for you
+// (`--reset` refuses a database not named smartstock or smartstock_test unless `--force` is given). It
 // refuses a PostgreSQL that is not on 127.0.0.1/localhost unless `--allow-non-local-db` is given, and it only talks to
 // emulators. `--dry-auth` runs the whole seed with in-memory stand-ins for the Auth and Storage emulators (nothing is
 // uploaded and no logins exist) -- for checking the database side without the emulators running.
@@ -65,6 +66,7 @@ import {
   type SeedAuth,
   type SeedBucket,
 } from './context'
+import { assertResettableDatabase } from '../dbGuard'
 import type { Caller } from '@/server/context'
 import { closeDb, getDb, type Db } from '@/server/db/client'
 import { newId } from '@/server/db/ids'
@@ -1384,7 +1386,11 @@ export async function runSeedCli(seed: (deps: SeedDeps) => Promise<SeedSummary>)
 
   const db = getDb(url)
   try {
-    if (args.includes('--reset')) await resetAppTables(db)
+    if (args.includes('--reset')) {
+      // The host check above cannot tell Cloud SQL behind the Auth Proxy from the local database; the name can.
+      await assertResettableDatabase(db.$client, args.includes('--force'), 'clear (--reset)')
+      await resetAppTables(db)
+    }
     await assertEmptyDatabase(db)
     const summary = await seed({ db, auth, bucket, allowNonLocalDb })
     for (const line of summaryLines(summary)) console.log(line)
