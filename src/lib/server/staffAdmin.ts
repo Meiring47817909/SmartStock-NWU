@@ -1,6 +1,8 @@
 import 'server-only'
 import type { NextRequest } from 'next/server'
-import { adminAuth, adminDb } from '@/lib/firebase/admin'
+import { eq } from 'drizzle-orm'
+import { VerifierUnavailableError, getRouteDb, verifyToken, type VerifiedToken } from '@/server/context'
+import { profiles } from '@/server/db/schema'
 
 // Shared helpers for the /api/staff/* routes (send-reset-email,
 // update-email). Both need to (a) confirm the caller is actually a signed-in
@@ -26,15 +28,16 @@ export class ApiError extends Error {
 // member's full borrow history, not just the caller's own). Throws
 // ApiError on any failure — callers should catch it and turn it into a
 // NextResponse.
-async function verifyBearer(request: NextRequest) {
+async function verifyBearer(request: NextRequest): Promise<VerifiedToken> {
   const authHeader = request.headers.get('authorization') ?? ''
   const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
   if (!idToken) {
     throw new ApiError(401, 'Missing Authorization header.')
   }
   try {
-    return await adminAuth.verifyIdToken(idToken)
-  } catch {
+    return await verifyToken(idToken)
+  } catch (err) {
+    if (err instanceof VerifierUnavailableError) throw err
     throw new ApiError(401, 'Invalid or expired session — please sign in again.')
   }
 }
@@ -68,9 +71,8 @@ export async function requireAdmin(request: NextRequest): Promise<{ uid: string 
 
 // Throws a 403 unless this user's profile has the admin role.
 export async function assertAdmin(uid: string, message = 'Only admins can manage staff logins.'): Promise<void> {
-  const profileSnap = await adminDb.collection('profiles').doc(uid).get()
-  const role = profileSnap.exists ? profileSnap.data()?.role : null
-  if (role !== 'admin') {
+  const [profile] = await getRouteDb().select({ role: profiles.role }).from(profiles).where(eq(profiles.uid, uid)).limit(1)
+  if (profile?.role !== 'admin') {
     throw new ApiError(403, message)
   }
 }
@@ -82,6 +84,8 @@ export async function findStaffDocOwningUid(
   uid: string,
   excludeStaffId?: string,
 ): Promise<{ id: string; full_name: string } | null> {
+  // Loaded on demand so importing this module never initialises Firebase Admin (Task 7 moves this lookup to PostgreSQL).
+  const { adminDb } = await import('@/lib/firebase/admin')
   const snap = await adminDb.collection('staff').where('uid', '==', uid).get()
   for (const d of snap.docs) {
     if (d.id === excludeStaffId) continue
