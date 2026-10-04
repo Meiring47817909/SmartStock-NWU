@@ -2,10 +2,9 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
-import { cn, formatDate, formatDateOnly, isoToLocalDateStr, sentenceCase, todayDateStr, withinDateRange } from '@/lib/utils'
-import { db } from '@/lib/firebase/config'
-import { loadWaivedByTxn, waivedQty } from '@/lib/firebase/waivers'
-import { collection, query, where, getDocs, orderBy, doc, getDoc } from 'firebase/firestore'
+import { appCalendarDay, cn, formatDate, formatDateOnly, sentenceCase, todayDateStr } from '@/lib/utils'
+import { listCategories } from '@/lib/api/catalog'
+import { loadReport } from '@/lib/api/reports'
 import { useTable, type SortingState } from '@tanstack/react-table'
 import {
   SORTABLE_TABLE_FEATURES as REPORT_TABLE_FEATURES,
@@ -32,7 +31,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { collapseLinesByProduct, formatBarcodeQuantities, formatBarcodeLabels, openBarcodeQuantities } from '@/lib/transactionLines'
+import { collapseLinesByProduct, formatBarcodeQuantities, formatBarcodeLabels } from '@/lib/transactionLines'
 
 type ReportTab = 'stock-levels' | 'low-stock' | 'issued-per-staff' | 'returns'
 
@@ -331,40 +330,29 @@ function StockLevelsReport() {
   const [pageSize, setPageSize] = useState<PageSize>(10)
 
   useEffect(() => {
-    getDocs(query(collection(db, 'categories'), orderBy('name'))).then(snap => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    listCategories().then(list => {
       setCats(list)
       setCatFilter(new Set([...list.map((c: any) => c.id), UNCATEGORIZED_CATEGORY]))
-    })
+    }).catch(err => console.error('Failed to load categories', err))
   }, [])
 
-  // No longer depends on the category filter — that's now applied client
-  // side below (a multi-select can't be expressed as a single Firestore
-  // `where` clause), so this fetches the product list exactly once.
+  // The category filter is applied client side below (a multi-select can't
+  // be expressed as a single category), so this fetches the product list
+  // exactly once. The server sends every product by name, with qty,
+  // threshold and status already worked out — the Status column needs a
+  // plain field to sort on.
   useEffect(() => {
-    setLoading(true)
-    getDocs(collection(db, 'products')).then(snap => {
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      items.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''))
-      setData(items)
-      setLoading(false)
-    })
+    loadReport('stock-levels')
+      .then(setData)
+      .catch(err => console.error('Failed to load the stock levels report', err))
+      .finally(() => setLoading(false))
   }, [])
 
-  // qty/threshold/status precomputed once here rather than inline per row —
-  // the Status column needs a plain field to sort on, not a value recomputed
-  // fresh inside the render loop each time.
-  const rows = data.map((p: any) => {
-    const qty = p.quantity_on_hand || 0
-    const threshold = p.reorder_threshold || 0
-    const status = qty === 0 ? 'OUT OF STOCK' : qty <= threshold ? 'LOW STOCK' : 'IN STOCK'
-    return { ...p, qty, threshold, status }
-  })
   // null (categories still loading) means "don't filter yet" — see
   // catFilter's declaration above.
   const catFiltered = catFilter === null
-    ? rows
-    : rows.filter((p: any) => catFilter.has(p.category_id || UNCATEGORIZED_CATEGORY))
+    ? data
+    : data.filter((p: any) => catFilter.has(p.category_id || UNCATEGORIZED_CATEGORY))
   const statusFiltered = catFiltered.filter((p: any) => statusFilter.has(p.status))
   const searched = statusFiltered.filter((p: any) => matchesSearch(search, p.name, p.category_name))
 
@@ -507,14 +495,12 @@ function LowStockReport() {
   const [pageIndex, setPageIndex] = useState(0)
   const [pageSize, setPageSize] = useState<PageSize>(10)
 
+  // Everything at or below its threshold, lowest quantity first, from the server.
   useEffect(() => {
-    getDocs(query(collection(db, 'products'))).then(snap => {
-      let items = snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
-      items = items.filter(p => p.quantity_on_hand <= p.reorder_threshold)
-      items.sort((a, b) => a.quantity_on_hand - b.quantity_on_hand)
-      setData(items)
-      setLoading(false)
-    })
+    loadReport('low-stock')
+      .then(setData)
+      .catch(err => console.error('Failed to load the low stock report', err))
+      .finally(() => setLoading(false))
   }, [])
 
   // The severity banner below reads off `data` — the true, unfiltered count
@@ -636,26 +622,14 @@ function LowStockReport() {
 // the item left the store, "expected by <date>" closes it on when it is due
 // back. Together they answer "what went out since X that should be back by Y".
 //
-// Issued-from goes through withinDateRange because created_at is a full UTC ISO
-// timestamp that has to be read as a local calendar day. Expected-by must NOT:
-// lend_to is already a plain YYYY-MM-DD date-only string, straight off an
-// <input type="date">, so it compares directly against the filter value. Putting
-// it through new Date() would reintroduce exactly the timezone shift that
-// withinDateRange exists to remove.
-function issuedFrom(t: any, from: string): boolean {
-  return withinDateRange(t.created_at, from, '')
-}
-
-// A Stock Out with no return date agreed has nothing for expected-by to test.
-// Same decision as on Returns, and Selouna makes it the same way, in the filter
-// row: silently keeping those rows hides that they bypassed the filter, and
-// silently dropping them hides the loosest records in the store, which is what
-// an audit is looking for. Defaults to including them.
-function expectedBy(t: any, to: string, includeUndated: boolean): boolean {
-  if (!to) return true
-  if (!t.lend_to) return includeUndated
-  return t.lend_to <= to
-}
+// Both are decided on the server (see issuedPerStaff in src/server/data/reports.ts).
+// Issued-from reads created_at as a calendar day in Africa/Johannesburg;
+// expected-by compares lend_to, already a plain YYYY-MM-DD date-only string,
+// straight against the filter value. A Stock Out with no return date agreed has
+// nothing for expected-by to test: Selouna makes that choice in the filter row
+// (the switch below), silently keeping those rows hides that they bypassed the
+// filter, and silently dropping them hides the loosest records in the store,
+// which is what an audit is looking for. Defaults to including them.
 
 const ISSUED_PER_STAFF_COLUMNS = columnHelper.columns([
   columnHelper.accessor('full_name', { id: 'full_name', header: 'Staff Member', sortFn: 'alphanumeric' }),
@@ -666,6 +640,7 @@ const ISSUED_PER_STAFF_COLUMNS = columnHelper.columns([
 
 function IssuedPerStaffReport() {
   const [data, setData] = useState<any[]>([])
+  const [undatedCount, setUndatedCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const { isExpanded: rowExpanded, toggle: toggleRow } = useExpandedRows()
   const [fromDate, setFromDate] = useState('')
@@ -676,57 +651,27 @@ function IssuedPerStaffReport() {
   const [pageIndex, setPageIndex] = useState(0)
   const [pageSize, setPageSize] = useState<PageSize>(10)
 
+  // The server sends each active staff member with their OUT transactions
+  // narrowed to the selected dates, newest first, and the totals computed over
+  // what survives — so the counts on a row always describe the rows underneath
+  // it. With either date set a staff member with nothing matching is left out
+  // (the question is who took stock out); unfiltered, the report stays a roster
+  // of every active staff member, zeroes included. The previous rows stay on
+  // screen while a new date range loads.
   useEffect(() => {
-    async function load() {
-      // 1. fetch staff
-      const staffSnap = await getDocs(query(collection(db, 'staff'), where('is_active', '==', true), orderBy('full_name')))
-      const staffData = staffSnap.docs.map(d => ({ id: d.id, ...d.data(), txns: [] as any[] }))
-
-      // 2. fetch all OUT transactions (if not too many, otherwise we fetch per staff - for now let's just fetch all OUT txns to get counts)
-      const txnSnap = await getDocs(query(collection(db, 'transactions'), where('transaction_type', '==', 'OUT')))
-      const allTxns = txnSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
-
-      // transaction_lines is its own collection now — fetch once and
-      // re-attach as `.transaction_lines` so the rendering code below
-      // doesn't need to change.
-      const linesSnap = await getDocs(collection(db, 'transaction_lines'))
-      const linesByTxn: Record<string, any[]> = {}
-      linesSnap.forEach(d => {
-        const l = d.data()
-        ;(linesByTxn[l.transaction_id] ??= []).push(l)
+    let cancelled = false
+    loadReport('issued-per-staff', { from: fromDate, to: toDate, includeUndated })
+      .then(report => {
+        if (cancelled) return
+        setData(report.staff)
+        setUndatedCount(report.undatedCount)
       })
-      allTxns.forEach(t => { t.transaction_lines = linesByTxn[t.id] ?? [] })
+      .catch(err => console.error('Failed to load the issued per staff report', err))
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [fromDate, toDate, includeUndated])
 
-      // Map txns to staff
-      staffData.forEach(s => {
-        s.txns = allTxns.filter(t => t.staff_id === s.id)
-      })
-
-      setData(staffData)
-      setLoading(false)
-    }
-    load()
-  }, [])
-
-  // Each staff member with their OUT transactions narrowed to the selected
-  // dates, newest first, and the totals recomputed over what survives — so the
-  // counts on a row always describe the rows underneath it. Derived on render
-  // rather than cached when a row expands: the whole set is already in memory
-  // (load() fetches it up front), and a cache keyed only by staff id would keep
-  // serving the previous range's transactions after the dates change.
   const staff = data
-    .map((s: any) => {
-      const txns = s.txns
-        .filter((t: any) => issuedFrom(t, fromDate) && expectedBy(t, toDate, includeUndated))
-        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      const totalQty = txns.reduce((sum: number, t: any) =>
-        sum + (t.transaction_lines || []).reduce((s2: number, l: any) => s2 + (l.quantity || 0), 0), 0)
-      return { ...s, txns, totalQty }
-    })
-    // With either date set the question is who took stock out, so a staff member
-    // with nothing matching is noise. Unfiltered, the report stays what it was:
-    // a roster of every active staff member, zeroes included.
-    .filter((s: any) => (!fromDate && !toDate) || s.txns.length > 0)
 
   const searched = staff.filter((s: any) => matchesSearch(search, s.full_name, s.department))
 
@@ -785,14 +730,12 @@ function IssuedPerStaffReport() {
   // are printed once, on their first line, and left blank on the lines under it
   // (the CSV repeats them on every line so each row stands alone in Excel).
   const staffPdfRows = staffCsvRows.map((r: any, i: number, all: any[]) => ({ ...r, first: i === 0 || all[i - 1].id !== r.id }))
-  // Counted over the transactions that already clear issued-from, since those
-  // are the ones the toggle decides. Unlike Returns — where both ends test the
-  // one field, so an undated row is counted against the whole set — here the
-  // issued-from end still bounds them, and the count should say so. Kept off
-  // `data` rather than the search-narrowed set: the search box is for finding
+  // undatedCount (from the server) counts the transactions that already clear
+  // issued-from, since those are the ones the toggle decides. Unlike Returns —
+  // where both ends test the one field, so an undated row is counted against
+  // the whole set — here the issued-from end still bounds them, and the count
+  // should say so. It is not narrowed by the search box: search is for finding
   // a row, not for changing the size of the decision the toggle offers.
-  const undatedCount = data.reduce((n: number, s: any) =>
-    n + s.txns.filter((t: any) => !t.lend_to && issuedFrom(t, fromDate)).length, 0)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -1012,16 +955,15 @@ function IssuedPerStaffReport() {
 function returnRowStatus(t: any): { label: string; className: string } | null {
   if (t.partial) return { label: 'Partial', className: 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold' }
   if (!t.expected_date) return null
-  const returnedOn = t.created_at ? isoToLocalDateStr(t.created_at) : ''
+  const returnedOn = t.created_at ? appCalendarDay(t.created_at) : ''
   if (returnedOn < t.expected_date) return { label: 'Early', className: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold' }
   if (returnedOn === t.expected_date) return { label: 'On time', className: 'bg-sky-100 text-sky-800 border-sky-200/60 px-2.5 font-semibold' }
   return { label: 'Late', className: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold' }
 }
 
 // Both ends bound t.expected_date — the lend_to copied off the Stock Out this
-// return settles. That is already a plain YYYY-MM-DD string, so it compares
-// directly and must NOT go through withinDateRange(), which is for reading a
-// UTC ISO timestamp as a local day.
+// return settles. That is already a plain YYYY-MM-DD string, so the server
+// compares it directly (see returns in src/server/data/reports.ts).
 //
 // A return whose expected date is unknown — its Stock Out set no return date,
 // or it is not linked to one at all — has nothing for either end to test. With
@@ -1030,13 +972,6 @@ function returnRowStatus(t: any): { label: string; className: string } | null {
 // worse: those are the loosest records in the store and are exactly what an
 // audit is looking for. So the choice is hers, made in the filter row rather
 // than decided here; `includeUndated` carries it. Defaults to including them.
-function expectedInRange(t: any, from: string, to: string, includeUndated: boolean): boolean {
-  if (!from && !to) return true
-  if (!t.expected_date) return includeUndated
-  if (from && t.expected_date < from) return false
-  if (to && t.expected_date > to) return false
-  return true
-}
 
 // Ranked so the rows worth a second look surface first: an unsettled balance,
 // then a late return, then on time, then early. A row with no status at all
@@ -1147,6 +1082,7 @@ const RETURNS_COLUMNS = columnHelper.columns([
 
 function ReturnsReport() {
   const [data, setData] = useState<any[]>([])
+  const [undatedCount, setUndatedCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const { isExpanded: rowExpanded, toggle: toggleRow } = useExpandedRows()
   const [fromDate, setFromDate] = useState('')
@@ -1161,93 +1097,24 @@ function ReturnsReport() {
   const [pageIndex, setPageIndex] = useState(0)
   const [pageSize, setPageSize] = useState<PageSize>(10)
 
+  // Each return comes with the Stock Out it settles (reference and Lend To)
+  // and what is still owed on that Stock Out, per product: issued minus every
+  // return on record minus what was written off, with the barcodes the rest
+  // went out under. Written-off lines are no longer outstanding, so a Partial
+  // row never keeps claiming a balance Selouna has already resolved away. The
+  // previous rows stay on screen while a new date range loads.
   useEffect(() => {
-    async function load() {
-      const snap = await getDocs(query(collection(db, 'transactions'), where('transaction_type', '==', 'RETURN'), orderBy('created_at', 'desc')))
-      const txns = snap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
-
-      // transaction_lines is its own collection now — fetch once and
-      // re-attach as `.transaction_lines` for the render code below. This
-      // pulls in every line for every transaction (not just RETURNs), which
-      // is used again below to look up the originating OUT transaction's
-      // issued quantities.
-      const linesSnap = await getDocs(collection(db, 'transaction_lines'))
-      const linesByTxn: Record<string, any[]> = {}
-      linesSnap.forEach(d => {
-        const l = d.data()
-        ;(linesByTxn[l.transaction_id] ??= []).push(l)
+    let cancelled = false
+    loadReport('returns', { from: fromDate, to: toDate, includeUndated })
+      .then(report => {
+        if (cancelled) return
+        setData(report.returns)
+        setUndatedCount(report.undatedCount)
       })
-      txns.forEach(t => { t.transaction_lines = linesByTxn[t.id] ?? [] })
-
-      // Total returned so far per [linked OUT transaction][product] — summed
-      // across every RETURN on record, since a loan can be settled across
-      // more than one return visit (see the same logic in returns/page.tsx).
-      const returnedByOutTxn: Record<string, Record<string, number>> = {}
-      txns.forEach(t => {
-        if (!t.linked_txn_id) return
-        const bucket = (returnedByOutTxn[t.linked_txn_id] ??= {})
-        ;(t.transaction_lines || []).forEach((l: any) => {
-          bucket[l.product_id] = (bucket[l.product_id] ?? 0) + (l.quantity || 0)
-        })
-      })
-
-      // Fetch each distinct linked OUT transaction once, for its Lend To
-      // date and originally-issued quantities.
-      // Written-off lines are no longer outstanding, so a Partial row must
-      // not keep claiming a balance Selouna has already resolved away.
-      const waivedByTxn = await loadWaivedByTxn()
-      const linkedIds = Array.from(new Set(txns.map(t => t.linked_txn_id).filter(Boolean))) as string[]
-      const outTxnById: Record<string, any> = {}
-      await Promise.all(linkedIds.map(async (id) => {
-        const outSnap = await getDoc(doc(db, 'transactions', id))
-        if (outSnap.exists()) outTxnById[id] = { id: outSnap.id, ...outSnap.data() }
-      }))
-
-      // Every RETURN's lines grouped by the OUT they settle, so the barcodes
-      // still outstanding can be worked out per barcode below.
-      const returnLinesByOut: Record<string, any[]> = {}
-      txns.forEach(t => {
-        if (t.linked_txn_id) (returnLinesByOut[t.linked_txn_id] ??= []).push(...(t.transaction_lines || []))
-      })
-
-      txns.forEach(t => {
-        const outTxn = t.linked_txn_id ? outTxnById[t.linked_txn_id] : null
-        // The raw Firestore doc ID (t.linked_txn_id) means nothing to
-        // Selouna — she only ever sees the human reference number
-        // (TXN-XXXXXXXX) elsewhere in the app (Stock Out, the Returns page
-        // itself, the Audit Log). Surface that instead so she can actually
-        // match this return back to the Stock Out it settles.
-        t.linked_txn_ref = outTxn?.reference_no ?? null
-        t.expected_date = outTxn?.lend_to ?? null
-        const outLines = outTxn ? collapseLinesByProduct(linesByTxn[outTxn.id] || []) : []
-        // Per-product remaining balance on the linked OUT transaction — used
-        // to show Selouna exactly what's still owed when she expands a
-        // Partial row, not just the fact that something is.
-        t.outstandingLines = outTxn
-          ? outLines
-              .map((l: any) => {
-                const issued = l.quantity || 0
-                const returned = returnedByOutTxn[outTxn.id]?.[l.product_id] ?? 0
-                const waived = waivedQty(waivedByTxn, outTxn.id, l.product_id)
-                // Which barcodes the outstanding units were issued under.
-                const productLines = (linesByTxn[outTxn.id] || []).filter((x: any) => String(x.product_id) === String(l.product_id))
-                const productReturns = (returnLinesByOut[outTxn.id] || []).filter((x: any) => String(x.product_id) === String(l.product_id))
-                return {
-                  product_name: l.product_name ?? 'Unknown',
-                  outstanding: issued - returned - waived,
-                  barcodeQuantities: openBarcodeQuantities(productLines, productReturns, waived),
-                }
-              })
-              .filter((l: any) => l.outstanding > 0)
-          : []
-        t.partial = t.outstandingLines.length > 0
-      })
-
-      setData(txns)
-      setLoading(false)
-    }
-    load()
-  }, [])
+      .catch(err => console.error('Failed to load the returns report', err))
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [fromDate, toDate, includeUndated])
 
   // A true range this time, both ends on ONE field: the date the item was due
   // back. "Expected from 21 Sep, Expected to 26 Sep" is everything that was
@@ -1259,12 +1126,12 @@ function ReturnsReport() {
   // is still owed on a Stock Out is a live figure across every return on
   // record, so a Partial row keeps telling the truth even when the return that
   // settled the rest of it falls outside the selected window.
-  const returns = data.filter((t: any) => expectedInRange(t, fromDate, toDate, includeUndated))
-  // Counted over the whole set, not the filtered one: this is the size of the
-  // decision the checkbox offers, so it has to stay steady as the dates move.
-  // Left off the search-narrowed set for the same reason as Issued per Staff:
-  // search finds a row, it doesn't change what the toggle is deciding.
-  const undatedCount = data.filter((t: any) => !t.expected_date).length
+  const returns = data
+  // undatedCount (from the server) is counted over the whole set, not the
+  // filtered one: this is the size of the decision the checkbox offers, so it
+  // has to stay steady as the dates move. Left off the search-narrowed set for
+  // the same reason as Issued per Staff: search finds a row, it doesn't change
+  // what the toggle is deciding.
 
   // Applied after the date range, before search: which statuses count is a
   // separate decision from which date window and which search term, and

@@ -2,10 +2,9 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
-import { formatDate, formatDateOnly, formatLendWindow, sentenceCase, todayDateStr, withinDateRange } from '@/lib/utils'
-import { db } from '@/lib/firebase/config'
+import { formatDate, formatDateOnly, formatLendWindow, sentenceCase, todayDateStr } from '@/lib/utils'
 import { LENDING_INTERVALS } from '@/lib/loanRequestRules'
-import { collection, query, orderBy, getDocs, where } from 'firebase/firestore'
+import { loadAuditLog } from '@/lib/api/auditLog'
 import { useTable, type SortingState } from '@tanstack/react-table'
 import {
   SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead, ExportCsvButton, ExportPdfButton,
@@ -273,7 +272,7 @@ const AUDIT_FIELD_ORDER: Record<string, string[]> = {
   'staff:access': ['full_name', 'email', 'uid'],
   // Same story for transactions: a resolved (written-off) return is logged
   // against the transaction it originated from but carries return_waivers'
-  // own fields, not a transaction's -- see waivers.ts / ResolveSummary.
+  // own fields, not a transaction's -- see createReturnWaiver (stock.ts) / ResolveSummary.
   'transaction:record': [
     'transaction_type', 'reference_no', 'staff_id', 'staff_name', 'user_id',
     'operator_name', 'manual_override', 'notes', 'return_date', 'linked_txn_id',
@@ -579,7 +578,7 @@ function StaffStatusSummary({ after }: { after: Record<string, unknown> | null }
 }
 
 // A resolved (written-off) return: logged against the ORIGINATING
-// transaction's entity_type/entity_id (see waivers.ts's createReturnWaiver)
+// transaction's entity_type/entity_id (see createReturnWaiver in stock.ts)
 // so it shows up alongside that transaction's own Stock Out entry rather
 // than looking like an unrelated record — but the waiver's own descriptive
 // fields (product/qty/staff/reason) don't match TransactionSummary's shape
@@ -979,28 +978,36 @@ export default function AuditLogPage() {
   const [pageIndex, setPageIndex] = useState(0)
   const [pageSize, setPageSize] = useState<PageSize>(10)
   const { isExpanded, toggle: toggleRow } = useExpandedRows()
-  // Keyed by transaction entity_id — fetched lazily the first time a
-  // transaction row is expanded, then cached so re-expanding is instant.
+  // Keyed by transaction entity_id — the product lines of the transaction
+  // entries that did not freeze them into their payload (the server looks
+  // them up along with the entries, so expanding a row needs no fetch).
   const [lines, setLines] = useState<Record<string, TransactionLine[]>>({})
   // Same idea, for a loan_request's 'create' entry — see LoanRequestSummary.
   const [loanLines, setLoanLines] = useState<Record<string, LoanRequestLine[]>>({})
 
   useEffect(() => {
+    let cancelled = false
     async function load() {
       setLoading(true)
-      const snap = await getDocs(query(collection(db, 'audit_log'), orderBy('created_at', 'desc')))
-      let items = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as AuditLogEntry[]
-
-      // Both ends inclusive, on the LOCAL calendar day the entry was written
-      // — see withinDateRange(). An entry timestamped 00:01 belongs to the day
-      // that has just started, which is not what its UTC `created_at` string
-      // says while the local clock runs ahead of UTC.
-      items = items.filter(e => withinDateRange(e.created_at, fromDate, toDate))
-
-      setEntries(items)
-      setLoading(false)
+      try {
+        // Newest first, both ends of the date range inclusive, on the
+        // calendar day in Africa/Johannesburg the entry was written — an entry
+        // timestamped 00:01 belongs to the day that has just started, which
+        // is not what its UTC `created_at` string says. Decided on the
+        // server, so it is the same wherever this page is opened.
+        const result = await loadAuditLog({ from: fromDate, to: toDate })
+        if (cancelled) return
+        setEntries(result.entries)
+        setLines(result.transactionLines)
+        setLoanLines(result.loanRequestLines)
+      } catch (err) {
+        console.error('Failed to load the audit log', err)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
     load()
+    return () => { cancelled = true }
   }, [fromDate, toDate])
 
   const filtered = entries.filter(e =>
@@ -1038,25 +1045,6 @@ export default function AuditLogPage() {
     setEntityFilter(next)
     const allowed = activityKeysFor(next)
     setActionFilter(prev => (prev.every(k => allowed.includes(k)) ? prev : prev.filter(k => allowed.includes(k))))
-  }
-
-  async function toggleExpand(e: AuditLogEntry) {
-    // toggle() reports whether the row just opened; collapsing needs no
-    // fetch.
-    if (!toggleRow(e.id)) return
-    // Entries written since product lines started being frozen into the
-    // payload already carry them, so there's nothing to join to.
-    const hasFrozenLines = Array.isArray(e.after?.lines)
-    if (e.entity_type === 'transaction' && !hasFrozenLines && !lines[e.entity_id]) {
-      const snap = await getDocs(query(collection(db, 'transaction_lines'), where('transaction_id', '==', e.entity_id)))
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as TransactionLine[]
-      setLines(prev => ({ ...prev, [e.entity_id]: items }))
-    }
-    if (e.entity_type === 'loan_request' && e.before === null && !loanLines[e.entity_id]) {
-      const snap = await getDocs(query(collection(db, 'loan_request_lines'), where('request_id', '==', e.entity_id)))
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as LoanRequestLine[]
-      setLoanLines(prev => ({ ...prev, [e.entity_id]: items }))
-    }
   }
 
   // Renders from activityKey(), the same value the filter compares
@@ -1195,7 +1183,7 @@ export default function AuditLogPage() {
             {!loading && filtered.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">No audit entries found</TableCell></TableRow>}
             {pageRows.map(e => (
               <Fragment key={e.id}>
-                <TableRow className="group cursor-pointer hover:bg-[#FAF7FC]" onClick={() => toggleExpand(e)}>
+                <TableRow className="group cursor-pointer hover:bg-[#FAF7FC]" onClick={() => toggleRow(e.id)}>
                   <TableCell className="py-4 pl-6 text-xs text-slate-600 transition-colors group-hover:text-primary">{isExpanded(e.id) ? '▲' : '▼'}</TableCell>
                   <TableCell className="py-4 text-sm text-slate-600">{formatDate(e.created_at)}</TableCell>
                   <TableCell className="max-w-xs py-4 text-sm font-semibold whitespace-normal break-words text-slate-900 transition-colors group-hover:text-primary">{e.user_name ?? '—'}</TableCell>
