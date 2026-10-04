@@ -1,10 +1,11 @@
 import 'server-only'
 import { createHash } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
-import { adminAuth, adminDb } from '@/lib/firebase/admin'
+import { adminAuth } from '@/lib/firebase/admin'
+import { getRouteDb } from '@/server/context'
 import { isMailEnabled } from '@/lib/server/mailer'
 import { passwordResetEmail } from '@/lib/server/emailTemplates'
-import { isAlreadyExists, safeAddress } from '@/lib/server/notificationDelivery'
+import { claimNotificationMarker, releaseNotificationMarker, safeAddress } from '@/lib/server/notificationDelivery'
 import { ApiError } from '@/lib/server/staffAdmin'
 import { appActionLink, isUnknownAccountError, sendAccountEmail } from '@/lib/server/accountEmail'
 
@@ -39,18 +40,15 @@ export async function POST(request: NextRequest) {
     }
 
     const entity = `${createHash('sha256').update(email).digest('hex').slice(0, 32)}__${Math.floor(Date.now() / COOLDOWN_MS)}`
-    const marker = adminDb.collection('sent_notifications').doc(`password_reset__${entity}`)
-    try {
-      await marker.create({ toggle: 'password_reset', entity_id: entity, created_at: new Date().toISOString() })
-    } catch (err) {
-      if (isAlreadyExists(err)) return NextResponse.json({ sent: true })
-      throw err
-    }
+    const db = getRouteDb()
+    const markerKey = `password_reset__${entity}`
+    // Already asked inside this minute: answered "sent" without sending another.
+    if (!(await claimNotificationMarker(db, markerKey, 'password_reset'))) return NextResponse.json({ sent: true })
 
     try {
       await sendAccountEmail(email, passwordResetEmail({ link: appActionLink(link) }))
     } catch (err) {
-      await marker.delete().catch((e: unknown) => console.error('could not remove password reset marker', e))
+      await releaseNotificationMarker(db, markerKey)
       throw err
     }
     return NextResponse.json({ sent: true })

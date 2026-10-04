@@ -1,7 +1,6 @@
 // Route test for POST /api/notifications/loan-request (emails after a loan-request transition). The request, its lines,
-// the staff member and the caller's role come from the test PostgreSQL database; the notification settings and the
-// sent-notification markers still live in Firestore until the settings task, so the Admin SDK is replaced with an
-// in-memory stand-in. Mail goes to a throwaway local SMTP server (it rejects one address, to prove a failing email does
+// the staff member, the caller's role, the notification settings and the sent-notification markers all come from the
+// test PostgreSQL database. Mail goes to a throwaway local SMTP server (it rejects one address, to prove a failing email does
 // not hide the other). Same cases as the scratch harness this replaces (check-loanrequest-route.mts, 41 checks).
 import type { AddressInfo } from 'node:net'
 import { eq } from 'drizzle-orm'
@@ -10,47 +9,19 @@ import { SMTPServer } from 'smtp-server'
 import type { NextRequest } from 'next/server'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
-const fire = vi.hoisted(() => ({ docs: {} as Record<string, Record<string, unknown>>, reads: 0 }))
-
-// In-memory stand-in for the Firestore Admin SDK pieces notificationDelivery.ts uses: doc get / create / delete.
-vi.mock('@/lib/firebase/admin', () => {
-  const rows = (col: string) => fire.docs[col] ?? {}
-  return {
-    adminDb: {
-      collection(col: string) {
-        return {
-          doc(id: string) {
-            return {
-              async get() {
-                fire.reads++
-                const d = rows(col)[id]
-                return { exists: d !== undefined, data: () => d, id }
-              },
-              // Admin SDK create(): fails with gRPC code 6 (ALREADY_EXISTS) if the doc exists.
-              async create(data: unknown) {
-                if (rows(col)[id] !== undefined) {
-                  throw Object.assign(new Error(`6 ALREADY_EXISTS: Document already exists: ${col}/${id}`), { code: 6 })
-                }
-                fire.docs[col] = { ...rows(col), [id]: data }
-              },
-              async delete() {
-                const next = { ...rows(col) }
-                delete next[id]
-                fire.docs[col] = next
-              },
-            }
-          },
-        }
-      },
-    },
-  }
+// Counts reads of the settings row, to prove nothing is read while the mailer is off.
+vi.mock('@/server/data/settings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/server/data/settings')>()
+  return { ...actual, getSettingsRow: vi.fn(actual.getSettingsRow) }
 })
 
+import { getSettingsRow } from '@/server/data/settings'
 import { POST } from '@/app/api/notifications/loan-request/route'
 import { loanRequestLines, loanRequests, products, profiles, staff } from '@/server/db/schema'
 import type { Db } from '@/server/db/client'
 import { installFakeAuth, tokenFor } from '../helpers/auth'
 import { closeTestDb, resetTestDb } from '../helpers/db'
+import { markerKeys, putNotificationSettings } from '../helpers/settings'
 
 const STAFF = 'jessica@example.com'
 const ADMIN = 'selouna@nwu.test'
@@ -142,8 +113,8 @@ async function setup(status: string, opts: SetupOpts = {}) {
     { id: 'l1', request_id: 'r1', product_id: 'p1', product_name: 'USB-C Cable 1m', line_no: 0, requested_quantity: 3, offered_quantity: 2, created_at: T0 },
     { id: 'l2', request_id: 'r1', product_id: 'p2', product_name: 'Wireless Mouse', line_no: 1, requested_quantity: 1, offered_quantity: 0, created_at: T0 },
   ])
-  fire.docs = { settings: { notifications: opts.settings ?? { admin_notification_email: ADMIN } } }
-  fire.reads = 0
+  await putNotificationSettings(db, opts.settings ?? { admin_notification_email: ADMIN })
+  vi.mocked(getSettingsRow).mockClear()
   sent.length = 0
   for (const k of ENV_KEYS) delete process.env[k]
   Object.assign(process.env, { MAIL_TRANSPORT: 'smtp', SMTP_HOST: '127.0.0.1', SMTP_PORT: String(sinkPort) }, opts.env)
@@ -162,7 +133,7 @@ async function call(body: unknown, token: string | null = 'admin1', rawBody?: st
 }
 
 const to = (m: ParsedMail) => (m.to as { value: { address: string }[] }).value[0].address
-const markers = () => Object.keys(fire.docs.sent_notifications ?? {})
+const markers = () => markerKeys(db)
 
 const CASES = [
   { event: 'new_loan_request', token: 'borrower1', status: 'pending', emails: [[ADMIN, 'New loan request LR-1234ABCD from Jessica Moore']] },
@@ -194,12 +165,12 @@ describe('POST /api/notifications/loan-request', () => {
     expect((await call({ event: 'loan_request_approved', requestId: 'nope' })).status).toBe(404)
   })
 
-  it('mail disabled -> mail_disabled result and no database reads at all', async () => {
+  it('mail disabled -> mail_disabled result and no settings read at all', async () => {
     await setup('accepted', { env: { MAIL_TRANSPORT: undefined } })
     const r = await call({ event: 'loan_request_approved', requestId: 'r1' })
     expect(r.status).toBe(200)
     expect(r.body).toEqual({ results: [{ toggle: 'loan_request_approved', sent: false, reason: 'mail_disabled' }] })
-    expect(fire.reads).toBe(0)
+    expect(vi.mocked(getSettingsRow).mock.calls.length).toBe(0)
     // The request is not even looked up in PostgreSQL: an unknown id answers mail_disabled too.
     expect((await call({ event: 'loan_request_approved', requestId: 'nope' })).body).toEqual(r.body)
   })
@@ -301,7 +272,7 @@ describe('POST /api/notifications/loan-request', () => {
     expect(r.status).toBe(500)
     expect(sent).toHaveLength(1)
     expect(to(sent[0])).toBe(ADMIN)
-    expect(markers()).toEqual(['incoming_pickup_confirmed__r1__2026-10-07T10:00:00.000Z'])
+    expect(await markers()).toEqual(['incoming_pickup_confirmed__r1__2026-10-07T10:00:00.000Z'])
   })
 
   it('blank admin inbox -> admin email no_email, 200', async () => {
@@ -342,7 +313,7 @@ describe('POST /api/notifications/loan-request', () => {
     const r = await call({ event: 'new_loan_request', requestId: 'r1' }, 'borrower1')
     expect(r.status).toBe(502)
     expect(r.body.error).toBe('Mail server not reachable. Is Mailpit running? (npm run mailpit)')
-    expect(markers()).toEqual([])
+    expect(await markers()).toEqual([])
   })
 
   it('hostile staff name in the request is escaped in the delivered html', async () => {

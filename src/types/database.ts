@@ -283,7 +283,7 @@ export interface ReturnWaiver {
 
 // Feature-flag toggles for the outbound notification emails this app can
 // send (see NOTIFICATION_EMAIL_DEFINITIONS in
-// lib/firebase/notificationSettings.ts for what each one actually covers,
+// lib/notificationSettingsRules.ts for what each one actually covers,
 // and (protected)/settings/notifications for the page that edits these).
 // One singleton document, not one per admin -- there is one operational
 // inbox (Selouna's) and one lending-portal audience to notify, not several.

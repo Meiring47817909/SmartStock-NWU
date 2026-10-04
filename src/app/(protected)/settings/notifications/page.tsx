@@ -16,7 +16,7 @@ import {
   loadSystemFromEmail,
   saveSystemFromEmail,
   type NotificationEmailDefinition,
-} from '@/lib/firebase/notificationSettings'
+} from '@/lib/api/settings'
 import { DEFAULT_SYSTEM_EMAIL } from '@/lib/notificationCatalog'
 import type { NotificationSettingKey } from '@/types/database'
 
@@ -60,13 +60,13 @@ function NotificationRow({
 // there's no separate "Save" step to forget. The three emails that still
 // need a timer can't be turned on yet (see lib/notificationCatalog.ts).
 export default function NotificationSettingsPage() {
-  const { user, profile } = useAuth()
+  const { user } = useAuth()
   const [settings, setSettings] = useState<Record<NotificationSettingKey, boolean> | null>(null)
   const [pendingKey, setPendingKey] = useState<NotificationSettingKey | null>(null)
   const [error, setError] = useState('')
 
   // The address the five "Emails to Selouna" below are actually sent to --
-  // savedAdminEmail is what's in Firestore right now, adminEmail is the
+  // savedAdminEmail is what's saved right now, adminEmail is the
   // (possibly-being-edited) form value, so the Save button can tell them
   // apart and disable itself once they match again.
   const [adminEmail, setAdminEmail] = useState('')
@@ -82,7 +82,7 @@ export default function NotificationSettingsPage() {
   const [systemError, setSystemError] = useState('')
 
   useEffect(() => {
-    // External read (Firestore), not state derivable from props.
+    // External read (the settings API), not state derivable from props.
     Promise.all([loadNotificationSettings(), loadAdminNotificationEmail(), loadSystemFromEmail()])
       .then(([toggles, email, systemFrom]) => {
         setSettings(toggles)
@@ -101,10 +101,7 @@ export default function NotificationSettingsPage() {
     setSavingEmail(true)
     try {
       const trimmed = adminEmail.trim()
-      await saveAdminNotificationEmail(trimmed, savedAdminEmail, {
-        uid: user?.uid,
-        name: profile?.full_name ?? user?.email,
-      })
+      await saveAdminNotificationEmail(trimmed)
       setAdminEmail(trimmed)
       setSavedAdminEmail(trimmed)
     } catch (err) {
@@ -119,10 +116,7 @@ export default function NotificationSettingsPage() {
     setSavingSystem(true)
     try {
       const trimmed = systemEmail.trim()
-      await saveSystemFromEmail(trimmed, savedSystemEmail, {
-        uid: user?.uid,
-        name: profile?.full_name ?? user?.email,
-      })
+      await saveSystemFromEmail(trimmed)
       // Clearing the field and saving goes back to the default sender.
       setSystemEmail(trimmed || DEFAULT_SYSTEM_EMAIL)
       setSavedSystemEmail(trimmed || DEFAULT_SYSTEM_EMAIL)
@@ -144,10 +138,7 @@ export default function NotificationSettingsPage() {
     setSettings({ ...settings, [key]: next }) // optimistic
     setPendingKey(key)
     try {
-      await setNotificationSetting(key, next, previous, {
-        uid: user?.uid,
-        name: profile?.full_name ?? user?.email,
-      })
+      await setNotificationSetting(key, next)
     } catch (e) {
       console.error(e)
       setSettings((curr) => (curr ? { ...curr, [key]: previous } : curr)) // revert

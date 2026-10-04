@@ -11,7 +11,7 @@ import { isStaleRequestError, withdrawRequest } from '@/lib/api/loanRequests'
 import { notifyAlertsChanged } from '@/lib/alertsBus'
 import { createReturnWaiver } from '@/lib/api/stock'
 import { loadDashboard, type DashboardData, type IncomingPickupRow, type LowStockStatus, type OutstandingReturnRow, type OutstandingStatus, type PickupLine } from '@/lib/api/dashboard'
-import { loadNotificationSettings } from '@/lib/firebase/notificationSettings'
+import { loadNotificationSettings } from '@/lib/api/settings'
 import { useAuth } from '@/context/AuthContext'
 import { useRole } from '@/context/RoleContext'
 import { Button } from '@/components/ui/button'
@@ -187,7 +187,7 @@ export default function DashboardPage() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    // External read (Firestore), not state derivable from props -- same
+    // External read (the settings API), not state derivable from props -- same
     // pattern as the Notification Settings page itself.
     loadNotificationSettings()
       .then((s) => setPickupCancelledEmailOn(s.approved_pickup_cancelled))

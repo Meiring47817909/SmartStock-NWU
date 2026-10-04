@@ -1,12 +1,16 @@
-import { db } from './config'
-import { doc, getDoc, setDoc } from 'firebase/firestore'
-import { logAudit } from './audit'
 import type { NotificationSettingKey } from '@/types/database'
 import { isNotificationImplemented } from '@/lib/notificationCatalog'
 
-// Singleton doc -- one operational inbox (Selouna's) and one lending-portal
-// audience to notify, not one set of preferences per admin.
-export const NOTIFICATION_SETTINGS_DOC_ID = 'notifications'
+// Pure and client-safe (no database, no Firebase, no server-only): the
+// definitions, defaults and validation shared by the Settings page and the
+// server. The stored values live in the PostgreSQL `settings` table (see
+// src/server/data/settings.ts); the browser reaches them through
+// src/lib/api/settings.ts.
+
+// Singleton row -- one operational inbox (Selouna's) and one lending-portal
+// audience to notify, not one set of preferences per admin. This is the
+// `settings.key` the values are stored under, and the audit entity id.
+export const NOTIFICATION_SETTINGS_KEY = 'notifications'
 
 export interface NotificationEmailDefinition {
   key: NotificationSettingKey
@@ -148,11 +152,13 @@ export const DEFAULT_NOTIFICATION_SETTINGS: Record<NotificationSettingKey, boole
   NOTIFICATION_EMAIL_DEFINITIONS.map((d) => [d.key, isNotificationImplemented(d.key)]),
 ) as Record<NotificationSettingKey, boolean>
 
-export async function loadNotificationSettings(): Promise<Record<NotificationSettingKey, boolean>> {
-  const snap = await getDoc(doc(db, 'settings', NOTIFICATION_SETTINGS_DOC_ID))
+// The toggles as stored (`data` is the stored settings object, if any): a
+// missing or non-boolean value falls back to the default, and an unbuilt email
+// is always off even if a leftover `true` is stored from before it was
+// switched off.
+export function resolveNotificationSettings(data: Record<string, unknown> | null | undefined): Record<NotificationSettingKey, boolean> {
   const result = { ...DEFAULT_NOTIFICATION_SETTINGS }
-  if (!snap.exists()) return result
-  const data = snap.data()
+  if (!data) return result
   for (const key of Object.keys(DEFAULT_NOTIFICATION_SETTINGS) as NotificationSettingKey[]) {
     if (typeof data[key] === 'boolean') result[key] = data[key] as boolean
   }
@@ -168,105 +174,35 @@ export async function loadNotificationSettings(): Promise<Record<NotificationSet
 // misses anyway).
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-type AddressField = 'admin_notification_email' | 'system_from_email'
+export type AddressField = 'admin_notification_email' | 'system_from_email'
 
-async function loadAddress(field: AddressField): Promise<string> {
-  const snap = await getDoc(doc(db, 'settings', NOTIFICATION_SETTINGS_DOC_ID))
-  if (!snap.exists()) return ''
-  const value = snap.data()[field]
+// The audit label of each address field.
+export const ADDRESS_LABELS: Record<AddressField, string> = {
+  admin_notification_email: 'Admin notification email',
+  system_from_email: 'System sending email',
+}
+
+// An address field as stored: a string, or '' when nothing is saved.
+export function storedAddress(data: Record<string, unknown> | null | undefined, field: AddressField): string {
+  const value = data?.[field]
   return typeof value === 'string' ? value : ''
 }
 
-export function loadAdminNotificationEmail(): Promise<string> {
-  return loadAddress('admin_notification_email')
-}
+export const INVALID_ADDRESS_MESSAGE = 'Enter a valid email address.'
 
-// The address every email the system sends comes from (the From header).
-// Blank means "use the server's default sender".
-export function loadSystemFromEmail(): Promise<string> {
-  return loadAddress('system_from_email')
-}
-
-// Resolves the open question flagged in the email-notifications review --
-// "who actually receives Selouna's emails" -- with the simpler of the two
-// options discussed there: one fixed, admin-editable address rather than a
-// query over every profiles doc with role admin. Throws (rather than
-// silently rejecting) on an invalid address so the Settings page's form can
-// show the same message inline instead of swallowing it.
-async function saveAddress(
-  field: AddressField,
-  label: string,
-  email: string,
-  previousEmail: string,
-  actor: { uid?: string | null; name?: string | null },
-): Promise<void> {
+// The trimmed address to save ('' clears it), or null when it is not a valid
+// address -- the caller refuses with INVALID_ADDRESS_MESSAGE so the Settings
+// page's form shows it inline.
+export function validatedAddress(email: string): string | null {
   const trimmed = email.trim()
-  if (trimmed && !EMAIL_RE.test(trimmed)) {
-    throw new Error('Enter a valid email address.')
-  }
-  const now = new Date().toISOString()
-  await setDoc(
-    doc(db, 'settings', NOTIFICATION_SETTINGS_DOC_ID),
-    {
-      [field]: trimmed || null,
-      updated_at: now,
-      updated_by_uid: actor.uid ?? null,
-      updated_by_name: actor.name ?? null,
-    },
-    { merge: true },
-  )
-  logAudit({
-    userId: actor.uid,
-    userName: actor.name,
-    action: 'update',
-    entityType: 'settings',
-    entityId: NOTIFICATION_SETTINGS_DOC_ID,
-    before: { [field]: previousEmail || null, label },
-    after: { [field]: trimmed || null, label },
-  })
+  return trimmed && !EMAIL_RE.test(trimmed) ? null : trimmed
 }
 
-export function saveAdminNotificationEmail(
-  email: string,
-  previousEmail: string,
-  actor: { uid?: string | null; name?: string | null },
-): Promise<void> {
-  return saveAddress('admin_notification_email', 'Admin notification email', email, previousEmail, actor)
+// The label shown in the audit entry for one toggle.
+export function notificationLabel(key: NotificationSettingKey): string {
+  return NOTIFICATION_EMAIL_DEFINITIONS.find((d) => d.key === key)?.label ?? key
 }
 
-export function saveSystemFromEmail(
-  email: string,
-  previousEmail: string,
-  actor: { uid?: string | null; name?: string | null },
-): Promise<void> {
-  return saveAddress('system_from_email', 'System sending email', email, previousEmail, actor)
-}
-
-// Flips exactly one toggle, merged into whatever's already stored (so
-// flipping one setting never clobbers a concurrent change to another), and
-// audits it against the same singleton entity id every time —
-// 'settings'/'notifications' — so every change to this doc shows up
-// together in the Audit Log (filter to Settings, or expand any entry).
-export async function setNotificationSetting(
-  key: NotificationSettingKey,
-  value: boolean,
-  previousValue: boolean,
-  actor: { uid?: string | null; name?: string | null },
-): Promise<void> {
-  const now = new Date().toISOString()
-  await setDoc(
-    doc(db, 'settings', NOTIFICATION_SETTINGS_DOC_ID),
-    { [key]: value, updated_at: now, updated_by_uid: actor.uid ?? null, updated_by_name: actor.name ?? null },
-    { merge: true },
-  )
-  const label = NOTIFICATION_EMAIL_DEFINITIONS.find((d) => d.key === key)?.label ?? key
-  logAudit({
-    userId: actor.uid,
-    userName: actor.name,
-    action: 'update',
-    entityType: 'settings',
-    entityId: NOTIFICATION_SETTINGS_DOC_ID,
-    before: { [key]: previousValue, label },
-    after: { [key]: value, label },
-  })
+export function isNotificationKey(key: unknown): key is NotificationSettingKey {
+  return typeof key === 'string' && Object.prototype.hasOwnProperty.call(DEFAULT_NOTIFICATION_SETTINGS, key)
 }

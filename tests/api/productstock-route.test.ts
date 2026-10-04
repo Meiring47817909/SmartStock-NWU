@@ -1,7 +1,6 @@
 // Route test for POST /api/notifications/product-stock (low stock email after a Products-page edit).
-// The product and the caller's role come from the test PostgreSQL database; the settings document and the
-// sent-notification markers still live in Firestore until the notifications task, so the Admin SDK is replaced
-// with an in-memory stand-in. Mail goes to a throwaway local SMTP server.
+// The product, the caller's role, the notification settings and the sent-notification markers all come from the test
+// PostgreSQL database. Mail goes to a throwaway local SMTP server.
 import type { AddressInfo } from 'node:net'
 import { eq } from 'drizzle-orm'
 import { simpleParser, type ParsedMail } from 'mailparser'
@@ -9,47 +8,19 @@ import { SMTPServer } from 'smtp-server'
 import type { NextRequest } from 'next/server'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const fire = vi.hoisted(() => ({ docs: {} as Record<string, Record<string, unknown>>, reads: 0 }))
-
-// In-memory stand-in for the Firestore Admin SDK pieces notificationDelivery.ts uses: doc get / create / delete.
-vi.mock('@/lib/firebase/admin', () => {
-  const rows = (col: string) => fire.docs[col] ?? {}
-  return {
-    adminDb: {
-      collection(col: string) {
-        return {
-          doc(id: string) {
-            return {
-              async get() {
-                fire.reads++
-                const d = rows(col)[id]
-                return { exists: d !== undefined, data: () => d, id }
-              },
-              // Admin SDK create(): fails with gRPC code 6 (ALREADY_EXISTS) if the doc exists.
-              async create(data: unknown) {
-                if (rows(col)[id] !== undefined) {
-                  throw Object.assign(new Error(`6 ALREADY_EXISTS: Document already exists: ${col}/${id}`), { code: 6 })
-                }
-                fire.docs[col] = { ...rows(col), [id]: data }
-              },
-              async delete() {
-                const next = { ...rows(col) }
-                delete next[id]
-                fire.docs[col] = next
-              },
-            }
-          },
-        }
-      },
-    },
-  }
+// Counts reads of the settings row, to prove nothing is read while the mailer is off.
+vi.mock('@/server/data/settings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/server/data/settings')>()
+  return { ...actual, getSettingsRow: vi.fn(actual.getSettingsRow) }
 })
 
+import { getSettingsRow } from '@/server/data/settings'
 import { POST } from '@/app/api/notifications/product-stock/route'
 import { productBarcodes, products, profiles } from '@/server/db/schema'
 import type { Db } from '@/server/db/client'
 import { installFakeAuth, tokenFor } from '../helpers/auth'
 import { closeTestDb, resetTestDb } from '../helpers/db'
+import { markerKeys, putNotificationSettings } from '../helpers/settings'
 
 const ADMIN_INBOX = 'selouna@nwu.test'
 const T1 = new Date('2026-10-03T10:00:00.000Z')
@@ -118,8 +89,8 @@ async function setup(opts: { settings?: Record<string, unknown>; env?: Record<st
     { barcode: 'B-2', product_id: 'p2', position: 0 },
     { barcode: 'B-3', product_id: 'p3', position: 0 },
   ])
-  fire.docs = { settings: { notifications: opts.settings ?? { admin_notification_email: ADMIN_INBOX } } }
-  fire.reads = 0
+  await putNotificationSettings(db, opts.settings ?? { admin_notification_email: ADMIN_INBOX })
+  vi.mocked(getSettingsRow).mockClear()
   sent.length = 0
   for (const k of ENV_KEYS) delete process.env[k]
   Object.assign(process.env, { MAIL_TRANSPORT: 'smtp', SMTP_HOST: '127.0.0.1', SMTP_PORT: String(sinkPort) }, opts.env)
@@ -168,12 +139,12 @@ describe('POST /api/notifications/product-stock', () => {
     }
   })
 
-  it('mail disabled -> mail_disabled, no product or Firestore read', async () => {
+  it('mail disabled -> mail_disabled, no product or settings read', async () => {
     await setup({ env: { MAIL_TRANSPORT: undefined } })
     // The product is not even looked up: an unknown id still answers mail_disabled.
     const r = await call(crossed({ productId: 'nope' }))
     expect(r.body).toEqual({ sent: false, reason: 'mail_disabled' })
-    expect(fire.reads).toBe(0)
+    expect(vi.mocked(getSettingsRow).mock.calls.length).toBe(0)
   })
 
   it('unknown product -> 404', async () => {
@@ -244,6 +215,6 @@ describe('POST /api/notifications/product-stock', () => {
     const r = await call(crossed())
     expect(r.status).toBe(502)
     expect(r.body.error).toBe('Mail server not reachable. Is Mailpit running? (npm run mailpit)')
-    expect(Object.keys(fire.docs.sent_notifications ?? {})).toHaveLength(0)
+    expect(await markerKeys(db)).toHaveLength(0)
   })
 })

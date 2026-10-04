@@ -1,5 +1,10 @@
 import 'server-only'
-import { adminDb } from '@/lib/firebase/admin'
+import { eq } from 'drizzle-orm'
+import { getRouteDb } from '@/server/context'
+import type { Db, Tx } from '@/server/db/client'
+import { sentNotifications } from '@/server/db/schema'
+import { getSettingsRow } from '@/server/data/settings'
+import { NOTIFICATION_SETTINGS_KEY } from '@/lib/notificationSettingsRules'
 import { sendMail } from '@/lib/server/mailer'
 import type { RenderedEmail } from '@/lib/server/emailTemplates'
 import { isNotificationImplemented } from '@/lib/notificationCatalog'
@@ -26,15 +31,9 @@ export function appBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   return (raw || DEFAULT_APP_BASE_URL).replace(/\/+$/, '')
 }
 
-export async function staffEmailFor(staffId: string): Promise<string> {
-  const snap = await adminDb.collection('staff').doc(staffId).get()
-  const email = snap.data()?.email
-  return typeof email === 'string' ? email.trim() : ''
-}
-
-export async function adminInboxEmail(): Promise<string> {
-  const snap = await adminDb.collection('settings').doc('notifications').get()
-  const email = snap.data()?.admin_notification_email
+// The Admin notification address, trimmed ('' when none is saved).
+export async function adminInboxEmail(db: Db | Tx = getRouteDb()): Promise<string> {
+  const email = (await getSettingsRow(db, NOTIFICATION_SETTINGS_KEY))?.admin_notification_email
   return typeof email === 'string' ? email.trim() : ''
 }
 
@@ -56,18 +55,33 @@ export function fromHeaderFor(address: unknown): string | undefined {
 }
 
 // Read from its own field, never from the administrator inbox address.
-export async function systemFromAddress(): Promise<string | undefined> {
-  const snap = await adminDb.collection('settings').doc('notifications').get()
-  return fromHeaderFor(snap.data()?.system_from_email)
+export async function systemFromAddress(db: Db | Tx = getRouteDb()): Promise<string | undefined> {
+  return fromHeaderFor((await getSettingsRow(db, NOTIFICATION_SETTINGS_KEY))?.system_from_email)
 }
 
-export function isAlreadyExists(err: unknown): boolean {
-  const e = err as { code?: unknown; message?: unknown }
-  return e?.code === 6 || e?.code === 'already-exists' || /ALREADY_EXISTS/.test(String(e?.message ?? ''))
+// The sent_notifications marker: "this email was already sent (or is being sent)". Claiming is one INSERT ... ON
+// CONFLICT DO NOTHING that commits on its own BEFORE the send, so two simultaneous calls cannot both send: only the
+// one that inserted the row (returns true) goes on. `key` is `<toggle>__<entity>`; the entity part is stored as well.
+export async function claimNotificationMarker(db: Db | Tx, key: string, toggle: string): Promise<boolean> {
+  const inserted = await db
+    .insert(sentNotifications)
+    .values({ key, toggle, entity_id: key.slice(key.indexOf('__') + 2) })
+    .onConflictDoNothing()
+    .returning({ key: sentNotifications.key })
+  return inserted.length > 0
+}
+
+// Removes a marker so a retry can send. Never throws: it only runs while another error is already being reported.
+export async function releaseNotificationMarker(db: Db | Tx, key: string): Promise<void> {
+  try {
+    await db.delete(sentNotifications).where(eq(sentNotifications.key, key))
+  } catch (e) {
+    console.error('could not remove notification marker', key, e)
+  }
 }
 
 // Order: unbuilt toggle, toggle off, recipient, duplicate marker, render, send.
-// The marker is written BEFORE sending so two simultaneous calls cannot both
+// The marker is committed BEFORE sending so two simultaneous calls cannot both
 // send; if rendering or sending then fails it is removed so a retry can send.
 export async function deliver(opts: {
   toggle: NotificationSettingKey
@@ -80,36 +94,24 @@ export async function deliver(opts: {
 
   if (!isNotificationImplemented(toggle)) return skip('not_implemented')
 
+  const db = getRouteDb()
+  const settingsRow = await getSettingsRow(db, NOTIFICATION_SETTINGS_KEY)
   // Missing or any non-false value means on, matching DEFAULT_NOTIFICATION_SETTINGS.
-  const settingsSnap = await adminDb.collection('settings').doc('notifications').get()
-  if (settingsSnap.data()?.[toggle] === false) return skip('toggle_off')
+  if (settingsRow?.[toggle] === false) return skip('toggle_off')
 
   const to = (await opts.recipient()).trim()
   if (!to) return skip('no_email')
 
-  const marker = adminDb.collection('sent_notifications').doc(dedupeKey)
-  try {
-    await marker.create({
-      toggle,
-      entity_id: dedupeKey.slice(dedupeKey.indexOf('__') + 2),
-      created_at: new Date().toISOString(),
-    })
-  } catch (err) {
-    if (isAlreadyExists(err)) return skip('duplicate')
-    throw err
-  }
-
-  const release = () =>
-    marker.delete().catch((e: unknown) => console.error('could not remove notification marker', dedupeKey, e))
+  if (!(await claimNotificationMarker(db, dedupeKey, toggle))) return skip('duplicate')
 
   try {
     const { subject, html, text } = await opts.render()
-    if (!(await sendMail({ to, subject, html, text, from: fromHeaderFor(settingsSnap.data()?.system_from_email) }))) {
-      await release()
+    if (!(await sendMail({ to, subject, html, text, from: fromHeaderFor(settingsRow?.system_from_email) }))) {
+      await releaseNotificationMarker(db, dedupeKey)
       return skip('mail_disabled')
     }
   } catch (err) {
-    await release()
+    await releaseNotificationMarker(db, dedupeKey)
     throw err
   }
   return { toggle, sent: true }

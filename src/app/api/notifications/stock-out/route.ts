@@ -1,16 +1,17 @@
 import 'server-only'
 import { NextRequest, NextResponse } from 'next/server'
 import { asc, eq } from 'drizzle-orm'
-import { adminDb } from '@/lib/firebase/admin'
 import { requireAdmin, routeCtx, ApiError } from '@/lib/server/staffAdmin'
 import { DataError, type Ctx } from '@/server/context'
 import { getProduct } from '@/server/data/catalog'
 import { getStaff } from '@/server/data/staff'
+import { getSettingsRow } from '@/server/data/settings'
 import { transactionLines, transactions } from '@/server/db/schema'
 import { isMailEnabled, sendMail, MailUnreachableError, MailConfigError } from '@/lib/server/mailer'
 import {
   stockOutConfirmationEmail, lowStockEmail, type StockOutEmailLine, type LowStockProduct,
 } from '@/lib/server/emailTemplates'
+import { NOTIFICATION_SETTINGS_KEY } from '@/lib/notificationSettingsRules'
 import { deliver, appBaseUrl, adminInboxEmail, fromHeaderFor, type SkipReason } from '@/lib/server/notificationDelivery'
 
 interface StepResult {
@@ -58,9 +59,8 @@ async function sendConfirmation(
   lines: TransactionLineDoc[],
 ): Promise<StepResult> {
   // Missing or any non-false value means on, matching DEFAULT_NOTIFICATION_SETTINGS.
-  // (The notification settings still live in Firestore until the settings task moves them.)
-  const settingsSnap = await adminDb.collection('settings').doc('notifications').get()
-  if (settingsSnap.data()?.stock_out_confirmation === false) return skipped('toggle_off')
+  const settingsRow = await getSettingsRow(ctx.db, NOTIFICATION_SETTINGS_KEY)
+  if (settingsRow?.stock_out_confirmation === false) return skipped('toggle_off')
 
   const staffData = txn.staff_id == null ? null : await getStaff(ctx, String(txn.staff_id))
   const staffEmail = typeof staffData?.email === 'string' ? staffData.email.trim() : ''
@@ -73,7 +73,7 @@ async function sendConfirmation(
     lendFrom: txn.lend_from ?? null,
     lendTo: txn.lend_to ?? null,
   })
-  await sendMail({ to: staffEmail, subject, html, text, from: fromHeaderFor(settingsSnap.data()?.system_from_email) })
+  await sendMail({ to: staffEmail, subject, html, text, from: fromHeaderFor(settingsRow?.system_from_email) })
   return { sent: true }
 }
 
