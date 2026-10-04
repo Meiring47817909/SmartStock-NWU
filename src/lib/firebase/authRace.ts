@@ -6,7 +6,7 @@ function sleep(ms: number) {
 // first call made from inside that callback, right after a sign-in, can go out
 // effectively unauthenticated and get a spurious rejection, even though it
 // would succeed once the token catches up. Two shapes of that rejection are
-// absorbed: a Firestore 'permission-denied' (the original Firestore reads) and
+// absorbed: a Firebase 'permission-denied' error and
 // an HTTP 401 from our own /api routes (a ClientApiError whose `status` is 401,
 // i.e. the token was missing or not yet accepted). Wrap any such call with this
 // to absorb that one-time race without masking a genuine problem — a real

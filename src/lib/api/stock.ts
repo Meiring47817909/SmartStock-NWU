@@ -1,5 +1,5 @@
-// Browser client for the stock API. Same function names as the old Firestore helpers where there were any
-// (loadWaivedByTxn, loadWaivers, createReturnWaiver), minus the server-side `ctx`.
+// Browser client for the stock API. Each function calls the matching route in src/app/api; the server-side `ctx` is
+// built there from the caller's token.
 //
 // Routes (all JSON, all admin; the Firebase ID token is attached by api()):
 //   POST /api/stock/in                  recordStockIn

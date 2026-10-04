@@ -3,8 +3,8 @@
 // address" saved under Settings -> Notifications, so changing it there changes
 // it everywhere. Only the address is ever shown, never a person's name.
 //
-// Signed-out visitors and portal borrowers cannot read the settings document
-// (firestore.rules: admin only), so this reads it through GET /api/contact.
+// Signed-out visitors and portal borrowers cannot read the settings API
+// (admin only), so this reads it through GET /api/contact.
 
 // Shown when nothing is saved yet or the request fails, so there is never a
 // blank or a broken mailto link.

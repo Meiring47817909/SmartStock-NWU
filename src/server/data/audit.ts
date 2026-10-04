@@ -12,7 +12,7 @@ export interface AuditEntry {
   after: Record<string, unknown> | null
 }
 
-// Same as logAudit in src/lib/firebase/audit.ts: values that are `undefined` are dropped from the snapshots.
+// Values that are `undefined` are dropped from the snapshots.
 function stripUndefined(value: Record<string, unknown> | null): Record<string, unknown> | null {
   if (!value) return null
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined))
@@ -20,8 +20,8 @@ function stripUndefined(value: Record<string, unknown> | null): Record<string, u
 
 /**
  * Append one audit entry as `ctx.caller` at `ctx.now()`. Returns its id.
- * Unlike the Firestore logAudit it does not swallow errors: callers run it inside the same transaction as the change
- * it describes, so a failed audit write rolls the change back too.
+ * It does not swallow errors: callers run it inside the same transaction as the change it describes, so a failed
+ * audit write rolls the change back too.
  */
 export async function writeAudit(ctx: Ctx, entry: AuditEntry): Promise<string> {
   const id = newId()

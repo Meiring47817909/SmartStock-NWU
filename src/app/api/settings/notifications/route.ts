@@ -3,7 +3,7 @@ import { DataError } from '@/server/context'
 import { loadAddress, loadNotificationSettings, saveAddress, setNotificationSetting } from '@/server/data/settings'
 import type { NotificationSettingKey } from '@/types/database'
 
-// Notification settings (admin only, like the old Firestore `settings` rule).
+// Notification settings (admin only).
 //   GET  /api/settings/notifications                                 → { [toggle]: boolean }  (defaults filled in)
 //   GET  /api/settings/notifications?kind=admin_notification_email   → { value: string }
 //   GET  /api/settings/notifications?kind=system_from_email          → { value: string }

@@ -24,7 +24,7 @@ import { markerKeys, putNotificationSettings } from '../helpers/settings'
 
 const ADMIN_INBOX = 'selouna@nwu.test'
 const T1 = new Date('2026-10-03T10:00:00.000Z')
-const ENV_KEYS = ['MAIL_TRANSPORT', 'SMTP_HOST', 'SMTP_PORT', 'FIREBASE_AUTH_EMULATOR_HOST', 'FIRESTORE_EMULATOR_HOST']
+const ENV_KEYS = ['MAIL_TRANSPORT', 'SMTP_HOST', 'SMTP_PORT', 'FIREBASE_AUTH_EMULATOR_HOST']
 
 let db: Db
 let restoreAuth: () => void

@@ -1,5 +1,5 @@
-// Browser client for the catalog API (categories, products, barcodes). Same function names as the Firestore
-// helpers in src/lib/firebase/products.ts, minus the server-side `ctx`.
+// Browser client for the catalog API (categories, products, barcodes). Each function calls the matching route in
+// src/app/api; the server-side `ctx` is built there from the caller's token.
 //
 // Routes (all JSON; the Firebase ID token is attached by api()):
 //   GET  /api/categories                              admin    list

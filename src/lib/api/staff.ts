@@ -1,5 +1,5 @@
-// Browser client for the staff API. Same function names as the old Firestore helpers where there were any
-// (findStaffEmailConflict), minus the server-side `ctx`.
+// Browser client for the staff API. Each function calls the matching route in src/app/api; the server-side `ctx` is
+// built there from the caller's token.
 //
 // Routes (all JSON; the Firebase ID token is attached by api()):
 //   GET  /api/staff[?includeAdminAccount=true]                admin    list

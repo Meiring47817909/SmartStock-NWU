@@ -60,10 +60,9 @@ export default function LendBrowsePage() {
         const outOfStockIds = items
           .filter((p) => (p.available ?? true) && p.quantity_on_hand <= 0)
           .map((p) => String(p.id))
-        // `transactions` is admin-only in firestore.rules (it's every staff
-        // member's full borrow history) — a portal borrower's own client
-        // can't query it directly, so this goes through an API route running
-        // with Admin SDK privileges instead of a direct Firestore read. See
+        // `transactions` is admin-only (it's every staff member's full
+        // borrow history) — a portal borrower can't read it, so this goes
+        // through an API route that runs the check on the server. See
         // lib/server/availability.ts for why.
         if (outOfStockIds.length > 0 && user) {
           try {
@@ -90,8 +89,8 @@ export default function LendBrowsePage() {
   }, [user])
 
 
-  // Categories aren't readable by a portal borrower directly (see
-  // firestore.rules — `categories` is admin-only), so the picker's options
+  // Categories aren't readable by a portal borrower (the categories API
+  // is admin-only), so the picker's options
   // come from each product's own denormalized category_id/category_name
   // instead of a separate query, the same fields the admin Products table
   // already relies on for display.

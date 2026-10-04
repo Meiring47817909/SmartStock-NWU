@@ -1,5 +1,5 @@
-// Browser client for the loan-request API. Same function names as the old Firestore helpers
-// (src/lib/firebase/loanRequests.ts, removed), minus the server-side `ctx`; the pure helpers come from src/lib/loanRequestRules.ts.
+// Browser client for the loan-request API. Each function calls the matching route in src/app/api; the server-side `ctx`
+// is built there from the caller's token. The pure helpers come from src/lib/loanRequestRules.ts.
 // What changed for callers: the actor (user id / name) is no longer passed, the server uses the signed-in caller; the
 // transitions take the request (or just its id) and the server reads the lines and statuses itself; the cart is
 // `{ product: { id }, quantity }` as before, but the server looks the product up (nothing about the product is trusted).

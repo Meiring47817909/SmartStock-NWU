@@ -41,7 +41,7 @@ export async function deadPort(): Promise<number> {
   return port
 }
 
-export const MAIL_ENV_KEYS = ['MAIL_TRANSPORT', 'SMTP_HOST', 'SMTP_PORT', 'FIREBASE_AUTH_EMULATOR_HOST', 'FIRESTORE_EMULATOR_HOST', 'APP_BASE_URL', 'MAIL_FROM', 'MAIL_USERNAME', 'MAIL_PASSWORD']
+export const MAIL_ENV_KEYS = ['MAIL_TRANSPORT', 'SMTP_HOST', 'SMTP_PORT', 'FIREBASE_AUTH_EMULATOR_HOST', 'APP_BASE_URL', 'MAIL_FROM', 'MAIL_USERNAME', 'MAIL_PASSWORD']
 
 /** Save the mail-related env vars; the returned function restores them. */
 export function saveMailEnv(): () => void {

@@ -23,10 +23,9 @@ describe('mailer', () => {
     })
   })
 
-  it('guard refuses non-local host when either emulator var is set, allows local hosts, allows any host without emulators', () => {
+  it('guard refuses non-local host when the Auth emulator var is set, allows local hosts, allows any host without emulators', () => {
     const bad = { MAIL_TRANSPORT: 'smtp', SMTP_HOST: 'smtp.gmail.com' }
     assert.throws(() => resolveSmtpConfig(env({ ...bad, FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099' })), MailConfigError)
-    assert.throws(() => resolveSmtpConfig(env({ ...bad, FIRESTORE_EMULATOR_HOST: '127.0.0.1:8081' })), MailConfigError)
     assert.equal(resolveSmtpConfig(env(bad)).host, 'smtp.gmail.com')
     for (const host of ['localhost', '::1', '127.0.0.1']) {
       assert.equal(resolveSmtpConfig(env({ MAIL_TRANSPORT: 'smtp', SMTP_HOST: host, FIREBASE_AUTH_EMULATOR_HOST: 'x' })).host, host)

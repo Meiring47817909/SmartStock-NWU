@@ -1,7 +1,7 @@
 // Firebase Storage helpers for product images.
 //
 // We store *paths* (e.g. "products/<id>/1699999999-0-photo.jpg") in
-// Firestore rather than resolved download URLs — URLs can change (tokens,
+// the database rather than resolved download URLs — URLs can change (tokens,
 // bucket moves) but a storage path is stable, and it's what deleteObject()
 // needs anyway. storageDownloadUrl() turns a path into a fetchable URL for
 // <img> tags.

@@ -1,4 +1,4 @@
-// Database types for NWU BICS – mirrors the Firebase Firestore schema
+// Database types for NWU BICS – mirror the PostgreSQL schema (src/server/db/schema.ts)
 
 // Two roles only.
 //   admin — Selouna and anyone else running the IT Store: every BICS page.
@@ -21,7 +21,7 @@ export interface Profile {
 }
 
 export interface Category {
-  id: string          // Firestore document ID
+  id: string          // row ID
   name: string
   description: string | null
   created_at: string
@@ -38,7 +38,7 @@ export type LendingInterval = 'week_1' | 'week_2' | 'week_3' | 'month_1' | 'inde
 
 export interface Product {
   id: number
-  category_id: string | null   // Firestore document ID of the category (see Category.id)
+  category_id: string | null   // row ID of the category (see Category.id)
   name: string
   description: string | null
   // Multiple codes can point at the same product — e.g. the barcode/QR a
@@ -139,9 +139,9 @@ export interface Transaction {
 }
 
 export interface TransactionLine {
-  id: string           // Firestore document ID
-  transaction_id: string  // Firestore document ID of the parent transaction
-  product_id: string      // Firestore document ID of the product
+  id: string           // row ID
+  transaction_id: string  // row ID of the parent transaction
+  product_id: string      // row ID of the product
   quantity: number
   unit_cost: number
   created_at: string
@@ -204,10 +204,10 @@ export type LoanRequestStatus =
   | 'no_show'    // accepted but pickup window passed with nothing issued — terminal
 
 export interface LoanRequest {
-  id: string                    // Firestore document ID
+  id: string                    // row ID
   // Human-readable reference, LR-XXXXXXXX — the loan-request counterpart
   // to Transaction.reference_no, so a request can be quoted in an email or
-  // matched against a paper note instead of a Firestore id. Optional
+  // matched against a paper note instead of a database id. Optional
   // because requests created before this existed genuinely don't have one;
   // they are not backfilled, since a reference invented today was never
   // the reference anyone used at the time.
@@ -240,9 +240,9 @@ export interface LoanRequest {
 }
 
 export interface LoanRequestLine {
-  id: string                    // Firestore document ID
+  id: string                    // row ID
   request_id: string             // LoanRequest document ID
-  product_id: string              // Firestore document ID of the product (Product.id.toString())
+  product_id: string              // row ID of the product (Product.id.toString())
   product_name: string            // denormalized
   requested_quantity: number      // set once at submission — never edited after
   offered_quantity: number        // starts equal to requested_quantity. Selouna's counter edits
@@ -257,7 +257,7 @@ export interface LoanRequestLine {
 //
 // Deliberately its own append-only collection rather than a mutable flag on
 // the OUT transaction/line: `transactions` and `transaction_lines` are
-// locked `allow update, delete: if false` in firestore.rules, and that
+// append-only (no update or delete function or route exists for them), and that
 // immutability is load-bearing (the whole outstanding calculation is a
 // replay of issued-minus-returned over an append-only ledger). A waiver is
 // just a third kind of entry in that replay — subtracted exactly the way a
@@ -268,9 +268,9 @@ export interface LoanRequestLine {
 // on-hand count is already correct; "resolving" is about the paperwork, not
 // the shelf.
 export interface ReturnWaiver {
-  id: string                 // Firestore document ID
+  id: string                 // row ID
   transaction_id: string      // the originating OUT transaction's document ID
-  product_id: string          // Firestore document ID of the product
+  product_id: string          // row ID of the product
   product_name: string        // denormalized, same pattern as TransactionLine
   staff_id: number | null     // denormalized from the OUT transaction
   staff_name: string | null
@@ -331,7 +331,7 @@ export type AuditAction =
 export type AuditEntityType = 'product' | 'category' | 'staff' | 'transaction' | 'loan_request' | 'settings'
 
 export interface AuditLogEntry {
-  id: string             // Firestore document ID
+  id: string             // row ID
   user_id: string | null    // Firebase Auth uid of who performed the action
   user_name: string | null  // denormalized at write-time for cheap rendering
   action: AuditAction

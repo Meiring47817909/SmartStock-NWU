@@ -25,7 +25,7 @@ import { putNotificationSettings } from '../helpers/settings'
 
 const ADMIN_INBOX = 'selouna@nwu.test'
 const T1 = new Date('2026-10-03T10:00:00.000Z')
-const ENV_KEYS = ['MAIL_TRANSPORT', 'SMTP_HOST', 'SMTP_PORT', 'FIREBASE_AUTH_EMULATOR_HOST', 'FIRESTORE_EMULATOR_HOST']
+const ENV_KEYS = ['MAIL_TRANSPORT', 'SMTP_HOST', 'SMTP_PORT', 'FIREBASE_AUTH_EMULATOR_HOST']
 
 let db: Db
 let restoreAuth: () => void
@@ -298,8 +298,8 @@ describe('POST /api/notifications/stock-out', () => {
     expect(Date.now() - t0).toBeLessThan(5000)
   })
 
-  it('emulators active + non-local SMTP_HOST -> 500 refusal, nothing sent', async () => {
-    await setup({ env: { FIRESTORE_EMULATOR_HOST: '127.0.0.1:8081', SMTP_HOST: 'smtp.example.com' } })
+  it('Auth emulator active + non-local SMTP_HOST -> 500 refusal, nothing sent', async () => {
+    await setup({ env: { FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099', SMTP_HOST: 'smtp.example.com' } })
     const r = await call({ transactionId: 't1' })
     expect(r.status).toBe(500)
     expect(String(r.body.error)).toContain('Refusing to send mail')

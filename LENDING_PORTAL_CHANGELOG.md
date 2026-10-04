@@ -1,5 +1,7 @@
 # Lending Portal — Implementation Changelog
 
+> **Historical record (October 2026).** This changelog describes the Firestore-era build. The app now stores its data in PostgreSQL, and `firestore.rules`, the Firestore emulator and the seeds mentioned below (`seed:emulators`, `seed:lending`, `seed:products`, `seed:staff`, `seed:outstanding`, `seed:conflicts`, `seed:catalog`, `seed:real-production`) are retired. Use `npm run seed:comprehensive` or `npm run seed:demo` and see `handout.md` ("Current setup (PostgreSQL)") instead. The text below is left as it was written.
+
 This document details every change made while implementing the staff self-service lending portal, from the initial build through the bug fixes and refinements that followed. It supplements `LENDING_PORTAL_SPEC.md` (the design spec this was built from) with a record of what was actually built, what deviated from the spec and why, and every bug found and fixed along the way.
 
 Branch: `marco`. Commits covered: `547a7d2` through `3e0091f` (7 commits, 31 files, ~7,900 insertions).

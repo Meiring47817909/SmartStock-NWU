@@ -1,7 +1,6 @@
 import 'server-only'
 import { cert, getApps, initializeApp, type App } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
-import { getFirestore } from 'firebase-admin/firestore'
 
 // Server-only Firebase Admin SDK. The `server-only` import above makes it a
 // build error to accidentally import this from a client component — these
@@ -21,14 +20,13 @@ function getAdminApp(): App {
   const existing = getApps()[0]
   if (existing) return existing
 
-  // The Admin SDK auto-detects these two host vars and silently redirects
-  // every call to the local emulators instead of the real project — this
-  // is Firebase's own convention, not something specific to this app. When
-  // they're set, emulators don't check credentials at all, so a bare
+  // The Admin SDK auto-detects this host var and silently redirects Auth
+  // calls to the local emulator instead of the real project — this is
+  // Firebase's own convention, not something specific to this app. When it
+  // is set, the emulator doesn't check credentials at all, so a bare
   // projectId is enough; this deliberately avoids requiring the real
   // service-account secrets just to run local tests against fake data.
-  const usingEmulator =
-    !!process.env.FIREBASE_AUTH_EMULATOR_HOST || !!process.env.FIRESTORE_EMULATOR_HOST
+  const usingEmulator = !!process.env.FIREBASE_AUTH_EMULATOR_HOST
   if (usingEmulator) {
     const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID || EMULATOR_PROJECT_ID
     return initializeApp({ projectId })
@@ -52,4 +50,3 @@ function getAdminApp(): App {
 
 export const adminApp = getAdminApp()
 export const adminAuth = getAuth(adminApp)
-export const adminDb = getFirestore(adminApp)

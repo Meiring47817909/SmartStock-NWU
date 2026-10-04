@@ -53,10 +53,10 @@ export function resolveSmtpConfig(env: NodeJS.ProcessEnv = process.env): SmtpCon
     throw new MailConfigError(`SMTP_PORT must be a number between 1 and 65535 (got "${rawPort}").`)
   }
 
-  // Local-only guard: while the Firebase emulators are active the data is
+  // Local-only guard: while the Firebase Auth emulator is active the data is
   // seeded with real-looking gmail addresses, so a non-local SMTP host could
   // deliver real mail to real inboxes. Refuse outright.
-  const emulated = !!env.FIREBASE_AUTH_EMULATOR_HOST || !!env.FIRESTORE_EMULATOR_HOST
+  const emulated = !!env.FIREBASE_AUTH_EMULATOR_HOST
   if (emulated && !LOCAL_HOSTS.has(host)) {
     throw new MailConfigError(
       `Refusing to send mail to "${host}" while the Firebase emulators are active. Use 127.0.0.1 (Mailpit).`,

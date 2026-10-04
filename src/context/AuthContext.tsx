@@ -13,8 +13,7 @@ interface AuthContextValue {
   loading: boolean
   // Re-reads the signed-in user's profile without waiting for another onAuthStateChanged
   // firing. Needed after (protected)/profile updates full_name via the
-  // Admin SDK (firestore.rules blocks a client write to `profiles`
-  // entirely), which otherwise leaves this context's cached profile
+  // Admin SDK (the browser can't write `profiles` directly), which otherwise leaves this context's cached profile
   // showing the old name until the next sign-in. A no-op while signed out.
   refreshProfile: () => Promise<void>
 }

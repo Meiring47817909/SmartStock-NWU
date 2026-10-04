@@ -1,12 +1,4 @@
 import { initializeApp, getApps } from 'firebase/app';
-import {
-  getFirestore,
-  initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
-  connectFirestoreEmulator,
-  type Firestore,
-} from 'firebase/firestore';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 
@@ -33,34 +25,11 @@ const firebaseConfig = {
 // Initialize Firebase
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
-// Firestore is initialized with persistent (IndexedDB-backed) offline
-// cache + multi-tab support so the app can read/write while offline and
-// sync automatically once connectivity returns. IndexedDB only exists in
-// the browser, so on the server (SSR/build) we fall back to the plain,
-// in-memory client — it's never actually used there for data access.
-function createFirestore(): Firestore {
-  if (typeof window === 'undefined') {
-    return getFirestore(app);
-  }
-  try {
-    return initializeFirestore(app, {
-      localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager(),
-      }),
-    });
-  } catch {
-    // Firestore was already initialized for this app instance
-    // (e.g. React Fast Refresh re-evaluating this module).
-    return getFirestore(app);
-  }
-}
-
-export const db = createFirestore();
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 
 // Point the Auth client SDK at the local emulator, when opted in. Unlike
-// Firestore/Storage below, this must run in BOTH the browser and on the
+// Storage below, this must run in BOTH the browser and on the
 // server: src/app/api/staff/send-reset-email/route.ts imports `auth` from
 // this module and calls the client SDK's sendPasswordResetEmail() there
 // (the Admin SDK can only generate a reset link, it can't send the actual
@@ -98,28 +67,19 @@ if (USE_EMULATORS && !(auth as TaggedAuth).__emulatorConnected) {
   }
 }
 
-// Firestore/Storage are only ever read via the client SDK in the browser
-// (every data-fetching page is a client component) — no server code in
-// this app touches `db`/`storage` from here, so these stay browser-gated.
-// Same per-instance-flag reasoning as Auth above applies here too.
-type TaggedFirestore = typeof db & { __emulatorConnected?: boolean };
+// Storage is only ever used via the client SDK in the browser (product
+// photo uploads) — no server code in this app touches `storage` from
+// here, so this stays browser-gated. Same per-instance-flag reasoning as
+// Auth above applies here too.
 type TaggedStorage = typeof storage & { __emulatorConnected?: boolean };
 if (USE_EMULATORS && typeof window !== 'undefined') {
-  if (!(db as TaggedFirestore).__emulatorConnected) {
-    try {
-      connectFirestoreEmulator(db, '127.0.0.1', 8081);
-      (db as TaggedFirestore).__emulatorConnected = true;
-    } catch {
-      // Already connected on this instance — safe to ignore.
-    }
-  }
   if (!(storage as TaggedStorage).__emulatorConnected) {
     try {
       connectStorageEmulator(storage, '127.0.0.1', 9199);
       (storage as TaggedStorage).__emulatorConnected = true;
+      console.info('[firebase] Connected Storage to the local emulator.');
     } catch {
       // Already connected on this instance — safe to ignore.
     }
   }
-  console.info('[firebase] Connected Firestore/Storage to the local emulators.');
 }

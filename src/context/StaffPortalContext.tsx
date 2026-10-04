@@ -29,7 +29,7 @@ export function StaffPortalProvider({ children }: { children: React.ReactNode })
       setUser(currUser)
       if (!currUser) {
         // No account signed in — the portal now allows browsing Browse/Cart
-        // as a guest (see firestore.rules' public `products` read and
+        // as a guest (products are readable without signing in; see
         // (portal)/lend/layout.tsx's isGuest handling); there's simply no
         // staff record to look up for a guest.
         setStaffMember(null)

@@ -1,6 +1,5 @@
-// Browser client for the notification-settings API (admin). Same function names as the old Firestore helpers in
-// src/lib/firebase/notificationSettings.ts (now deleted), minus the `previous…` and `actor` arguments: the server reads the value it
-// replaces and writes the audit entry itself, as the signed-in admin.
+// Browser client for the notification-settings API (admin). The `previous…` and `actor` values are not passed: the server
+// reads the value it replaces and writes the audit entry itself, as the signed-in admin.
 //
 //   GET  /api/settings/notifications[?kind=admin_notification_email|system_from_email]
 //   POST /api/settings/notifications { action: 'toggle' | 'address', … }

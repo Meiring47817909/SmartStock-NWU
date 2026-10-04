@@ -21,11 +21,9 @@ export class ApiError extends Error {
 
 // Verifies the request's `Authorization: Bearer <idToken>` header belongs
 // to SOME signed-in Firebase Auth user — BICS admin or portal borrower,
-// no role check. For routes that need admin data access (bypassing
-// firestore.rules via adminDb) but are called from portal pages a
-// borrower's own client can't read directly — e.g. computing another
-// staff member's expected-return date, which touches `transactions` and
-// is admin-only in firestore.rules for good reason (it's every staff
+// no role check. For routes that need data a portal borrower may not read
+// directly — e.g. computing another staff member's expected-return date,
+// which touches `transactions` and must stay admin-only (it's every staff
 // member's full borrow history, not just the caller's own). Throws
 // ApiError on any failure — callers should catch it and turn it into a
 // NextResponse.

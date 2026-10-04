@@ -1,6 +1,5 @@
 // Pure loan-request helpers and shapes shared by the server data layer (src/server/data/loanRequests.ts), the browser
-// client (src/lib/api/loanRequests.ts) and the pages that only need a pure helper. No Firebase, no database. Moved from
-// the old Firestore module src/lib/firebase/loanRequests.ts (removed). Expiry and no-show decide by calendar day in
+// client (src/lib/api/loanRequests.ts) and the pages that only need a pure helper. No Firebase, no database. Expiry and no-show decide by calendar day in
 // APP_TIME_ZONE (Africa/Johannesburg), not the machine's zone, and isExpired / isNoShowCandidate take an optional
 // `today` so the server can decide from its own clock (ctx.now()).
 import { appCalendarDay, addDaysToDateStr } from '@/lib/utils'

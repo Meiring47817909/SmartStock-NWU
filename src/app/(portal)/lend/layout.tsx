@@ -44,7 +44,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
   const [myRequestsCount, setMyRequestsCount] = useState<number | null>(null)
 
   // Guest = nobody signed in. Browse and Cart both work without an
-  // account (firestore.rules allows a public read of `products`; the cart
+  // account (products are readable without signing in; the cart
   // itself is local, in-memory state) — everything else in the portal
   // still needs a real, linked sign-in.
   const isGuest = !user

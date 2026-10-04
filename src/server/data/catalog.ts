@@ -557,7 +557,7 @@ async function computeOutstandingHolders(ctx: Ctx, productId: string): Promise<O
 
 /**
  * How many physical units of a product carry each of its barcodes, worked out from the barcodes recorded on Stock In /
- * Stock Out / Return lines (see the Firestore original in src/lib/firebase/products.ts for the full definition):
+ * Stock Out / Return lines:
  * `outstanding` = issued under the barcode and not yet returned or written off; `inStock` = received under it (or
  * returned wearing it) and not issued; `total` = both. Only scans that recorded a barcode count, so treat it as a floor.
  */

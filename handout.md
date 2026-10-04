@@ -1,4 +1,162 @@
-# SmartStock-NWU: Firebase Migration Handout
+# SmartStock-NWU: Handout
+**Last updated:** October 4, 2026
+
+> **Where to start.** The first sections below ("Current setup", "Cut-over to Cloud SQL", "PostgreSQL pool on Vercel", "Behaviour changes", "Manual check list") describe the app as it is now: PostgreSQL for all data, Firebase only for sign-in (Auth) and product photos (Storage). Everything after the line "Historical log" is a dated record of earlier sessions. It was written when the data lived in Firestore, so its mentions of the Firestore emulator, `firestore.rules` and the `seed:emulators`, `seed:lending`, `seed:products`, `seed:staff`, `seed:outstanding`, `seed:conflicts`, `seed:catalog` and `seed:real-production` scripts are retired and must not be followed. The few places where that log still told you to run something now say so.
+
+## Current setup (PostgreSQL)
+
+**What runs where**
+- Data (products, staff, stock, loan requests, audit log, settings): PostgreSQL 17, reached only from server code through `DATABASE_URL`. The browser never opens a database connection; it calls the `/api/*` routes with its Firebase ID token.
+- Sign-in, password reset and email change: Firebase Auth (unchanged).
+- Product photos: Firebase Storage (unchanged; `storage.rules` still applies).
+- Firestore is no longer used by the app. The only code that still reads it is the one-off importer (`scripts/import-firestore.ts`, `src/server/import/*`). `firestore.rules` and `firestore.indexes.json` are gone; there is nothing to deploy for Firestore any more.
+
+**Local setup, first time**
+1. `npm install`.
+2. Start PostgreSQL 17, either:
+   - `npm run db` (Docker Desktop must be running). It creates or reuses the container `smartstock-postgres` (image `postgres:17`) on `127.0.0.1:5432`, user and password `postgres`, with two databases: `smartstock` (the app) and `smartstock_test` (the tests). Stop it with `npm run db:stop`; the data is kept in the `smartstock-pg` volume. Or
+   - any local PostgreSQL 17 you already have: create the databases `smartstock` and `smartstock_test` yourself.
+3. Set `DATABASE_URL` for the app, for example `postgres://postgres:postgres@127.0.0.1:5432/smartstock`, in `.env.local` (`npm run dev:emulators` already sets this value for itself). The Firebase public settings (`NEXT_PUBLIC_FIREBASE_*`) and, for the real project, `FIREBASE_ADMIN_PROJECT_ID`, `FIREBASE_ADMIN_CLIENT_EMAIL` and `FIREBASE_ADMIN_PRIVATE_KEY` also live in `.env.local`, as before.
+4. `npm run db:migrate` applies the schema (`drizzle/`). `npm run db:reset` empties the app tables again (schema and migrations stay) when you want a clean start.
+5. Seed data (the seeds need the Firebase Auth and Storage emulators running first, see below):
+   - `npm run seed:comprehensive` fills every status, badge and label the app can show: 31 scenario staff, 25 products, both logins.
+   - `npm run seed:demo` is the smaller client demo: the 20 NWU staff, the administrator and Meiring as a portal borrower.
+   - Both refuse to run on a database that already has data. Run `npm run db:reset` first, or add `--reset`: `npm run seed:comprehensive -- --reset`, `npm run seed:demo -- --reset`.
+   - Both refuse a database that is not on this machine and emulators that are not local. `-- --dry-auth` seeds only the database (no logins, no photos) and needs no emulators.
+6. Run the app against the emulators: `npm run emulators` in one terminal (Auth on 9099, Storage on 9199, Emulator UI on http://127.0.0.1:4000; Firestore is no longer started), then `npm run dev:emulators` in another. `dev:emulators` sets `NEXT_PUBLIC_USE_FIREBASE_EMULATORS`, `FIREBASE_AUTH_EMULATOR_HOST`, the Mailpit SMTP settings and `DATABASE_URL` for the local `smartstock` database. Sign in as:
+   - after `seed:comprehensive`: `jonathan.pritchard@nwu.ac.za` / `password123` (administrator) or `jessica.moore@gmail.com` / `password123` (portal borrower);
+   - after `seed:demo`: `selouna.visser@nwu.ac.za` / `password123` (administrator) or `47817909@mynwu.ac.za` / `password123` (Meiring, portal, at `/lend/login`).
+7. Email goes to Mailpit: `npm run mailpit` (Docker), inbox at http://localhost:8025. See the Mailpit and Email notifications entries below.
+
+**Other commands**
+- `npm test` runs the automated tests (Vitest) against `smartstock_test`; start PostgreSQL first. They need no Firebase emulators.
+- `npx tsc --noEmit` and `npx eslint <files>` as before.
+- `npm run build` needs the Firebase public settings and `DATABASE_URL` in the environment. A build on a machine with no real credentials can use placeholder values for the build only (for the Admin SDK, setting `FIREBASE_AUTH_EMULATOR_HOST` is enough; do not commit placeholders).
+- `npm run db:import-firestore` is the one-off Firestore importer (next section).
+
+**Retired seeds and scripts.** `seed:emulators`, `seed:lending`, `seed:products`, `seed:staff`, `seed:outstanding`, `seed:conflicts`, `seed:catalog`, `seed:real-production` and `cleanup:borrower-test` wrote to Firestore and no longer exist. `seed:comprehensive` and `seed:demo` replace them. `images:fetch` and `images:generate` are unchanged.
+
+## Cut-over to Cloud SQL
+
+This is the runbook for moving the live data from Firestore into the production PostgreSQL (Cloud SQL). Run it from the repo root on the `postgres` branch. The importer only ever reads Firestore; it cannot write to it.
+
+**0. Prepare**
+- Create the Cloud SQL for PostgreSQL 17 instance and a database (the commands below assume `smartstock`) and a database user. Check the instance's region, tier and `max_connections` (see the pool note below).
+- Create a service account for the dry runs with only the read-only role `roles/datastore.viewer` on the Firebase project, and put its details in `.env.local` as `FIREBASE_ADMIN_PROJECT_ID`, `FIREBASE_ADMIN_CLIENT_EMAIL` and `FIREBASE_ADMIN_PRIVATE_KEY`. With that role the import cannot change anything in Firestore even by mistake. (Do not use the app's normal admin key for this.)
+- Make sure `FIRESTORE_EMULATOR_HOST` is not set: with `--source live` the importer refuses if it is, because the Admin SDK would read the emulator instead of the live project.
+- `DATABASE_URL` is never read from `.env.local` by the importer; give it in the shell for each command so the target is always deliberate.
+
+**1. Live dry run (reads Firestore, writes nothing).** Save the output.
+```bash
+unset FIRESTORE_EMULATOR_HOST
+npm run db:import-firestore -- --source live --dry-run 2>&1 | tee import-live-dryrun.txt
+```
+```powershell
+Remove-Item Env:FIRESTORE_EMULATOR_HOST -ErrorAction SilentlyContinue
+npm run db:import-firestore -- --source live --dry-run 2>&1 | Tee-Object import-live-dryrun.txt
+```
+The report lists the documents read, the rows it would write, warnings (shown, not blocking) and problems. It exits with 1 while there are problems, and `--write` refuses to run until there are none. The result must end with `Problems (0; ...)` before the cut-over.
+
+**2. Resolve the problems.** Each problem names the collection and document. Fix it in Firestore (the importer never changes the source), then dry-run again. The most likely one: the old app let a product be deleted once nothing was outstanding, but the history lines of that product stayed behind, pointing at a product that no longer exists, and PostgreSQL cannot hold such a line. The dry run lists these as `product_id "..." is not in products`.
+- If the missing product has a delete entry in the audit log, the report says so. Run with `--restore-deleted-products` to rebuild each of them from that entry (unavailable, 0 in stock, no photos; each is listed in the output), and look at the result without writing:
+  ```bash
+  npm run db:import-firestore -- --source live --dry-run --restore-deleted-products 2>&1 | tee import-live-dryrun-restore.txt
+  ```
+- A missing product without a delete entry must be fixed in Firestore first, for example by recreating the product document under the same id.
+
+**3. Optional rehearsal into the local database**
+```bash
+npm run db:reset
+npm run db:import-firestore -- --source live --write [--restore-deleted-products]
+```
+
+**4. Freeze writes on the old app.** Agree a time, then stop anyone using the old (Firestore) app, so nothing changes after the final dry run. The import is a snapshot: one consistent read of Firestore, written to PostgreSQL in one transaction.
+
+**5. Schema, last dry run, then `--write` into Cloud SQL**
+```bash
+# a) schema on Cloud SQL
+DATABASE_URL='postgres://<user>:<password>@<host>:5432/smartstock?sslmode=require' npm run db:migrate
+# b) last dry run (read-only)
+npm run db:import-firestore -- --source live --dry-run [--restore-deleted-products]
+# c) the import: one transaction; prints the target before writing
+DATABASE_URL='postgres://<user>:<password>@<host>:5432/smartstock?sslmode=require' \
+  npm run db:import-firestore -- --source live --write --allow-non-local-db [--restore-deleted-products]
+```
+```powershell
+$env:DATABASE_URL = 'postgres://<user>:<password>@<host>:5432/smartstock?sslmode=require'
+npm run db:import-firestore -- --source live --write --allow-non-local-db [--restore-deleted-products]
+```
+Through the Cloud SQL Auth Proxy instead (`cloud-sql-proxy <PROJECT>:<REGION>:<INSTANCE> --port 5433`), use `DATABASE_URL=postgres://<user>:<password>@127.0.0.1:5433/smartstock` and leave out `--allow-non-local-db`. The proxy makes the target look local (`127.0.0.1`), so the local-database guard will not ask for `--allow-non-local-db`. **Read the line the importer prints after connecting, `Connected: database ... on server ...`, and check it names the Cloud SQL database you intend before it writes.** The importer first echoes the target host and database (no password) and marks a non-local one with `(NOT this machine)`.
+
+**6. Replacing a rehearsal import.** The importer refuses to write into a database that already has data. Only before go-live, when you want to redo an import, add `--replace=<database>` with the target's own name:
+```bash
+DATABASE_URL='postgres://<user>:<password>@<host>:5432/smartstock?sslmode=require' \
+  npm run db:import-firestore -- --source live --write --allow-non-local-db --replace=smartstock
+```
+A bare `--replace` is refused and prints the name of the target database. `--replace` is also refused once the target holds any row created after the newest record in Firestore (data entered after go-live), so a re-run cannot wipe live work. If a write fails, the transaction rolls back and the database is left as it was.
+
+**7. Notes on the imported data**
+- Timestamps are imported at millisecond precision (what the app wrote); a microsecond or nanosecond Firestore value would be cut to milliseconds. Day-only fields (loan dates, expected return dates) are copied as the same `YYYY-MM-DD` text, never through a date object, so they do not shift.
+- Firestore document ids are kept as the primary keys.
+- Collections the new app no longer has are reported in the dry run and not imported.
+
+**8. Point the app at Cloud SQL.** In Vercel (Project Settings, Environment Variables) set `DATABASE_URL` for Production (and Preview if you use it) to the Cloud SQL connection string with `?sslmode=require`, then redeploy; `DATABASE_URL` is read when the server starts, so a redeploy is needed for a changed value to take effect. Check how Vercel will reach Cloud SQL first (see the pool note below). After the redeploy, sign in and open the Dashboard and Products pages as a smoke test, then lift the write freeze on the new app and keep the old one read-only (or off) for a while.
+
+## PostgreSQL pool on Vercel
+
+`src/server/db/client.ts` creates one `pg` pool per server process with `max: 5` connections. On Vercel every running function instance is its own process with its own pool, so the number of database connections is roughly (instances running at the same time) x (up to 5). A burst of traffic that starts many instances can therefore open many connections at once, and Cloud SQL accepts only as many as its `max_connections` allows. Things to check, none of which are verified here:
+- Look up the `max_connections` of the Cloud SQL instance you choose (it depends on the instance tier and can be changed with a database flag) and compare it with your expected peak concurrency x 5, leaving room for migrations, the importer, the Auth Proxy session you use for admin work and Cloud SQL's own reserved connections.
+- If that margin is thin, lower the pool maximum in `src/server/db/client.ts` (it is a fixed `5` today, not an environment setting) or put a connection pooler in front of Cloud SQL (for example PgBouncer, or Cloud SQL's managed connection pooling if your edition offers it). Test the app against a pooler in transaction mode before relying on it, because every data change runs inside a database transaction.
+- Check Vercel's current documentation on running a `pg` pool in functions (how long idle connections are kept and how the platform reuses instances), and keep the idle timeout short enough that connections are released when an instance goes quiet.
+- Check how Vercel connects to Cloud SQL. The Cloud SQL Auth Proxy is a process you run next to the app, which a Vercel function cannot do. Options to compare in the Cloud SQL and Vercel documentation: a public IP with SSL (`sslmode=require`) and an authorised-networks list (Vercel's outgoing addresses may not be fixed on every plan, so check whether you need a static-IP option), or the Cloud SQL Node.js connector library (a code change in `client.ts`). Whichever you pick, keep the database user's password in Vercel's encrypted environment variables only.
+- Put Cloud SQL in the region closest to the Vercel region in `vercel.json` (`cpt1`, Cape Town) that Cloud SQL offers; each page action makes several short queries, so latency adds up.
+- Use `?sslmode=require` in the connection string, and keep automated backups on and point-in-time recovery enabled on the instance (check the option names in the console).
+
+## Behaviour changes for the client
+
+Things that work differently from the Firestore version, on purpose:
+1. **A product with stock history cannot be deleted any more.** A product that appears in any Stock In, Stock Out, Return, waiver or loan-request record is kept, because that history is append-only and still points at it. The app says so ("This product has stock history ... and can't be deleted."); mark the product unavailable instead. A product with no history (and nothing outstanding or reserved) can still be deleted.
+2. **Expiry and no-show are decided on South African calendar days, on the server.** A loan request expires and a pickup counts as a no-show according to the calendar day in Africa/Johannesburg (`APP_TIME_ZONE`), using the server's clock, not the browser's time zone or the machine it was opened on.
+3. **Grace Thornton's and Samuel Prescott's seed loan windows are now 7 days.** The server enforces the 1-week rule for the lending interval, so their loans in the seed data are 7 days long (comprehensive seed).
+4. **The audit log has more seed entries.** Every create is now audited by the server in the same transaction as the change, so the seeded data has more audit rows than the Firestore seed had (the header comment of `tests/seed/comprehensive.test.ts` lists the counts per action next to the Firestore seed's).
+5. **The loan-request "Not picked up" badge settles on first Dashboard load.** When a pickup's day has passed, the first time the Dashboard is opened afterwards moves the request to its no-show state (one status change and one audit entry, even if two people open it at the same moment). Until someone opens the Dashboard the stored status has not changed yet.
+
+Unchanged: sign-in and password flows (Firebase Auth), product photos (Firebase Storage), all on-screen text and messages, the append-only rule for transactions, transaction lines, waivers and the audit log, and emails being sent after the data is saved (a mail failure never undoes a save).
+
+## Manual check list (not yet run)
+
+The automated checks (`npm test`, `npx tsc --noEmit`, eslint, `npm run build`) ran when Firestore was removed; see `.superpowers/sdd/2026-10-04-postgres-migration/task-18-report.md`. The check below needs Docker, the Firebase emulators and a browser, so it has **not** been done. Please run it and tick it off here. Note anything unexpected next to the step.
+
+Setup
+- [ ] `npm run db`, then `npm run db:reset && npm run seed:demo` (start `npm run emulators` first; the seed needs Auth and Storage). It should print the demo summary.
+- [ ] `npm run mailpit` (inbox at http://localhost:8025), then `npm run dev:emulators`.
+
+Mailpit check list
+- [ ] Run steps 1 to 15 of the "Try it" list in the Email notifications entry below (it was written for `seed:comprehensive`, which also saves the Admin notification address and System email; after `seed:demo`, check Settings, Notifications first and set the Admin notification address if it is empty). Tick each step here as you go: 1 [ ] 2 [ ] 3 [ ] 4 [ ] 5 [ ] 6 [ ] 7 [ ] 8 [ ] 9 [ ] 10 [ ] 11 [ ] 12 [ ] 13 [ ] 14 [ ] 15 [ ].
+
+Demo walkthrough (as `selouna.visser@nwu.ac.za`, then the portal as `47817909@mynwu.ac.za`)
+- [ ] Dashboard: Outstanding Returns, Incoming Pickups, Low Stock tabs and their count badges load; a "Not picked up" badge appears after the first load (Behaviour change 5).
+- [ ] Products: list, search, add a product, edit it, upload a photo (Storage emulator), add a barcode that another product already uses (expect the friendly "already used by ..." message, not an error page).
+- [ ] Delete a product that has stock history: it is refused with a message and you can mark it unavailable instead (Behaviour change 1). Delete a brand-new product with no history: it works.
+- [ ] Stock In (existing and new product), Stock Out to a staff member (with and without lend dates), Returns (scan the barcode, partial return, resolve an item).
+- [ ] Loan Requests: submit one in the portal, approve, counter, decline and withdraw it; cancel an approved pickup on the Dashboard.
+- [ ] Staff: add, edit, deactivate and activate; Send Login Email; the Status, Card UID and Portal Access badges.
+- [ ] Audit Log: every action above appears once, with operator names; sort, page and export CSV.
+- [ ] Reports: tables, CSV and PDF export.
+- [ ] Settings, Notifications: toggles and the two address cards save, and the audit log records the change.
+- [ ] Profile (administrator and portal): change name, change password, change email (confirmation email in Mailpit).
+- [ ] Sign out and reload `/lend` while signed out: Browse and Cart work as a guest.
+- [ ] `npm run db:reset` then `npm run seed:comprehensive` works as well (Grace Thornton and Samuel Prescott show 7-day loan windows).
+
+Before the cut-over, also run the Cloud SQL steps above as a rehearsal (a throwaway Cloud SQL database, `--replace=<database>`), and read the dry-run report with the client.
+
+---
+
+## Historical log
+
+Everything below is dated history from the Firestore era. Where it tells you to run the Firestore emulator, deploy `firestore.rules` or run one of the retired seeds, follow "Current setup" above instead.
+
+# SmartStock-NWU: Firebase Migration Handout (original)
 **Date:** August 9, 2026
 **Time:** 00:28 (SAST)
 
@@ -34,7 +192,7 @@ Every page in the application was refactored to interface strictly with Firebase
 
 ### 5. Seeding & Cleanup
 * **Supabase Eradication:** Systematically scoured the codebase to uninstall and delete all residual Supabase dependencies, types, server routes, and helper configurations. The codebase is strictly Firebase-only.
-* **Security Rules:** Supplied basic `firestore.rules` to lock down read and write operations to authenticated users only.
+* **Security Rules:** Supplied basic `firestore.rules` to lock down read and write operations to authenticated users only. (Retired: the app no longer uses Firestore, the file is deleted, and the API routes check the caller's role on the server.)
 * **User Seeding:** Deployed a local automation script using Firebase Auth and Firestore to instantly create and configure the default users:
   * `admin@nwu.ac.za` -> Assigned **Admin** Role
   * `staff@nwu.ac.za` -> Assigned **Staff** Role
@@ -119,6 +277,8 @@ This was built as two independent, single-purpose actions rather than one combin
 **Not yet built / still open:** anything about the lending portal itself (section 3 below) — none of that exists yet, this section only covers provisioning the login.
 
 #### Testing this locally with the Firebase emulators
+> **Retired (October 2026):** the Firestore emulator and `npm run seed:emulators` are gone. `npm run emulators` now starts Auth and Storage only, and the data is in PostgreSQL: follow "Current setup (PostgreSQL)" at the top. The notes below stay as a record of how the Auth wiring works; the Auth emulator parts still apply.
+
 Also set up on this branch — lets you exercise the whole flow (create account, send/resend, edit-email sync, both 409 conflict paths) against fake data, with **zero real emails ever sent** and **zero real Firebase credentials required**. All emulator wiring is opt-in — the normal `npm run dev` workflow against the real project is untouched unless you explicitly use the commands below.
 
 How it works: `firebase.json` / `.firebaserc` configure Auth + Firestore + Storage emulators plus the Emulator UI, all under a fixed `demo-smartstock-nwu` project id (the `demo-` prefix means the emulators never touch real GCP — no billing, no real project needed at all). `src/lib/firebase/admin.ts` auto-detects the `FIREBASE_AUTH_EMULATOR_HOST`/`FIRESTORE_EMULATOR_HOST` env vars (Firebase's own convention) and initializes with just that project id instead of the real service-account cert. `src/lib/firebase/config.ts` does the client-side equivalent behind an explicit `NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true` flag, calling `connectAuthEmulator`/`connectFirestoreEmulator`/`connectStorageEmulator` once per instance.
@@ -212,6 +372,8 @@ Plus two new **untracked** files: `scripts/seed-staff-roster.mjs` and `scripts/c
 `src/app/(protected)/stock-out/page.tsx` and `src/app/(protected)/returns/page.tsx`. The "Select Staff Member" modal's `loadStaffList` now filters on `full_name` and `email` (was `full_name` + `department` on Stock Out, `full_name` only on Returns — now consistent between the two). Each row also shows the email right next to the name (`Name Surname - email@domain`). Placeholder text on both search inputs changed to "Search name, email…".
 
 ### 3. Emulator seed scripts — categories, real staff roster, fixed location, cleanup
+> **Retired (October 2026):** `seed:products`, `seed:lending`, `seed:staff` and `cleanup:borrower-test` are retired (they wrote to Firestore). Use `npm run seed:comprehensive` or `npm run seed:demo`.
+
 Four separate changes, all emulator-only (never touch the real Firebase project):
 
 - **Categories were never seeded.** `scripts/seed-products.mjs` now seeds all 7 real categories (Cables & Adapters, Consumables, Laptops & Computers, Networking, Peripherals, Power, Storage — exact names/descriptions from a screenshot the user provided of the real category list) via a new `upsertCategory()` helper, *before* seeding products, and assigns each seeded product's `category_id` accordingly. `scripts/seed-lending-portal.mjs`'s Test Projector product got the same treatment (its own small `upsertCategory` call, just for the one category it needs).
@@ -253,7 +415,7 @@ Building this surfaced a real bug: the Dashboard's lazy expiry/no-show transitio
 - Real BICS login credentials (`admin@nwu.ac.za` / `staff@nwu.ac.za`, mentioned in the very first section of this handout) are **not recorded anywhere in this repo** — Firebase Auth never stores plaintext passwords, and there's no real-project seed script (only the emulator ones, which have their own separate fake test accounts like `admin@nwu.test`/`password123`). If real access is needed, the user resets it via the Firebase Console.
 
 ## Still open — nothing here has been done yet
-- **Firestore rules deployment status is unverified.** `firestore.rules` is a real, fairly detailed file now (see `LENDING_PORTAL_CHANGELOG.md` §2), but it's only ever been exercised against the local emulator in everything documented so far. Check whether `firebase deploy --only firestore:rules` has actually been run against the real project before assuming production is protected by it.
+- **Firestore rules deployment status is unverified.** `firestore.rules` is a real, fairly detailed file now (see `LENDING_PORTAL_CHANGELOG.md` §2), but it's only ever been exercised against the local emulator in everything documented so far. (Retired: Firestore and `firestore.rules` are no longer used by the app, so there is nothing to deploy.)
 - `LENDING_PORTAL_SPEC.md` §3.2 needs the same kind of staleness fix its §5.2 already got — it still describes `lend_to` as required (see point 5 above).
 - The Availability/Lend-From coupling (point 4) may need revisiting for non-portal products — not yet raised with the user as a potential problem, just flagged here.
 - The category mapping for both projector products (point 3) is an unconfirmed judgment call, not a user-approved decision.
@@ -263,7 +425,7 @@ Building this surfaced a real bug: the Dashboard's lazy expiry/no-show transitio
 ## Quick orientation notes for a fresh agent
 - Build/verify workflow: `npx tsc --noEmit -p tsconfig.json` in a sandbox copy is the fast, reliable check used throughout — `npx next build` will fail in a sandbox with no real Firebase Admin/client credentials (missing-env-var errors on `/api/staff/*` and `/api/auth/cas/validate`), that's an environment limitation, not a code problem.
 - Key docs, in order of how specific they are: `LENDING_PORTAL_SPEC.md` (original design spec, written before any code), `LENDING_PORTAL_CHANGELOG.md` (what the other developer actually built on branch `marco`, plus their own bug fixes), this "Session Handoff" section (everything since). When they conflict, the changelog and this section win — the spec is the design intent, not necessarily the shipped behavior.
-- Emulator workflow is unchanged from Stage B's original documentation above — `npm run emulators`, then any combination of `npm run seed:emulators` / `seed:lending` / `seed:products` / `seed:staff` in a second terminal, then `npm run dev:emulators`. All are safe to re-run and never touch the real project.
+- Emulator workflow (retired, see "Current setup (PostgreSQL)" at the top): it used to be `npm run emulators`, then any of the Firestore seeds (`seed:emulators`, `seed:lending`, `seed:products`, `seed:staff`), then `npm run dev:emulators`. Now: `npm run db`, `npm run db:migrate`, `npm run seed:comprehensive` or `seed:demo`, `npm run emulators`, `npm run dev:emulators`.
 
 ---
 
@@ -328,7 +490,7 @@ What changed, file by file:
 
 **Existing accounts with role `'staff'` or `'manager'` lose BICS access.** This was a deliberate decision, not an oversight. That includes `staff@nwu.ac.za` from the original seed (§"User Seeding" at the top of this document). Such an account has no linked `staff` record, so it reaches neither BICS nor the portal — it is signed out at login with "This account isn't set up for BICS or portal access". If someone is actually using it, set `role: 'admin'` on its profiles doc in the Console, or link it to a staff record.
 
-**`firestore.rules` must be redeployed.** The emulator picks the file up automatically; the real project needs `firebase deploy --only firestore:rules`. Note the open item below — production rules deployment has never been verified, and these rules are now the *only* thing stopping a portal borrower from reading BICS data directly.
+**(Retired: `firestore.rules` is deleted; there is nothing to redeploy.)** It used to need `firebase deploy --only firestore:rules`. Note the open item below — production rules deployment has never been verified, and these rules are now the *only* thing stopping a portal borrower from reading BICS data directly.
 
 `/login?error=no-profile` is now unreachable — nothing pushes it. The handler was left in place as a harmless fallback.
 
@@ -340,13 +502,15 @@ What changed, file by file:
 
 `npx tsc --noEmit -p tsconfig.json` passes clean. ESLint introduces no new problem classes (the pre-existing `catch (err: any)` and setState-in-effect warnings are untouched).
 
-**Nothing in either change has been clicked through against the emulator** — it wasn't running during this session. Everything above is code-review-and-typecheck verified only. Start there: `npm run emulators` picks up the new rules automatically, and both seeded logins are role `admin`, so they still work.
+**Nothing in either change has been clicked through against the emulator** — it wasn't running during this session. Everything above is code-review-and-typecheck verified only. (Retired advice: the rules file and the Firestore emulator are gone.)
 
 ---
 
 # Session Handoff — 19 September 2026 (part 2)
 
 ## Emulator seed: the portal borrower now has a password
+> **Retired (October 2026):** `seed:emulators`, `seed:lending` and `seed:staff` are gone. The logins to use now are listed under "Current setup (PostgreSQL)".
+
 
 `npm run seed:emulators` changed. `test.borrower@example.com` gets a real Auth account with **password123**, and its `staff` doc is linked via `uid`, so you can sign straight into `/lend` as a borrower. That matters more than it used to: since the two-role change, that account is the only way to exercise what a non-admin can actually do.
 
@@ -450,6 +614,8 @@ The user asked for the same thing on the Staff page's expandable "currently lent
 Typechecks clean (`npx tsc --noEmit -p tsconfig.json` → exit 0). **Not yet click-tested against the emulator** — see the new seed script below, which exists specifically to make this testable.
 
 ### New: `npm run seed:outstanding`
+> **Retired (October 2026):** this script is gone; `seed:comprehensive` covers the same outstanding-return scenarios.
+
 
 `scripts/seed-outstanding.mjs` — seeds the emulators with OUT transactions covering every state the Dashboard's Resolve flow and the Staff page's expandable rows need:
 
@@ -743,6 +909,8 @@ A staff member's own accepted request is never counted against them (that's what
 `npx tsc --noEmit -p tsconfig.json` passes clean.
 
 ## Session Handoff — 2026-09-20 (cont.): new seed script for today's features
+> **Retired (October 2026):** `seed:conflicts` is gone; `seed:comprehensive` and `seed:demo` cover these scenarios. The commands below are history.
+
 
 Added `scripts/seed-conflict-scenarios.mjs` (`npm run seed:conflicts`) covering test data for everything built today:
 
@@ -760,6 +928,8 @@ npm run seed:conflicts  (in another terminal)
 Re-running it is safe for the staff/product upserts, but NOT for the OUT transaction / loan_requests writes — same append-only caveat as `seed-outstanding.mjs`. Clear the emulator data first (http://127.0.0.1:4000) if you want a clean re-seed.
 
 ## Session Handoff — 2026-09-20 (cont.): fixed a firestore.rules permission error on the portal Browse page
+> **Retired (October 2026):** `firestore.rules` and `adminDb` no longer exist; this check now runs in the server data layer behind an API route.
+
 
 The "Unavailable" feature added earlier today broke the portal Browse page for real (non-admin) borrowers with a rules evaluation error (`evaluation error ... for 'list' @ L61 ... false for 'list' @ L140`). Root cause: `getExpectedReturnDates()` queried `transactions`, `transaction_lines`, and `return_waivers` directly from the client — all three are admin-only in `firestore.rules` (`allow read, create: if hasBicsRole(['admin'])`), and rightly so: `transactions` is every staff member's full borrow history, not something a portal borrower should be able to query broadly just to find out when one product is back in stock. A BICS admin session wouldn't have hit this; only a real portal borrower login would, which is presumably how you ran into it.
 
@@ -1060,6 +1230,8 @@ The "Sent Counters" tab (`loan-requests/page.tsx`) previously reused the exact s
 `npx tsc --noEmit -p tsconfig.json` passes clean.
 
 ## Session Handoff — 2026-09-20 (cont. 13): Comprehensive demo-data seed script
+> **Retired (October 2026):** `scripts/seed-comprehensive-demo.mjs` is replaced by `scripts/seed/comprehensive.ts`, which writes to PostgreSQL (same `npm run seed:comprehensive`). The text below describes the Firestore version.
+
 
 Added `scripts/seed-comprehensive-demo.mjs` (`npm run seed:comprehensive`) — a single script that populates the emulator with essentially every distinct status/badge/label the app can show, so the whole thing can be inspected in one sitting rather than piecing it together from the six narrower `seed:*` scripts:
 
@@ -1090,6 +1262,8 @@ Following up on the comprehensive seed script above, which needed to explain why
 `npx tsc --noEmit -p tsconfig.json` passes clean.
 
 ## Session Handoff — 2026-09-20 (cont. 15): seed:comprehensive now provisions Auth logins too
+> **Retired (October 2026):** described the Firestore version of the script; the PostgreSQL version still creates the Auth logins.
+
 
 User hit `Firebase: Error (auth/user-not-found)` logging into the BICS login page as `admin@nwu.test` after running only `npm run seed:comprehensive`. Root cause: unlike `seed-emulator.mjs`/`seed-lending-portal.mjs`, the comprehensive script only ever wrote Firestore documents — it never created any Firebase Auth accounts, so there was no login for the app's client-side Firebase Auth to find. Products/categories/staff/loan requests/audit log were never the gap; it was purely the Auth side. Asked to fix this so `npm run seed:comprehensive` alone is sufficient to run the whole app — no other seed script needed first.
 
@@ -1317,6 +1491,7 @@ Everything below was verified with `npx tsc --noEmit -p tsconfig.json` (clean). 
 - **Design that was deliberately kept:** an *accepted* counter offer leaves the **Loan Requests** badge (which counts `pending` + `countered`) and joins the **Dashboard** badge as an Incoming Pickup. Counting it in both would double-count. Change this only if asked.
 
 ## 7. Seed data (`npm run seed:comprehensive`)
+> **Retired (October 2026):** `seed-outstanding.mjs` and `seed-conflict-scenarios.mjs` (mentioned below) are gone.
 
 - Lost-label demo: staff **"Demo Lost Labels -- Stuck Row"** has one Stock Out with **3 × Lost Label Kit** (barcode `DEMO-LOSTLABEL-A`; `-B`/`-C` registered) **and 2 × Lost Label Pair** (`DEMO-LOSTPAIR-A`; `-B` registered), so Returns shows two rows. Test: scan A once, + → B, + → B or C again; also try an unregistered barcode (rejected) and the issued barcode via + (rejected).
 - `seed-outstanding.mjs` and `seed-conflict-scenarios.mjs` were updated for per-barcode lines too.
@@ -1344,11 +1519,11 @@ Emails sent while developing against the emulators now land in a local inbox ins
 
 **Run it**
 1. Start Docker Desktop, then `npm run mailpit` (stop it with `npm run mailpit:stop`). Inbox: http://localhost:8025. SMTP: `127.0.0.1:1025`.
-2. `npm install` once (adds `nodemailer`), then `npm run dev:emulators` as usual.
+2. `npm install` once (adds `nodemailer`), then `npm run dev:emulators` as usual (with PostgreSQL running and seeded, see "Current setup (PostgreSQL)").
 
 **How it works**
 - `src/lib/server/mailer.ts` — one `sendMail()` on `nodemailer`. It only sends when `MAIL_TRANSPORT=smtp`; with it unset it does nothing, so production is unchanged. Other vars: `SMTP_HOST` (default `127.0.0.1`), `SMTP_PORT` (default `1025`), `MAIL_FROM` (default `SmartStock NWU <no-reply@smartstock.local>`). `dev:emulators` sets the first three; plain `npm run dev` sets none.
-- **Local-only guard:** while either Firebase emulator variable is set, the mailer refuses any `SMTP_HOST` other than `127.0.0.1`, `localhost` or `::1`, so the seeded gmail addresses can never get real mail.
+- **Local-only guard:** while the Firebase Auth emulator variable (`FIREBASE_AUTH_EMULATOR_HOST`) is set, the mailer refuses any `SMTP_HOST` other than `127.0.0.1`, `localhost` or `::1`, so the seeded gmail addresses can never get real mail.
 - `src/lib/server/emailTemplates.ts` — shared SmartStock NWU layout (HTML + plain text, everything escaped) plus the two emails below.
 - **Login email:** `send-reset-email` now calls `deliverLoginEmail()`. With the mailer on it generates the reset link (`adminAuth.generatePasswordResetLink`) and sends our own email; otherwise it calls `sendPasswordResetEmail` exactly as before. If Mailpit is down the toast says "Mail server not reachable. Is Mailpit running? (npm run mailpit)".
 - **Stock Out confirmation:** after a Stock Out saves, the page calls `POST /api/notifications/stock-out` in the background. It honours the Settings → Notifications "Stock Out confirmation" toggle, skips staff with no email, and never blocks the Stock Out (failure shows a toast). It does not modify the transaction.
@@ -1369,16 +1544,16 @@ Ten more emails now go through the Mailpit mailer (see the Mailpit handoff for h
 - **Not built, always off:** loan request expired, overdue return alert, incoming pickup insufficient stock (they need a timer). The Settings page shows "Not implemented yet" with a line saying what each still needs (a separate scheduled service, a cron job, because nothing in the app runs when nobody is signed in), and refuses to switch them on. To build them: one protected daily sweep route, started by Vercel cron (Hobby plan: once a day only, within the hour) or a Firebase scheduled function (Blaze plan), plus a manual "run now" for the demo.
 
 **How it works**
-- Loan-request changes stay client-side as before. After one succeeds, the page calls `notifyLoanRequestEvent()` (`src/lib/firebase/notifyEvent.ts`) in the background; it posts `{ event, requestId, reason? }` to `POST /api/notifications/loan-request`, which re-reads the request, checks who is calling and that the request is in the right state, then sends. A failure shows "Saved, but the email couldn't be sent." and never undoes the action. Low stock is handled by the existing Stock Out route.
-- Duplicates are prevented by marker documents in the server-only `sent_notifications` collection (clients cannot read or write it). To make the app resend one email while testing, delete its marker in the emulator UI (http://localhost:4000, Firestore).
+- Loan-request changes are saved through the `/api/loan-requests` routes. After one succeeds, the page calls `notifyLoanRequestEvent()` (`src/lib/firebase/notifyEvent.ts`) in the background; it posts `{ event, requestId, reason? }` to `POST /api/notifications/loan-request`, which re-reads the request, checks who is calling and that the request is in the right state, then sends. A failure shows "Saved, but the email couldn't be sent." and never undoes the action. Low stock is handled by the existing Stock Out route.
+- Duplicates are prevented by marker rows in the `sent_notifications` table (written by the server only; the browser has no access to the database). To make the app resend one email while testing, delete its row from that table (for example `psql postgres://postgres:postgres@127.0.0.1:5432/smartstock -c "delete from sent_notifications where key = '<key>'"`; `select * from sent_notifications` lists the keys).
 - Settings → Notifications has two address cards. "Admin notification address" is where the administrator emails are delivered. "System emails" holds the system sending address: the From header of every email (notifications, Stock Out confirmation, staff login reset), shown as "SmartStock NWU". Until one is saved the field shows the default sender (`no-reply@smartstock.local`, shared by the mailer and the page via `DEFAULT_SYSTEM_EMAIL`); if the stored value is blank or not a plain address, `MAIL_FROM` is used. Stored as `system_from_email`; the administrator address is `admin_notification_email`. A real mail server may reject or spam-filter a From address it is not set up to send for.
-- The contact email shown on the login error messages and in the lending portal (home, policy, profile, deactivated-account screen) is the Admin notification address, read through the public `GET /api/contact` (settings are admin-only in Firestore, so signed-out visitors and borrowers cannot read them directly). Only the address is shown, never a name. It is read on every page load, so a change in Settings shows on the next load; if none is saved it falls back to `jonathan.pritchard@nwu.ac.za` (`src/lib/contactEmail.ts`). "Jonathan" in sentences such as "Jonathan will review it" is still typed in the pages and does not follow the setting.
+- The contact email shown on the login error messages and in the lending portal (home, policy, profile, deactivated-account screen) is the Admin notification address, read through the public `GET /api/contact` (settings are admin-only, so signed-out visitors and borrowers cannot read them directly). Only the address is shown, never a name. It is read on every page load, so a change in Settings shows on the next load; if none is saved it falls back to `jonathan.pritchard@nwu.ac.za` (`src/lib/contactEmail.ts`). "Jonathan" in sentences such as "Jonathan will review it" is still typed in the pages and does not follow the setting.
 - Account emails go through the same mailer, from the System emails address: "Forgot password?" (login page and portal profile) via `POST /api/auth/forgot-password`, and the administrator's change-email confirmation via `POST /api/auth/change-email`. They are sign-in security emails, so they have no toggle in Settings. When `MAIL_TRANSPORT` is not `smtp` the pages fall back to Firebase's own emails, as before. Forgot password always answers "sent" (it never says whether an address has an account) and sends at most one email per address per minute. Change email needs the current password re-entered (a sign-in within the last 5 minutes) and sends the confirmation link to the NEW address; the login email only changes once the link is clicked, and the administrator's `staff` record email follows when "Check again" is pressed on My Profile. The portal profile's old "You sign in with NWU-CAS" card is gone (NWU-CAS sign-in was removed earlier): every portal user sees the normal Change password card. Send Login Email on the Staff page was already going through Mailpit. The buttons in all of these emails (Reset password, Set your password, Confirm new email) open the app's own page `/auth/action` on `APP_BASE_URL` instead of Firebase's handler page (which in the emulator is only plain text); Firebase still checks and applies the one-time code there. On the live project, also set Firebase Console → Authentication → Templates → "Customize action URL" to `<APP_BASE_URL>/auth/action`, so Firebase's own fallback emails (mail off) open the same page.
 - Email buttons link to `APP_BASE_URL` (optional; default `http://localhost:3000`).
 - Hosted demo (Vercel + Mailtrap Email Sandbox): in Vercel's environment variables set `MAIL_TRANSPORT=smtp`, `SMTP_HOST=sandbox.smtp.mailtrap.io`, `SMTP_PORT=587`, `MAIL_USERNAME` and `MAIL_PASSWORD` (from the sandbox's Integration tab) and `APP_BASE_URL=https://smart-stock-nwu.vercel.app`, then redeploy. Every email lands in the sandbox inbox whatever the recipient, so nothing reaches real people. Any non-local SMTP server must support STARTTLS (or TLS on port 465): the mailer refuses to log in or send unencrypted except to a local Mailpit. The same variables work for the client's own server later.
 - The cancel reason typed on the Dashboard is not stored on the request, so it travels with the notify call.
 
-**Try it** (Docker Desktop running, `npm install` done, `npm run mailpit`, then `npm run dev:emulators`; `npm run seed:comprehensive` already sets the Admin notification address (the admin login's email, `jonathan.pritchard@nwu.ac.za`) and the System email (`noreply@smartstock-nwu.com`), and gives the administrator their own staff record (so My Profile shows name, surname and department); without that seed, set the Admin notification address under Settings → Notifications first; read the mail at http://localhost:8025)
+**Try it** (Docker Desktop running, `npm install` done, `npm run db`, `npm run db:migrate`, a seed (`npm run seed:demo` or `npm run seed:comprehensive`, with `npm run emulators` running), `npm run mailpit`, then `npm run dev:emulators`; `npm run seed:comprehensive` already sets the Admin notification address (the admin login's email, `jonathan.pritchard@nwu.ac.za`) and the System email (`noreply@smartstock-nwu.com`), and gives the administrator their own staff record (so My Profile shows name, surname and department); without that seed, set the Admin notification address under Settings → Notifications first; read the mail at http://localhost:8025)
 1. Portal: submit a request. Admin inbox gets "New loan request".
 2. Loan Requests: approve it as-is. Staff gets "approved", admin inbox gets "Pickup confirmed".
 3. Submit another and counter it. Staff gets "countered". In the portal accept it: staff gets "counter accepted" and the admin inbox "Pickup confirmed". Do it again and decline the counter: "counter declined".
@@ -1397,7 +1572,4 @@ Ten more emails now go through the Mailpit mailer (see the Mailpit handoff for h
 
 ## PostgreSQL locally
 
-The app is moving from Firestore to PostgreSQL. The database runs in Docker, so Docker Desktop must be running.
-- Start it: `npm run db` (first run downloads the image and creates the container; later runs reuse it). Stop it: `npm run db:stop` (your data is kept).
-- It listens on `127.0.0.1:5432` (user and password `postgres`) and holds two databases: `smartstock` (the app, `DATABASE_URL`) and `smartstock_test` (the automated tests, `TEST_DATABASE_URL`).
-- `npm test` runs the automated tests against `smartstock_test`; start the database first.
+Superseded: see "Current setup (PostgreSQL)" at the top of this file (the app no longer uses Firestore; all data is in PostgreSQL).
