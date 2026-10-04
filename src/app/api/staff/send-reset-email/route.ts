@@ -7,6 +7,7 @@ import { ApiError, requireAdmin, findStaffDocOwningUid } from '@/lib/server/staf
 import { isMailEnabled, sendMail, MailUnreachableError, MailConfigError } from '@/lib/server/mailer'
 import { loginEmail } from '@/lib/server/emailTemplates'
 import { systemFromAddress } from '@/lib/server/notificationDelivery'
+import { appActionLink } from '@/lib/server/accountEmail'
 
 // Sends the "set your password" email. With the mailer on (local emulator
 // testing, MAIL_TRANSPORT=smtp) we build the reset link ourselves and send our
@@ -19,7 +20,7 @@ async function deliverLoginEmail(email: string, name: string): Promise<void> {
   }
   try {
     const link = await adminAuth.generatePasswordResetLink(email)
-    const { subject, html, text } = loginEmail({ name, link })
+    const { subject, html, text } = loginEmail({ name, link: appActionLink(link) })
     await sendMail({ to: email, subject, html, text, from: await systemFromAddress() })
   } catch (err) {
     if (err instanceof MailUnreachableError) {

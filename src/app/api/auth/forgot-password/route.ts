@@ -6,7 +6,7 @@ import { isMailEnabled } from '@/lib/server/mailer'
 import { passwordResetEmail } from '@/lib/server/emailTemplates'
 import { isAlreadyExists, safeAddress } from '@/lib/server/notificationDelivery'
 import { ApiError } from '@/lib/server/staffAdmin'
-import { isUnknownAccountError, sendAccountEmail } from '@/lib/server/accountEmail'
+import { appActionLink, isUnknownAccountError, sendAccountEmail } from '@/lib/server/accountEmail'
 
 // A person can ask for one reset email per address per minute; asking again
 // inside that minute is answered "sent" without sending another.
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      await sendAccountEmail(email, passwordResetEmail({ link }))
+      await sendAccountEmail(email, passwordResetEmail({ link: appActionLink(link) }))
     } catch (err) {
       await marker.delete().catch((e: unknown) => console.error('could not remove password reset marker', e))
       throw err

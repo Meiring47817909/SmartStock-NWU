@@ -5,7 +5,7 @@ import { isMailEnabled } from '@/lib/server/mailer'
 import { changeEmailEmail } from '@/lib/server/emailTemplates'
 import { safeAddress } from '@/lib/server/notificationDelivery'
 import { ApiError, assertAdmin, requireRecentSignIn } from '@/lib/server/staffAdmin'
-import { isUnknownAccountError, sendAccountEmail } from '@/lib/server/accountEmail'
+import { appActionLink, isUnknownAccountError, sendAccountEmail } from '@/lib/server/accountEmail'
 
 // The profile page re-checks the current password right before calling this,
 // which refreshes the sign-in time the server checks here.
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     }
 
     const link = await adminAuth.generateVerifyAndChangeEmailLink(currentEmail, newEmail)
-    await sendAccountEmail(newEmail, changeEmailEmail({ newEmail, link }))
+    await sendAccountEmail(newEmail, changeEmailEmail({ newEmail, link: appActionLink(link) }))
     return NextResponse.json({ sent: true })
   } catch (err) {
     if (err instanceof ApiError) {

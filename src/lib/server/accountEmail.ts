@@ -1,7 +1,7 @@
 import 'server-only'
 import { sendMail, MailUnreachableError, MailConfigError } from '@/lib/server/mailer'
 import type { RenderedEmail } from '@/lib/server/emailTemplates'
-import { systemFromAddress } from '@/lib/server/notificationDelivery'
+import { appBaseUrl, systemFromAddress } from '@/lib/server/notificationDelivery'
 import { ApiError } from '@/lib/server/staffAdmin'
 
 // Shared by the account-email routes (forgot password, change email). These
@@ -22,6 +22,23 @@ export async function sendAccountEmail(to: string, email: RenderedEmail): Promis
     }
     throw err
   }
+}
+
+// Firebase builds its action links to its own handler page (the emulator's
+// plain-text page locally, Firebase's hosted page live). Point them at the
+// app's own /auth/action page instead, keeping only what that page needs:
+// the action and its one-time code. Anything unexpected is left unchanged.
+export function appActionLink(firebaseLink: string, env: NodeJS.ProcessEnv = process.env): string {
+  let url: URL
+  try {
+    url = new URL(firebaseLink)
+  } catch {
+    return firebaseLink
+  }
+  const mode = url.searchParams.get('mode')
+  const oobCode = url.searchParams.get('oobCode')
+  if (!mode || !oobCode) return firebaseLink
+  return `${appBaseUrl(env)}/auth/action?${new URLSearchParams({ mode, oobCode })}`
 }
 
 // Firebase Admin reports "no account for this email" under either code.
