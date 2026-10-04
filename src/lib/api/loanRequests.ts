@@ -1,5 +1,5 @@
-// Browser client for the loan-request API. Same function names as the old Firestore helpers in
-// src/lib/firebase/loanRequests.ts, minus the server-side `ctx`; the pure helpers come from src/lib/loanRequestRules.ts.
+// Browser client for the loan-request API. Same function names as the old Firestore helpers
+// (src/lib/firebase/loanRequests.ts, removed), minus the server-side `ctx`; the pure helpers come from src/lib/loanRequestRules.ts.
 // What changed for callers: the actor (user id / name) is no longer passed, the server uses the signed-in caller; the
 // transitions take the request (or just its id) and the server reads the lines and statuses itself; the cart is
 // `{ product: { id }, quantity }` as before, but the server looks the product up (nothing about the product is trusted).
@@ -12,8 +12,8 @@
 //   POST /api/loan-requests/<id>/transition { action }      approveAsIs / sendCounter / declineRequest / acceptCounter /
 //                                                           declineCounter / withdrawRequest / expireIfNeeded
 // The emails after a change (POST /api/notifications/loan-request) are separate calls, made by the pages as today.
-import { api } from '@/lib/api/client'
-import { ACTIVE_STATUSES, type CartCheck, type CounterInput, type ListRequestsOptions, type ReservationHolder, type ReservationInterval } from '@/lib/loanRequestRules'
+import { api, ClientApiError } from '@/lib/api/client'
+import { ACTIVE_STATUSES, isExpired, isNoShowCandidate, type CartCheck, type CounterInput, type ListRequestsOptions, type ReservationHolder, type ReservationInterval } from '@/lib/loanRequestRules'
 import type { LoanRequest, LoanRequestLine, LoanRequestStatus } from '@/types/database'
 
 export {
@@ -171,4 +171,18 @@ export const withdrawRequest = (request: RequestRef, reason?: string | null): Pr
 /** Persist the expiry / no-show transition if the request is due; resolves to its status afterwards. */
 export async function expireIfNeeded(request: RequestRef): Promise<LoanRequestStatus> {
   return (await transition<{ status: LoanRequestStatus }>(request, { action: 'expire' })).status
+}
+
+/**
+ * Same as expireIfNeeded for a request the page already holds, but only calls the server when the request looks due
+ * (same date rules as the server, which decides for real): a list of requests costs one call per due row, not per row.
+ */
+export async function expireIfDue(request: LoanRequest): Promise<LoanRequestStatus> {
+  if (!isExpired(request) && !isNoShowCandidate(request)) return request.status
+  return expireIfNeeded(request)
+}
+
+/** True for the server's 409 on an action whose request changed meanwhile: the page shows the message and reloads. */
+export function isStaleRequestError(err: unknown): boolean {
+  return err instanceof ClientApiError && err.status === 409 && err.message.startsWith('This request has already changed')
 }

@@ -6,13 +6,12 @@ import { useTable, type SortingState } from '@tanstack/react-table'
 import { SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead } from '@/components/data-table-helpers'
 import { toast } from 'sonner'
 import { notifyLoanRequestEvent } from '@/lib/firebase/notifyEvent'
-import { db } from '@/lib/firebase/config'
-import { collection, doc, getDoc, getDocs } from 'firebase/firestore'
 import { useAuth } from '@/context/AuthContext'
 import {
-  approveAsIs, sendCounter, declineRequest, expireIfNeeded,
-  computeExpiryDate, getReservedQuantity, effectiveToDate,
-} from '@/lib/firebase/loanRequests'
+  ACTIVE_STATUSES, approveAsIs, sendCounter, declineRequest, expireIfDue, isStaleRequestError,
+  listRequests, getRequestLines, computeExpiryDate, getReservedQuantity, effectiveToDate,
+} from '@/lib/api/loanRequests'
+import { getProduct } from '@/lib/api/catalog'
 import { formatDateOnly, formatDateShort, formatLendWindow, sentenceCase, todayDateStr } from '@/lib/utils'
 import { notifyAlertsChanged } from '@/lib/alertsBus'
 import { Card } from '@/components/ui/card'
@@ -89,8 +88,7 @@ const SENT_COUNTERS_COLUMNS = sortableColumnHelper.columns([
 ])
 
 export default function LoanRequestsPage() {
-  const { user, profile } = useAuth()
-  const actor = { userId: user?.uid, userName: profile?.full_name ?? user?.email }
+  const { user } = useAuth()
 
   const [requests, setRequests] = useState<LoanRequest[]>([])
   const [linesByRequest, setLinesByRequest] = useState<Record<string, LoanRequestLine[]>>({})
@@ -121,24 +119,24 @@ export default function LoanRequestsPage() {
 
   async function load() {
     setLoading(true)
-    const reqSnap = await getDocs(collection(db, 'loan_requests'))
-    let reqs = reqSnap.docs.map(d => ({ id: d.id, ...d.data() })) as LoanRequest[]
+    // Only the active requests: this page shows Needs Review and Sent Counters, and the lazy expiry below only
+    // concerns pending/countered/accepted ones.
+    let reqs = await listRequests({ statuses: ACTIVE_STATUSES })
 
     // Lazily flip expiry/no-show transitions before rendering, so a stale
     // pending/countered/accepted status never lingers in the list — see
     // LENDING_PORTAL_SPEC.md §3.3/3.4.
     reqs = await Promise.all(reqs.map(async (r) => {
       if (r.status !== 'pending' && r.status !== 'countered' && r.status !== 'accepted') return r
-      const next = await expireIfNeeded(r)
+      const next = await expireIfDue(r)
       return next !== r.status ? { ...r, status: next, updated_at: new Date().toISOString() } : r
     }))
 
-    const linesSnap = await getDocs(collection(db, 'loan_request_lines'))
+    // Lines are only needed for the two tabs' rows (Needs Review / Sent Counters).
     const byRequest: Record<string, LoanRequestLine[]> = {}
-    linesSnap.forEach((d) => {
-      const l = { id: d.id, ...d.data() } as LoanRequestLine
-      ;(byRequest[l.request_id] ??= []).push(l)
-    })
+    await Promise.all(reqs.filter((r) => r.status === 'pending' || r.status === 'countered').map(async (r) => {
+      byRequest[r.id] = await getRequestLines(r.id)
+    }))
 
     setRequests(reqs)
     setLinesByRequest(byRequest)
@@ -148,8 +146,7 @@ export default function LoanRequestsPage() {
   async function refreshAvailability(requestId: string, lines: DraftLine[], fromDate: string, toDate: string) {
     const uniqueProductIds = Array.from(new Set(lines.map((l) => l.product_id)))
     const entries = await Promise.all(uniqueProductIds.map(async (pid) => {
-      const productSnap = await getDoc(doc(db, 'products', pid))
-      const onHand = (productSnap.data() as { quantity_on_hand?: number } | undefined)?.quantity_on_hand ?? 0
+      const onHand = (await getProduct(pid))?.quantity_on_hand ?? 0
       const reserved = await getReservedQuantity(pid, fromDate, effectiveToDate(toDate), requestId)
       return [pid, Math.max(0, onHand - reserved)] as const
     }))
@@ -234,7 +231,7 @@ export default function LoanRequestsPage() {
   async function handleApprove(r: LoanRequest) {
     setBusy(r.id); setRowErrors((prev) => ({ ...prev, [r.id]: '' }))
     try {
-      await approveAsIs(r, linesByRequest[r.id] ?? [], actor)
+      await approveAsIs(r)
       notifyLoanRequestEvent(user, 'loan_request_approved', r.id)
       toast.success(`Approved ${r.staff_name}'s request.`)
       collapseRow(r.id)
@@ -247,6 +244,8 @@ export default function LoanRequestsPage() {
       const message = err instanceof Error ? err.message : 'Failed to approve request.'
       setRowErrors((prev) => ({ ...prev, [r.id]: message }))
       toast.error(message)
+      // Someone else (or the expiry) got to this request first: show what it is now.
+      if (isStaleRequestError(err)) await load()
     }
     setBusy(null)
   }
@@ -267,11 +266,10 @@ export default function LoanRequestsPage() {
     if (!draft) return
     setCounterBusy(true)
     try {
-      await sendCounter(
-        r,
-        draft.lines.map((l) => ({ lineId: l.id, product_id: l.product_id, offered_quantity: l.offered_quantity })),
-        draft.fromDate, draft.toDate || null, counterMessage, actor,
-      )
+      await sendCounter(r, {
+        lines: draft.lines.map((l) => ({ lineId: l.id, product_id: l.product_id, offered_quantity: l.offered_quantity })),
+        fromDate: draft.fromDate, toDate: draft.toDate || null, message: counterMessage,
+      })
       notifyLoanRequestEvent(user, 'loan_request_countered', r.id)
       toast.success(`Counter sent to ${r.staff_name}.`)
       collapseRow(r.id)
@@ -282,6 +280,7 @@ export default function LoanRequestsPage() {
       notifyAlertsChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to send counter.')
+      if (isStaleRequestError(err)) { collapseRow(r.id); setCountering(null); setCounterMessage(''); await load() }
     }
     setCounterBusy(false)
   }
@@ -300,7 +299,7 @@ export default function LoanRequestsPage() {
     const r = declining
     setDeclineBusy(true)
     try {
-      await declineRequest(r, declineMessage, linesByRequest[r.id], actor)
+      await declineRequest(r, declineMessage)
       notifyLoanRequestEvent(user, 'loan_request_declined', r.id)
       toast.success(`Declined ${r.staff_name}'s request.`)
       collapseRow(r.id)
@@ -311,6 +310,7 @@ export default function LoanRequestsPage() {
       notifyAlertsChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to decline request.')
+      if (isStaleRequestError(err)) { collapseRow(r.id); setDeclining(null); setDeclineMessage(''); await load() }
     }
     setDeclineBusy(false)
   }

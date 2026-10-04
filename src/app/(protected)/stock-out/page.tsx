@@ -9,7 +9,8 @@ import { listStaff } from '@/lib/api/staff'
 import { recordStockOut } from '@/lib/api/stock'
 import { postStaffAdmin } from '@/lib/firebase/staff'
 import { toast } from 'sonner'
-import { getReservationHolders, reservationStatusLabel, resolutionInstruction, getAcceptedPickups, getRequestLines, OPEN_ENDED_TO, type ReservationHolder } from '@/lib/firebase/loanRequests'
+import { getReservationHolders, getAcceptedPickups, getRequestLines } from '@/lib/api/loanRequests'
+import { reservationStatusLabel, resolutionInstruction, OPEN_ENDED_TO, type ReservationHolder } from '@/lib/loanRequestRules'
 import { useAuth } from '@/context/AuthContext'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
@@ -174,8 +175,6 @@ export default function StockOutPage() {
     setLoading(false)
   }
 
-  // Loan requests still live in Firestore until the loan-request task moves
-  // them, so this read stays on loanRequests.ts (see getAcceptedPickups).
   async function loadPendingPickups(s: StaffMember) {
     setPendingPickups(await getAcceptedPickups(s.id.toString()))
   }

@@ -9,7 +9,7 @@ import { useStaffPortal } from '@/context/StaffPortalContext'
 import {
   submitLoanRequest, validateCartDates, tightestLendingCap, lendingIntervalLabel,
   getReservationIntervals, reservedQuantityInRange, type ReservationInterval,
-} from '@/lib/firebase/loanRequests'
+} from '@/lib/api/loanRequests'
 import { todayDateStr, addDaysToDateStr, formatLendWindow } from '@/lib/utils'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
@@ -37,9 +37,9 @@ export default function LendCartPage() {
   // which item is tightest), so the effect must still run on a blank toDate
   // rather than skipping validation entirely the way it used to.
   useEffect(() => {
-    // loan_requests/loan_request_lines (read inside validateCartDates, for
-    // the live availability check) stay signed-in-only in firestore.rules —
-    // unlike `products`, that wasn't opened up to guests. A guest can still
+    // The loan-request API (read inside validateCartDates, for the live
+    // availability check) is signed-in-only — unlike `products`, that isn't
+    // open to guests. A guest can still
     // fill in dates and see errors clear, but the actual conflict check
     // only runs once there's a real linked account to run it against; it
     // re-runs on its own once they sign in (staffMember becomes truthy).
@@ -128,8 +128,7 @@ export default function LendCartPage() {
     setSubmitting(true)
     try {
       const requestId = await submitLoanRequest(
-        staffMember.id.toString(), staffMember.full_name, cart, fromDate, toDate,
-        message.trim() || null, { userId: user?.uid, userName: staffMember.full_name },
+        cart, fromDate, toDate, message.trim() || null, staffMember.id.toString(),
       )
       notifyLoanRequestEvent(user, 'new_loan_request', requestId)
       toast.success('Request submitted — Jonathan will review it soon.')

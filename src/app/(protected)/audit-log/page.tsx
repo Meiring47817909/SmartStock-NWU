@@ -4,7 +4,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
 import { formatDate, formatDateOnly, formatLendWindow, sentenceCase, todayDateStr, withinDateRange } from '@/lib/utils'
 import { db } from '@/lib/firebase/config'
-import { LENDING_INTERVALS } from '@/lib/firebase/loanRequests'
+import { LENDING_INTERVALS } from '@/lib/loanRequestRules'
 import { collection, query, orderBy, getDocs, where } from 'firebase/firestore'
 import { useTable, type SortingState } from '@tanstack/react-table'
 import {

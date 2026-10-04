@@ -3,10 +3,8 @@
 import { Fragment, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { notifyLoanRequestEvent } from '@/lib/firebase/notifyEvent'
-import { db } from '@/lib/firebase/config'
-import { collection, query, where, getDocs } from 'firebase/firestore'
 import { useStaffPortal } from '@/context/StaffPortalContext'
-import { acceptCounter, declineCounter, withdrawRequest, expireIfNeeded, computeExpiryDate, effectiveToDate, OPEN_ENDED_TO } from '@/lib/firebase/loanRequests'
+import { acceptCounter, declineCounter, withdrawRequest, expireIfDue, isStaleRequestError, listRequests, getRequestLines, computeExpiryDate, effectiveToDate, OPEN_ENDED_TO } from '@/lib/api/loanRequests'
 import { notifyAlertsChanged } from '@/lib/alertsBus'
 import { formatDateOnly, formatLendWindow, sentenceCase } from '@/lib/utils'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
@@ -141,26 +139,19 @@ export default function MyRequestsPage() {
   async function load() {
     if (!staffMember) return
     setLoading(true)
-    const reqSnap = await getDocs(query(collection(db, 'loan_requests'), where('staff_id', '==', staffMember.id.toString())))
-    let reqs = reqSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as LoanRequest[]
+    let reqs = await listRequests({ staffId: staffMember.id.toString() })
 
     reqs = await Promise.all(reqs.map(async (r) => {
       if (r.status !== 'pending' && r.status !== 'countered' && r.status !== 'accepted') return r
-      const next = await expireIfNeeded(r)
+      const next = await expireIfDue(r)
       return next !== r.status ? { ...r, status: next, updated_at: new Date().toISOString() } : r
     }))
 
-    // Broad read + filter client-side (this app's consistent convention —
-    // see loanRequests.ts's getReservedQuantity) rather than an `in` query,
-    // which has a value-count cap and needs no composite index here anyway.
-    const requestIds = new Set(reqs.map((r) => r.id))
-    const linesSnap = await getDocs(collection(db, 'loan_request_lines'))
+    // One read per request: every card (history included) lists its lines.
     const byRequest: Record<string, LoanRequestLine[]> = {}
-    linesSnap.forEach((d) => {
-      const l = { id: d.id, ...d.data() } as LoanRequestLine
-      if (!requestIds.has(l.request_id)) return
-      ;(byRequest[l.request_id] ??= []).push(l)
-    })
+    await Promise.all(reqs.map(async (r) => {
+      byRequest[r.id] = await getRequestLines(r.id)
+    }))
 
     setRequests(reqs)
     setLinesByRequest(byRequest)
@@ -170,13 +161,15 @@ export default function MyRequestsPage() {
   async function handleAccept(r: LoanRequest) {
     setBusy(r.id)
     try {
-      await acceptCounter(r, { userId: user?.uid, userName: staffMember?.full_name })
+      await acceptCounter(r)
       notifyLoanRequestEvent(user, 'loan_request_counter_accepted', r.id)
       toast.success('Accepted — see you at pickup!')
       await load()
       notifyAlertsChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to accept.')
+      // The request changed meanwhile (expired, or the other side acted): show what it is now.
+      if (isStaleRequestError(err)) await load()
     }
     setBusy(null)
   }
@@ -184,13 +177,15 @@ export default function MyRequestsPage() {
   async function handleDecline(r: LoanRequest) {
     setBusy(r.id)
     try {
-      await declineCounter(r, { userId: user?.uid, userName: staffMember?.full_name })
+      await declineCounter(r)
       notifyLoanRequestEvent(user, 'loan_request_counter_declined', r.id)
       toast.success('Declined.')
       await load()
       notifyAlertsChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to decline.')
+      // The request changed meanwhile (expired, or the other side acted): show what it is now.
+      if (isStaleRequestError(err)) await load()
     }
     setBusy(null)
   }
@@ -198,13 +193,15 @@ export default function MyRequestsPage() {
   async function handleWithdraw(r: LoanRequest) {
     setBusy(r.id)
     try {
-      await withdrawRequest(r, { userId: user?.uid, userName: staffMember?.full_name })
+      await withdrawRequest(r)
       notifyLoanRequestEvent(user, 'loan_request_withdrawn', r.id)
       toast.success('Request withdrawn.')
       await load()
       notifyAlertsChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to withdraw.')
+      // The request changed meanwhile (expired, or the other side acted): show what it is now.
+      if (isStaleRequestError(err)) await load()
     }
     setBusy(null)
   }

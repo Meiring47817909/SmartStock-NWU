@@ -10,7 +10,7 @@ import { markLoggingOut, consumeLoggingOut } from '@/lib/authTransition'
 import { StaffPortalProvider, useStaffPortal } from '@/context/StaffPortalContext'
 import { PortalCartProvider, usePortalCart } from '@/context/PortalCartContext'
 import { PortalMobileSearchProvider, usePortalMobileSearch } from '@/context/PortalMobileSearchContext'
-import { loadMyRequestsAlertCount } from '@/lib/firebase/loanRequests'
+import { loadMyRequestsAlertCount } from '@/lib/api/loanRequests'
 import { subscribeToAlertsChanged } from '@/lib/alertsBus'
 import CookieNotice from '@/components/portal/CookieNotice'
 import { Button } from '@/components/ui/button'
@@ -40,7 +40,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
 
   // Combined total of My Requests' three actionable tabs (Needs your
   // response, Awaiting Jonathan, Upcoming) -- History is excluded, see
-  // lib/firebase/loanRequests.ts's loadMyRequestsAlertCount().
+  // lib/api/loanRequests.ts's loadMyRequestsAlertCount().
   const [myRequestsCount, setMyRequestsCount] = useState<number | null>(null)
 
   // Guest = nobody signed in. Browse and Cart both work without an
@@ -52,7 +52,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!staffMember) return
     let cancelled = false
-    loadMyRequestsAlertCount(staffMember.id.toString()).then(count => {
+    loadMyRequestsAlertCount().then(count => {
       if (!cancelled) setMyRequestsCount(count)
     }).catch(() => {
       // Best-effort: the badge just stays hidden if this fails, the My
@@ -67,7 +67,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!staffMember) return
     return subscribeToAlertsChanged(() => {
-      loadMyRequestsAlertCount(staffMember.id.toString()).then(setMyRequestsCount).catch(() => {})
+      loadMyRequestsAlertCount().then(setMyRequestsCount).catch(() => {})
     })
   }, [staffMember])
 

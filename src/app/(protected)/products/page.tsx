@@ -28,13 +28,13 @@ import {
   type ProductDeleteBlockers,
   type BarcodeUnitCount,
 } from "@/lib/api/catalog";
+import { findQuantityReductionConflicts } from "@/lib/api/loanRequests";
 import {
-  findQuantityReductionConflicts,
   reservationStatusLabel,
   resolutionInstruction,
   LENDING_INTERVALS,
   type ReservationHolder,
-} from "@/lib/firebase/loanRequests";
+} from "@/lib/loanRequestRules";
 import type { LendingInterval } from "@/types/database";
 import { notifyProductStockChange } from "@/lib/firebase/notifyEvent";
 import { useAuth } from "@/context/AuthContext";
@@ -620,7 +620,14 @@ export default function ProductsPage() {
           return;
         }
       }
-      const offenders = await findQuantityReductionConflicts(editing.id.toString(), Number(form.quantity_on_hand));
+      let offenders: ReservationHolder[];
+      try {
+        offenders = await findQuantityReductionConflicts(editing.id.toString(), Number(form.quantity_on_hand));
+      } catch (err) {
+        // The server's own message (e.g. a Qty On Hand that isn't a whole number).
+        setError(err instanceof Error ? err.message : String(err));
+        return;
+      }
       if (offenders.length > 0) {
         setError(formatQuantityConflictError(offenders));
         return;

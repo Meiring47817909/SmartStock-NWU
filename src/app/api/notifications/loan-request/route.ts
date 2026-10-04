@@ -1,10 +1,13 @@
 import 'server-only'
 import { NextRequest, NextResponse } from 'next/server'
-import { adminDb } from '@/lib/firebase/admin'
+import { asc, eq } from 'drizzle-orm'
 import { requireAdmin, requireSignedIn, ApiError } from '@/lib/server/staffAdmin'
+import { getRouteDb } from '@/server/context'
+import { toIso } from '@/server/db/client'
+import { loanRequestLines, loanRequests, staff } from '@/server/db/schema'
 import { isMailEnabled, MailUnreachableError, MailConfigError } from '@/lib/server/mailer'
 import {
-  deliver, appBaseUrl, staffEmailFor, adminInboxEmail, type DeliveryResult,
+  deliver, appBaseUrl, adminInboxEmail, type DeliveryResult,
 } from '@/lib/server/notificationDelivery'
 import {
   loanRequestApprovedEmail, loanRequestCounteredEmail, loanRequestDeclinedEmail, pickupCancelledEmail,
@@ -16,26 +19,19 @@ import type { LoanRequestStatus, NotificationSettingKey } from '@/types/database
 
 const MAX_REASON_LENGTH = 500
 
-// The fields of the Firestore documents this route reads.
+// The fields of the loan_requests row this route reads (timestamps as ISO strings).
 interface LoanRequestDoc {
-  staff_id?: unknown
-  staff_name?: string
-  status?: string
-  reference_no?: string | null
-  message?: string | null
-  admin_message?: string | null
+  staff_id: string
+  staff_name: string
+  status: string
+  reference_no: string | null
+  message: string | null
+  admin_message: string | null
   from_date: string
-  to_date?: string | null
-  original_from_date?: string
-  original_to_date?: string | null
-  updated_at?: string
-}
-
-interface LineDoc {
-  product_name?: string
-  requested_quantity?: number
-  offered_quantity?: number
-  created_at?: string
+  to_date: string | null
+  original_from_date: string
+  original_to_date: string | null
+  updated_at: string
 }
 
 interface Ctx {
@@ -146,27 +142,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ results: [{ toggle: plan.emails[0].toggle, sent: false, reason: 'mail_disabled' }] })
     }
 
-    const requestSnap = await adminDb.collection('loan_requests').doc(requestId).get()
-    if (!requestSnap.exists) throw new ApiError(404, 'Loan request not found.')
-    const req = requestSnap.data() as LoanRequestDoc
+    // The request is only read here, never written: the page calls this after its change has committed.
+    const db = getRouteDb()
+    const [row] = await db.select().from(loanRequests).where(eq(loanRequests.id, requestId)).limit(1)
+    if (!row) throw new ApiError(404, 'Loan request not found.')
+    const req: LoanRequestDoc = { ...row, updated_at: toIso(row.updated_at) as string }
 
+    // The staff member the request belongs to: owner check for borrower events, address for the staff emails.
+    const [owner] = await db.select({ uid: staff.uid, email: staff.email }).from(staff).where(eq(staff.id, req.staff_id)).limit(1)
     if (plan.caller === 'admin') {
       await requireAdmin(request)
-    } else {
-      const staffSnap = await adminDb.collection('staff').doc(String(req.staff_id)).get()
-      if (staffSnap.data()?.uid !== uid) throw new ApiError(403, 'Only the staff member who owns this request can do that.')
+    } else if (owner?.uid !== uid) {
+      throw new ApiError(403, 'Only the staff member who owns this request can do that.')
     }
     if (req.status !== plan.status) throw new ApiError(409, 'The request is not in the state this event expects.')
 
-    const linesSnap = await adminDb.collection('loan_request_lines').where('request_id', '==', requestId).get()
-    const lines: RequestEmailLine[] = linesSnap.docs
-      .map((d) => d.data() as LineDoc)
-      .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')))
-      .map((l) => ({
-        productName: l.product_name ?? 'Item',
-        requested: Number(l.requested_quantity ?? 0),
-        offered: Number(l.offered_quantity ?? l.requested_quantity ?? 0),
-      }))
+    // In cart order.
+    const lineRows = await db
+      .select({
+        product_name: loanRequestLines.product_name,
+        requested_quantity: loanRequestLines.requested_quantity,
+        offered_quantity: loanRequestLines.offered_quantity,
+      })
+      .from(loanRequestLines)
+      .where(eq(loanRequestLines.request_id, requestId))
+      .orderBy(asc(loanRequestLines.line_no), asc(loanRequestLines.id))
+    const lines: RequestEmailLine[] = lineRows.map((l) => ({
+      productName: l.product_name ?? 'Item',
+      requested: Number(l.requested_quantity ?? 0),
+      offered: Number(l.offered_quantity ?? l.requested_quantity ?? 0),
+    }))
 
     const base = appBaseUrl()
     const reason = typeof body?.reason === 'string' ? body.reason.trim().slice(0, MAX_REASON_LENGTH) || null : null
@@ -188,7 +193,7 @@ export async function POST(request: NextRequest) {
         results.push(await deliver({
           toggle: email.toggle,
           dedupeKey: `${email.toggle}__${requestId}__${req.updated_at}`,
-          recipient: () => (email.to === 'staff' ? staffEmailFor(String(req.staff_id)) : adminInboxEmail()),
+          recipient: async () => (email.to === 'staff' ? (owner?.email ?? '').trim() : adminInboxEmail()),
           render: async () => email.render(ctx),
         }))
       } catch (err) {

@@ -9,7 +9,7 @@ import { useTable, type SortingState } from '@tanstack/react-table'
 import { SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead } from '@/components/data-table-helpers'
 import { toast } from 'sonner'
 import { notifyLoanRequestEvent } from '@/lib/firebase/notifyEvent'
-import { expireIfNeeded, isNoShowCandidate, withdrawRequest, getReservedQuantity, effectiveToDate } from '@/lib/firebase/loanRequests'
+import { expireIfDue, isNoShowCandidate, isStaleRequestError, withdrawRequest, getReservedQuantity, effectiveToDate } from '@/lib/api/loanRequests'
 import { notifyAlertsChanged } from '@/lib/alertsBus'
 import { loadWaivedByTxn, waivedQty, createReturnWaiver } from '@/lib/firebase/waivers'
 import { loadNotificationSettings } from '@/lib/firebase/notificationSettings'
@@ -286,7 +286,7 @@ export default function DashboardPage() {
           .map(d => ({ id: d.id, ...d.data() }) as LoanRequest)
           .filter(r => r.status === 'accepted')
         loanReqs = await Promise.all(loanReqs.map(async (r) => {
-          const next = await expireIfNeeded(r)
+          const next = await expireIfDue(r)
           return next !== r.status ? { ...r, status: next } : r
         }))
         const loanReqLinesSnap = await getDocs(collection(db, 'loan_request_lines'))
@@ -388,19 +388,15 @@ export default function DashboardPage() {
   // Incoming Pickups' own Cancel button (2026-09-20 — moved here from the
   // Loan Requests page, which no longer shows accepted requests at all).
   // Confirmed through a dialog with an optional reason, same shape as
-  // Resolve's own confirmation below. withdrawRequest() only reads
-  // request.id/.status off what's passed in (see loanRequests.ts) — the
-  // lean pickups row already carries both, so there's no need to keep the
-  // full LoanRequest around just for this.
+  // Resolve's own confirmation below. withdrawRequest() only needs the
+  // request's id (see lib/api/loanRequests.ts) — the lean pickups row
+  // already carries it, so there's no need to keep the full LoanRequest
+  // around just for this.
   async function confirmCancelPickup() {
     if (!cancelling) return
     setCancelBusy(true)
     try {
-      await withdrawRequest(
-        { id: cancelling.id, status: 'accepted' } as LoanRequest,
-        { userId: user?.uid, userName: profile?.full_name ?? user?.email },
-        cancelReason.trim() || null,
-      )
+      await withdrawRequest(cancelling.id, cancelReason.trim() || null)
       // The reason isn't stored on the request, so it travels with the call.
       notifyLoanRequestEvent(user, 'approved_pickup_cancelled', cancelling.id, { reason: cancelReason })
       // Drop the row locally rather than refetching the whole dashboard —
@@ -419,6 +415,12 @@ export default function DashboardPage() {
       setCancelReason('')
     } catch (err: any) {
       toast.error('Could not cancel this pickup. ' + (err?.message ?? ''))
+      // The request changed meanwhile (e.g. it was picked up or expired): show what it is now.
+      if (isStaleRequestError(err)) {
+        setCancelling(null)
+        setCancelReason('')
+        getDashboardData({ silent: true })
+      }
     } finally {
       setCancelBusy(false)
     }

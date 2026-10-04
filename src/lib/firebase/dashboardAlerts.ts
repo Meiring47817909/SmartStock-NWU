@@ -21,7 +21,7 @@ import { db } from './config'
 import { collection, query, where } from 'firebase/firestore'
 import { getDocsFresh } from './freshDocs'
 import { loadWaivedByTxn, waivedQty } from './waivers'
-import { expireIfNeeded } from './loanRequests'
+import { expireIfDue } from '@/lib/api/loanRequests'
 import type { LoanRequest } from '@/types/database'
 import { collapseLinesByProduct } from '@/lib/transactionLines'
 
@@ -78,7 +78,7 @@ export async function loadDashboardAlertCounts(): Promise<DashboardAlertCounts> 
   let loanReqs = loanReqSnap.docs.map(d => ({ id: d.id, ...d.data() })) as LoanRequest[]
   loanReqs = await Promise.all(loanReqs.map(async (r) => {
     if (r.status !== 'pending' && r.status !== 'countered' && r.status !== 'accepted') return r
-    const next = await expireIfNeeded(r)
+    const next = await expireIfDue(r)
     return next !== r.status ? { ...r, status: next } : r
   }))
   const incomingPickups = loanReqs.filter(r => r.status === 'accepted').length

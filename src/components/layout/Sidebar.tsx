@@ -13,7 +13,7 @@ import { signOut } from 'firebase/auth'
 import { auth } from '@/lib/firebase/config'
 import { markLoggingOut } from '@/lib/authTransition'
 import { loadDashboardAlertCounts } from '@/lib/firebase/dashboardAlerts'
-import { loadLoanRequestsAlertCount } from '@/lib/firebase/loanRequests'
+import { loadLoanRequestsAlertCount } from '@/lib/api/loanRequests'
 import { subscribeToAlertsChanged } from '@/lib/alertsBus'
 import { useRole } from '@/context/RoleContext'
 import {
@@ -103,7 +103,7 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
   const [alertCount, setAlertCount] = useState<number | null>(null)
   // Combined total of Loan Requests' three actionable tabs (Needs Review,
   // Sent Counters, Incoming Pickups) — History is excluded, see
-  // lib/firebase/loanRequests.ts's loadLoanRequestsAlertCount().
+  // lib/api/loanRequests.ts's loadLoanRequestsAlertCount().
   const [loanRequestCount, setLoanRequestCount] = useState<number | null>(null)
 
   useEffect(() => {
