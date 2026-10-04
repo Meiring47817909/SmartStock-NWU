@@ -10,14 +10,14 @@ import {
 } from '@/server/data/staff'
 import type { OwnDetailsInput, StaffInput } from '@/lib/staffRules'
 
-// Staff. The data functions enforce who may do what (the staff table is admin-only except a caller's own row), so the
-// routes only need a signed-in caller.
+// Staff. The data functions enforce who may do what (staff writes are admin-only, including the admin's own row from
+// My Profile; a borrower may only read their own row), so the routes only need a signed-in caller.
 //   GET  /api/staff[?includeAdminAccount=true]                    → StaffMember[] by name          (admin)
 //   GET  /api/staff?kind=emailConflict&email=…[&excludeId=…]      → { id, full_name } | null       (admin)
 //   GET  /api/staff?kind=holdings                                 → { [staffId]: { outstanding, items } }  (admin)
 //   POST /api/staff { action: 'create', ...StaffInput }           → StaffMember                    (admin)
-//   POST /api/staff { action: 'updateOwn', ...OwnDetailsInput }   → StaffMember   (the caller's own row; creates it for an admin)
-//   POST /api/staff { action: 'syncOwnEmail', email }             → StaffMember | null   (403 unless it is the caller's Firebase Auth email)
+//   POST /api/staff { action: 'updateOwn', ...OwnDetailsInput }   → StaffMember   (admin: their own row; creates it if missing)
+//   POST /api/staff { action: 'syncOwnEmail', email }             → StaffMember | null   (admin; 403 unless it is their Firebase Auth email)
 // The account's real email from Firebase Auth. Loaded on demand so importing this route never initialises Firebase Admin.
 async function authEmailOf(uid: string): Promise<string | null> {
   const { adminAuth } = await import('@/lib/firebase/admin')

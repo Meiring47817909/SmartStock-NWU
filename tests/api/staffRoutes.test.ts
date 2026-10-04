@@ -157,20 +157,31 @@ describe('/api/staff and /api/staff/[id]', () => {
     expect((await json(await staffPOST(request('POST', '/api/staff', 'sam-uid', { action: 'create', name: 'A', surname: 'B' })))).status).toBe(403)
   })
 
-  it('My Profile: updateOwn saves the caller\'s own details and profile name; syncOwnEmail updates their email', async () => {
-    const res = await json(await staffPOST(request('POST', '/api/staff', 'sam-uid', { action: 'updateOwn', name: 'Samuel', surname: 'Staff', department: 'Art' })))
-    expect(res.body).toMatchObject({ id: 'staff-1', full_name: 'Samuel Staff', department: 'Art' })
-    const [p] = await db.select().from(profiles).where(eq(profiles.uid, 'sam-uid'))
-    expect(p.full_name).toBe('Samuel Staff')
+  it('My Profile: updateOwn saves the admin\'s own details and profile name; syncOwnEmail updates their email', async () => {
+    const res = await json(await staffPOST(request('POST', '/api/staff', 'admin-uid', { action: 'updateOwn', name: 'Adaline', surname: 'Admin', department: 'Art' })))
+    expect(res.body).toMatchObject({ uid: 'admin-uid', full_name: 'Adaline Admin', department: 'Art' })
+    const [p] = await db.select().from(profiles).where(eq(profiles.uid, 'admin-uid'))
+    expect(p.full_name).toBe('Adaline Admin')
     // The address must be the one Firebase Auth has for the caller.
-    fb.users.set('sam.old@nwu.test', { uid: 'sam-uid', email: 'sam.old@nwu.test' })
-    const refused = await json(await staffPOST(request('POST', '/api/staff', 'sam-uid', { action: 'syncOwnEmail', email: 'evil@nwu.test' })))
+    fb.users.set('ada.old@nwu.test', { uid: 'admin-uid', email: 'ada.old@nwu.test' })
+    const refused = await json(await staffPOST(request('POST', '/api/staff', 'admin-uid', { action: 'syncOwnEmail', email: 'evil@nwu.test' })))
     expect(refused).toEqual({ status: 403, body: { error: 'You can only sync your own login email.' } })
-    expect((await db.select().from(staff).where(eq(staff.id, 'staff-1')))[0].email).toBe('sam@nwu.test')
     fb.users.clear()
+    fb.users.set('ada.new@nwu.test', { uid: 'admin-uid', email: 'ada.new@nwu.test' })
+    const sync = await json(await staffPOST(request('POST', '/api/staff', 'admin-uid', { action: 'syncOwnEmail', email: 'Ada.New@nwu.test' })))
+    expect(sync.body).toMatchObject({ uid: 'admin-uid', email: 'ada.new@nwu.test' })
+  })
+
+  it('My Profile writes are admin-only: a staff caller (borrower) gets 403 for updateOwn and syncOwnEmail', async () => {
+    const own = await json(await staffPOST(request('POST', '/api/staff', 'sam-uid', { action: 'updateOwn', name: 'Samuel', surname: 'Staff', department: 'Art' })))
+    expect(own).toEqual({ status: 403, body: { error: 'Only admins can do this.' } })
     fb.users.set('sam.new@nwu.test', { uid: 'sam-uid', email: 'sam.new@nwu.test' })
-    const sync = await json(await staffPOST(request('POST', '/api/staff', 'sam-uid', { action: 'syncOwnEmail', email: 'Sam.New@nwu.test' })))
-    expect(sync.body).toMatchObject({ id: 'staff-1', email: 'sam.new@nwu.test' })
+    const sync = await json(await staffPOST(request('POST', '/api/staff', 'sam-uid', { action: 'syncOwnEmail', email: 'sam.new@nwu.test' })))
+    expect(sync).toEqual({ status: 403, body: { error: 'Only admins can do this.' } })
+    const [row] = await db.select().from(staff).where(eq(staff.id, 'staff-1'))
+    expect(row).toMatchObject({ full_name: 'Sam Staff', email: 'sam@nwu.test' })
+    const [p] = await db.select().from(profiles).where(eq(profiles.uid, 'sam-uid'))
+    expect(p.full_name).toBe('Sam Staff')
   })
 
   it('unknown actions and kinds are 400', async () => {

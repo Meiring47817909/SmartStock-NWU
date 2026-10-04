@@ -4,7 +4,7 @@
 // Routes (all JSON; the Firebase ID token is attached by api()):
 //   GET  /api/staff[?includeAdminAccount=true]                admin    list
 //   GET  /api/staff?kind=emailConflict|holdings               admin
-//   POST /api/staff { action: create|updateOwn|syncOwnEmail } create is admin; the others are the caller's own row
+//   POST /api/staff { action: create|updateOwn|syncOwnEmail } admin (updateOwn/syncOwnEmail: the admin's own row)
 //   GET  /api/staff/<id>                                      admin, or the record's owner (404 → null here)
 //   POST /api/staff/<id> { action: update|setActive|resolve } admin
 // Login emails are sent through POST /api/staff/send-reset-email (see postStaffAdmin in src/lib/firebase/staff.ts),

@@ -306,16 +306,17 @@ export async function logResendAccess(ctx: Ctx, id: string, sent?: { email?: str
 // --- My Profile (the caller's own row) ----------------------------------------
 
 /**
- * Save the caller's own details. Name, surname and department for anyone; the card UID too for an admin. When an admin
+ * Save the admin caller's own details (name, surname, department, card UID). Admin-only: a borrower gets 403. When an admin
  * has no row yet, this creates their own borrower record (`is_admin_account`, so the Staff page hides it and Stock Out
  * can still pick them). `profiles.full_name` follows the new name. No audit entry, as the page wrote none.
  */
 export async function updateOwnDetails(ctx: Ctx, input: OwnDetailsInput): Promise<StaffOut> {
+  // Staff writes are admin-only (spec §4): My Profile is an admin page, and a borrower must not edit their staff row.
+  assertAdmin(ctx)
   const uid = ctx.caller.uid
   if (!uid) throw new DataError(403, 'You can only do this for your own staff record.')
   const { name, surname, full_name } = names(input?.name, input?.surname, 'Name and surname are required.')
   const department = clean(input.department)
-  const isAdmin = ctx.caller.role === 'admin'
   const card_uid = clean(input.card_uid)
 
   try {
@@ -324,17 +325,16 @@ export async function updateOwnDetails(ctx: Ctx, input: OwnDetailsInput): Promis
       let row: StaffRow
       if (own) {
         assertStaffSelf(c, own.id)
-        if (isAdmin && card_uid) {
+        if (card_uid) {
           const other = await cardOwner(c, card_uid, own.id)
           if (other) throw new DataError(409, staffCardConflictMessage(other.full_name))
         }
         ;[row] = await c.db
           .update(staff)
-          .set({ name, surname, full_name, department, ...(isAdmin ? { card_uid } : {}), updated_at: c.now() })
+          .set({ name, surname, full_name, department, card_uid, updated_at: c.now() })
           .where(eq(staff.id, own.id))
           .returning()
       } else {
-        assertAdmin(c)
         const email = clean(input.email)
         if (email) {
           const other = await emailOwner(c, email.toLowerCase())
@@ -375,14 +375,15 @@ export async function updateOwnDetails(ctx: Ctx, input: OwnDetailsInput): Promis
 /**
  * Keep the caller's own staff record's email in step with their Firebase Auth account after a confirmed email change.
  * `authEmailOf(uid)` returns the account's real, current email (the route looks it up with Firebase Admin: the ID token's
- * own claim can be stale right after a change); anything other than that email is refused with 403, so a signed-in user
- * can't point their row at an arbitrary address. Null (nothing changed) when they have no staff record.
+ * own claim can be stale right after a change); anything other than that email is refused with 403, so an admin can't
+ * point their row at an arbitrary address. Admin-only (a borrower gets 403). Null (nothing changed) when they have no staff record.
  */
 export async function syncOwnEmail(
   ctx: Ctx,
   email: string,
   authEmailOf: (uid: string) => Promise<string | null | undefined>,
 ): Promise<StaffOut | null> {
+  assertAdmin(ctx) // staff writes are admin-only (spec §4); My Profile is an admin page
   const uid = ctx.caller.uid
   if (!uid) throw new DataError(403, 'You can only do this for your own staff record.')
   const normalized = normalizeEmail(email ?? '')

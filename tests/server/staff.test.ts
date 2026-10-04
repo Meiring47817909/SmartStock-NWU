@@ -336,34 +336,38 @@ describe('linkStaffLogin / logResendAccess', () => {
 })
 
 describe('updateOwnDetails / syncOwnEmail (My Profile)', () => {
-  it('a staff caller updates only their own row (name, surname, department) and their profile name follows', async () => {
-    const row = await updateOwnDetails(ctxAs(sam), { name: 'Samuel', surname: 'Staffer', department: ' Science ', card_uid: 'HACK' })
-    expect(row).toMatchObject({
-      id: 'staff-1',
-      name: 'Samuel',
-      surname: 'Staffer',
-      full_name: 'Samuel Staffer',
-      department: 'Science',
-      card_uid: null, // a borrower cannot re-point their own card
-      email: 'sam@nwu.test',
-      updated_at: NOW.toISOString(),
-    })
-    const [other] = await db.select().from(staff).where(eq(staff.id, 'staff-2'))
-    expect(other.name).toBe('Bo')
+  it('a staff caller (borrower) cannot write their own staff row: 403, row and profile unchanged (spec §4)', async () => {
+    await expectDataError(
+      updateOwnDetails(ctxAs(sam), { name: 'Samuel', surname: 'Staffer', department: ' Science ', card_uid: 'HACK' }),
+      403,
+      'Only admins can do this.',
+    )
+    const [row] = await db.select().from(staff).where(eq(staff.id, 'staff-1'))
+    expect(row).toMatchObject({ name: 'Sam', surname: 'Staff', department: 'Maths', card_uid: null })
     const [profile] = await db.select().from(profiles).where(eq(profiles.uid, 'sam-uid'))
-    expect(profile.full_name).toBe('Samuel Staffer')
-    expect(await audits()).toHaveLength(0) // the page wrote no audit entry for this today
+    expect(profile.full_name).toBe('Sam Staff')
+    expect(await audits()).toHaveLength(0)
   })
 
   it('requires name and surname, as the page did', async () => {
-    await expectDataError(updateOwnDetails(ctxAs(sam), { name: ' ', surname: 'X' }), 400, 'Name and surname are required.')
+    await expectDataError(updateOwnDetails(adminCtx(), { name: ' ', surname: 'X' }), 400, 'Name and surname are required.')
   })
 
   it('an admin with a row updates it, including the card UID, and profiles.full_name follows', async () => {
     const row = await updateOwnDetails(adminCtx(), { name: 'Adaline', surname: 'Admin', department: '', card_uid: ' CARD-A ' })
-    expect(row).toMatchObject({ id: 'admin-row', full_name: 'Adaline Admin', department: null, card_uid: 'CARD-A', is_admin_account: true })
+    expect(row).toMatchObject({
+      id: 'admin-row',
+      full_name: 'Adaline Admin',
+      department: null,
+      card_uid: 'CARD-A',
+      is_admin_account: true,
+      updated_at: NOW.toISOString(),
+    })
     const [profile] = await db.select().from(profiles).where(eq(profiles.uid, 'admin-uid'))
     expect(profile.full_name).toBe('Adaline Admin')
+    const [other] = await db.select().from(staff).where(eq(staff.id, 'staff-1'))
+    expect(other.name).toBe('Sam')
+    expect(await audits()).toHaveLength(0) // the page wrote no audit entry for this today
   })
 
   it('an admin with no row gets their own borrower record created (is_admin_account, with the sign-in email)', async () => {
@@ -388,36 +392,43 @@ describe('updateOwnDetails / syncOwnEmail (My Profile)', () => {
       updateOwnDetails(ctxAs({ uid: null, name: null, role: 'staff', staffId: null }), { name: 'A', surname: 'B' }),
       403,
     )
+    expect(await db.select().from(staff).where(eq(staff.uid, 'sam-uid'))).toHaveLength(0)
   })
 
   // What Firebase Auth says each uid's email really is.
   let authEmails: Record<string, string> = {}
   beforeEach(() => {
-    authEmails = { 'sam-uid': 'New@nwu.test', 'admin-uid': 'ada@nwu.test' }
+    authEmails = { 'sam-uid': 'New@nwu.test', 'admin-uid': 'Ada.New@nwu.test' }
   })
   const authEmailOf = async (uid: string) => authEmails[uid] ?? null
 
-  it('syncOwnEmail updates the caller\'s own row with their real Auth email (any letter case); another row\'s email is a 409', async () => {
-    const row = await syncOwnEmail(ctxAs(sam), ' new@NWU.test ', authEmailOf)
-    expect(row).toMatchObject({ id: 'staff-1', email: 'new@nwu.test', updated_at: NOW.toISOString() })
-    authEmails['sam-uid'] = 'BO@nwu.test'
-    await expectDataError(syncOwnEmail(ctxAs(sam), 'BO@nwu.test', authEmailOf), 409, 'This email is already used by Bo Rrower.')
+  it('syncOwnEmail updates the admin\'s own row with their real Auth email (any letter case); another row\'s email is a 409', async () => {
+    const row = await syncOwnEmail(adminCtx(), ' ada.new@NWU.test ', authEmailOf)
+    expect(row).toMatchObject({ id: 'admin-row', email: 'ada.new@nwu.test', updated_at: NOW.toISOString() })
+    authEmails['admin-uid'] = 'BO@nwu.test'
+    await expectDataError(syncOwnEmail(adminCtx(), 'BO@nwu.test', authEmailOf), 409, 'This email is already used by Bo Rrower.')
     const [other] = await db.select().from(staff).where(eq(staff.id, 'staff-2'))
     expect(other.email).toBe('bo@nwu.test')
   })
 
   it('syncOwnEmail refuses an email that is not the caller\'s Auth email (403) and leaves the row unchanged', async () => {
-    await expectDataError(syncOwnEmail(ctxAs(sam), 'anything@else.test', authEmailOf), 403, 'You can only sync your own login email.')
+    await expectDataError(syncOwnEmail(adminCtx(), 'anything@else.test', authEmailOf), 403, 'You can only sync your own login email.')
     // Auth knows no email for the caller either: refused.
-    await expectDataError(syncOwnEmail(ctxAs(sam), 'sam@nwu.test', async () => null), 403, 'You can only sync your own login email.')
-    const [row] = await db.select().from(staff).where(eq(staff.id, 'staff-1'))
-    expect(row.email).toBe('sam@nwu.test')
+    await expectDataError(syncOwnEmail(adminCtx(), 'ada.new@nwu.test', async () => null), 403, 'You can only sync your own login email.')
+    const [row] = await db.select().from(staff).where(eq(staff.id, 'admin-row'))
+    expect(row.email).toBeNull()
     expect(row.updated_at.getTime()).not.toBe(NOW.getTime())
   })
 
+  it('syncOwnEmail from a staff caller (borrower) is 403 even with their real Auth email, and their row is unchanged', async () => {
+    await expectDataError(syncOwnEmail(ctxAs(sam), 'new@nwu.test', authEmailOf), 403, 'Only admins can do this.')
+    const [row] = await db.select().from(staff).where(eq(staff.id, 'staff-1'))
+    expect(row.email).toBe('sam@nwu.test')
+  })
+
   it('syncOwnEmail with no staff row is a no-op (null), like the page when no record was found', async () => {
-    await db.delete(staff).where(eq(staff.id, 'staff-1'))
-    expect(await syncOwnEmail(ctxAs(sam), 'new@nwu.test', authEmailOf)).toBeNull()
+    await db.delete(staff).where(eq(staff.id, 'admin-row'))
+    expect(await syncOwnEmail(adminCtx(), 'ada.new@nwu.test', authEmailOf)).toBeNull()
   })
 })
 
