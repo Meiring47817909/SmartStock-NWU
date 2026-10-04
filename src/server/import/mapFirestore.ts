@@ -431,6 +431,16 @@ class DocReader {
     }
     return readPresent()
   }
+  /** Like orOldReading, for a safe value that is not an old reading: missing or null -> `value`, with `why` in the warning. */
+  orSafeDefault<T>(field: string, value: T, why: string, readPresent: () => T): T {
+    const v = this.data[field]
+    if (v === undefined || v === null) {
+      this.used.add(field)
+      this.warn(`${field} is missing; imported as ${value instanceof Date ? value.toISOString() : JSON.stringify(value)} (${why})`)
+      return value
+    }
+    return readPresent()
+  }
   bool(field: string): boolean {
     const v = this.raw(field)
     if (v === undefined || v === null) this.problem(`${field} is missing`)
@@ -685,7 +695,7 @@ export async function planImport(source: FirestoreSource, opts: PlanOptions = {}
       // Absent by design (the type: "Never set on an ordinary staff member's record"), read as false: no warning.
       is_admin_account: r.optBool('is_admin_account', false),
       created_at: createdAt,
-      updated_at: r.timestamp('updated_at'),
+      updated_at: r.orSafeDefault('updated_at', createdAt, 'its created_at: the truthful lower bound', () => r.timestamp('updated_at')),
     }
   })
 
@@ -744,7 +754,7 @@ export async function planImport(source: FirestoreSource, opts: PlanOptions = {}
       lending_interval: r.optOneOf('lending_interval', LENDING_INTERVALS), // absent on old products; the app reads null as week_1
       images: r.orOldReading('images', [] as string[], () => r.textList('images')),
       created_at: createdAt,
-      updated_at: r.timestamp('updated_at'),
+      updated_at: r.orSafeDefault('updated_at', createdAt, 'its created_at: the truthful lower bound', () => r.timestamp('updated_at')),
     }
   })
 
@@ -824,10 +834,9 @@ export async function planImport(source: FirestoreSource, opts: PlanOptions = {}
     const productId = r.text('product_id')
     productRef(r, productId, 'transactionLines')
     const productName = frozenProductName(r, productId)
-    // Every writer stored unit_cost (always 0) and nothing read it, so there is no old reading to fall back on.
-    const unitCost = r.raw('unit_cost')
-    if (unitCost === undefined || unitCost === null) r.problem('unit_cost is missing')
-    else if (typeof unitCost !== 'number' || !Number.isFinite(unitCost)) r.problem(`unit_cost should be a number, found ${describe(unitCost)}`)
+    // Every writer since 284f2c8 (Stock In, Stock Out, Returns) stored unit_cost: 0, and 0 is the column default.
+    const unitCost = r.orSafeDefault('unit_cost', 0 as unknown, 'what every writer stored, and the column default', () => r.raw('unit_cost'))
+    if (typeof unitCost !== 'number' || !Number.isFinite(unitCost)) r.problem(`unit_cost should be a number, found ${describe(unitCost)}`)
     return {
       id: r.id,
       transaction_id: txnId,

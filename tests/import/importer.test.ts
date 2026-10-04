@@ -317,8 +317,6 @@ describe('problems block the write', () => {
     state.categories.c1.name = 42
     delete state.loan_requests.r1.staff_name
     state.audit_log.a1.after = 'not an object'
-    delete state.staff['s-admin'].updated_at // no old reading: never guessed
-    delete state.transaction_lines['l-x'].unit_cost
     const plan = await planOf(state)
     expect(problemTexts(plan).sort()).toEqual([
       'audit_log/a1: after should be a map or null, found string',
@@ -326,10 +324,8 @@ describe('problems block the write', () => {
       'loan_request_lines/lb: requested_quantity should be a whole number, found 1.5',
       'loan_requests/r1: staff_name is missing',
       'products/p1: quantity_on_hand should be at least 0, found -1',
-      'staff/s-admin: updated_at is missing',
       'staff/s1: surname is missing',
       'transaction_lines/l-i: quantity should be at least 1, found 0',
-      'transaction_lines/l-x: unit_cost is missing',
     ])
   })
 
@@ -363,6 +359,9 @@ describe('problems block the write', () => {
     delete state.loan_requests.r1.original_from_date
     delete state.loan_request_lines.lb.requested_quantity
     delete state.loan_request_lines.lb.offered_quantity
+    delete state.transaction_lines['l-x'].unit_cost
+    delete state.staff['s-admin'].updated_at
+    delete state.products.p2.updated_at
     const plan = await planOf(state)
     expect(plan.problems).toEqual([])
     expect(plan.rows.products.find((p) => p.id === 'p1')).toMatchObject({
@@ -384,6 +383,13 @@ describe('problems block the write', () => {
     said('loan_requests', 'r1', 'original_from_date', '2026-09-20')
     said('loan_request_lines', 'lb', 'requested_quantity', 0)
     said('loan_request_lines', 'lb', 'offered_quantity', 0)
+    // safe defaults that are not old readings: unit_cost 0 (what every writer stored), updated_at = created_at
+    expect(plan.rows.transaction_lines.find((l) => l.id === 'l-x')?.unit_cost).toBe(0)
+    expect(plan.rows.staff.find((x) => x.id === 's-admin')?.updated_at).toEqual(new Date('2026-09-01T08:00:00.000Z'))
+    expect(plan.rows.products.find((p) => p.id === 'p2')?.updated_at).toEqual(new Date('2026-08-01T11:00:00.000Z'))
+    expect(plan.warnings).toContainEqual({ collection: 'transaction_lines', id: 'l-x', problem: 'unit_cost is missing; imported as 0 (what every writer stored, and the column default)' })
+    expect(plan.warnings).toContainEqual({ collection: 'staff', id: 's-admin', problem: 'updated_at is missing; imported as 2026-09-01T08:00:00.000Z (its created_at: the truthful lower bound)' })
+    expect(plan.warnings).toContainEqual({ collection: 'products', id: 'p2', problem: 'updated_at is missing; imported as 2026-08-01T11:00:00.000Z (its created_at: the truthful lower bound)' })
     // and is_admin_account, absent on every ordinary staff record by design, is read as false without a warning
     expect(plan.rows.staff.find((x) => x.id === 's1')?.is_admin_account).toBe(false)
     expect(plan.warnings.some((w) => w.problem.includes('is_admin_account'))).toBe(false)
