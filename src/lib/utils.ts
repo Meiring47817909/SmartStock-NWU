@@ -102,8 +102,8 @@ function dateStrFromDate(d: Date): string {
 // pickers. Deliberately avoids `new Date().toISOString()`, which reports the
 // UTC date and can be a day off from "today" depending on the viewer's
 // timezone.
-export function todayDateStr(): string {
-  return dateStrFromDate(new Date())
+export function todayDateStr(now: Date = new Date()): string {
+  return dateStrFromDate(now)
 }
 
 // Converts a full ISO datetime string (e.g. a `created_at` timestamp) to a

@@ -4,7 +4,6 @@ import { assertAdmin, DataError, type Ctx } from '@/server/context'
 import { toIso, withTx, type Db } from '@/server/db/client'
 import { newId } from '@/server/db/ids'
 import {
-  loanRequestLines,
   loanRequests,
   productBarcodes,
   products,
@@ -14,6 +13,7 @@ import {
   transactions,
 } from '@/server/db/schema'
 import { writeAudit } from '@/server/data/audit'
+import { requestAuditSnapshot, type RequestRow } from '@/server/data/loanRequests'
 import { genRef } from '@/lib/utils'
 import {
   productBalance,
@@ -355,43 +355,6 @@ export async function recordAdjust(ctx: Ctx, input: AdjustInput): Promise<StockM
 
 // --- Stock Out ----------------------------------------------------------------
 
-type RequestRow = typeof loanRequests.$inferSelect
-
-/**
- * The full loan-request snapshot every request transition writes into the audit log (same fields as the old
- * requestAuditSnapshot): the request as it stands, its lines, and `overrides` for what this transition changes.
- */
-async function requestSnapshot(c: Ctx, req: RequestRow, overrides: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
-  const lines = await c.db
-    .select({
-      product_id: loanRequestLines.product_id,
-      product_name: loanRequestLines.product_name,
-      requested_quantity: loanRequestLines.requested_quantity,
-      offered_quantity: loanRequestLines.offered_quantity,
-    })
-    .from(loanRequestLines)
-    .where(eq(loanRequestLines.request_id, req.id))
-    .orderBy(asc(loanRequestLines.created_at), asc(loanRequestLines.id))
-  return {
-    reference_no: req.reference_no ?? null,
-    staff_id: req.staff_id,
-    staff_name: req.staff_name,
-    status: req.status,
-    from_date: req.from_date,
-    to_date: req.to_date,
-    original_from_date: req.original_from_date,
-    original_to_date: req.original_to_date,
-    message: req.message ?? null,
-    admin_message: req.admin_message ?? null,
-    fulfilled_txn_id: req.fulfilled_txn_id ?? null,
-    lines,
-    line_count: lines.length,
-    // The agreed quantity: what would actually be handed over.
-    total_qty: lines.reduce((sum, l) => sum + l.offered_quantity, 0),
-    ...overrides,
-  }
-}
-
 /**
  * Issue stock to a staff member: lowers each product's quantity and writes an OUT transaction. 409 "Not enough stock for
  * <product>." when any product would go below zero. With `linkedRequestId` the (accepted, not yet fulfilled) loan request
@@ -465,7 +428,7 @@ export async function recordStockOut(ctx: Ctx, input: StockOutInput): Promise<St
     })
 
     if (request) {
-      const before = await requestSnapshot(c, request)
+      const before = await requestAuditSnapshot(c, request)
       await c.db
         .update(loanRequests)
         .set({ status: 'fulfilled', fulfilled_txn_id: result.id, updated_at: c.now() })
@@ -476,7 +439,7 @@ export async function recordStockOut(ctx: Ctx, input: StockOutInput): Promise<St
         entityId: request.id,
         before,
         // The transaction's own reference too: fulfilled_txn_id is not something anyone can look up by eye.
-        after: await requestSnapshot(c, request, {
+        after: await requestAuditSnapshot(c, request, {
           status: 'fulfilled',
           fulfilled_txn_id: result.id,
           fulfilled_txn_ref: result.reference_no,

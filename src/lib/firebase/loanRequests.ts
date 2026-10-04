@@ -2,61 +2,23 @@ import { getDocsFresh } from './freshDocs'
 import { db } from './config'
 import { collection, doc, getDoc, getDocs, addDoc, updateDoc, query, where } from 'firebase/firestore'
 import { logAudit } from './audit'
-import { todayDateStr, addDaysToDateStr, isoToLocalDateStr, genRequestRef } from '@/lib/utils'
-import type { Product, LoanRequest, LoanRequestLine, LoanRequestStatus, LendingInterval } from '@/types/database'
+import { addDaysToDateStr, genRequestRef } from '@/lib/utils'
+import {
+  ACTIVE_STATUSES, OPEN_ENDED_TO, ALL_TIME_FROM, effectiveToDate, tightestLendingCap, isExpired, isNoShowCandidate,
+  type ReservationHolder, type ReservationInterval, type RequestSnapshotLine,
+} from '@/lib/loanRequestRules'
+import type { Product, LoanRequest, LoanRequestLine, LoanRequestStatus } from '@/types/database'
 
-export const ACTIVE_STATUSES: LoanRequestStatus[] = ['pending', 'countered', 'accepted']
-const MAX_LOAN_DAYS = 30
+// The pure helpers (statuses, lending intervals, date sentinels, expiry rules, reservation labels) live in
+// src/lib/loanRequestRules.ts, shared with the PostgreSQL data layer; re-exported so the pages that still import this
+// Firestore module keep compiling until the loan-request pages move over (Task 11 deletes this file).
+export {
+  ACTIVE_STATUSES, OPEN_ENDED_TO, ALL_TIME_FROM, LENDING_INTERVALS, lendingIntervalDays, lendingIntervalLabel,
+  effectiveToDate, reservationStatusLabel, resolutionInstruction, reservedQuantityInRange, tightestLendingCap,
+  computeExpiryDate, isExpired, isNoShowCandidate,
+} from '@/lib/loanRequestRules'
+export type { ReservationHolder, ReservationInterval, RequestSnapshotLine } from '@/lib/loanRequestRules'
 
-// Stand-in upper/lower bounds for "any time, ever" when a check has no
-// meaningful date window of its own (see findQuantityReductionConflicts
-// below). Dates compare lexicographically as YYYY-MM-DD strings throughout
-// this app, so these sentinels behave as -infinity/+infinity without
-// special-casing the comparison itself. OPEN_ENDED_TO also matches Stock
-// Out's own sentinel for an open-ended (no Lend To) walk-in issue.
-export const OPEN_ENDED_TO = '9999-12-31'
-// Exported for the Products page's delete guard (getProductDeleteBlockers
-// in products.ts) — it needs the same "any time, ever" sentinel to ask
-// getReservationHolders for every active reservation on a product,
-// regardless of date window, before allowing a delete.
-export const ALL_TIME_FROM = '0001-01-01'
-
-// A product saved before the Lending Interval field existed has no
-// lending_interval at all — treated as this, which preserves the flat
-// 7-day cap every product used to have (the old MAX_LOAN_DAYS constant
-// above, kept only for computeExpiryDate's unrelated SLA now).
-const DEFAULT_LENDING_INTERVAL: LendingInterval = 'week_1'
-
-export const LENDING_INTERVALS: { value: LendingInterval; label: string; days: number | null }[] = [
-  { value: 'week_1', label: '1 Week', days: 7 },
-  { value: 'week_2', label: '2 Weeks', days: 14 },
-  { value: 'week_3', label: '3 Weeks', days: 21 },
-  { value: 'month_1', label: '1 Month', days: 30 },
-  { value: 'indefinite', label: 'Indefinitely', days: null },
-]
-
-function lendingIntervalInfo(interval: LendingInterval | null | undefined) {
-  return LENDING_INTERVALS.find((i) => i.value === interval) ?? LENDING_INTERVALS.find((i) => i.value === DEFAULT_LENDING_INTERVAL)!
-}
-
-// Max loan duration in days for a product's lending interval, or null for
-// Indefinitely (no cap at all).
-export function lendingIntervalDays(interval: LendingInterval | null | undefined): number | null {
-  return lendingIntervalInfo(interval).days
-}
-
-export function lendingIntervalLabel(interval: LendingInterval | null | undefined): string {
-  return lendingIntervalInfo(interval).label
-}
-
-// A candidate or stored date range's "to" side, resolved to a real,
-// comparable string — null/blank (an indefinite loan, or a walk-in issue
-// with no Lend To) behaves as "overlaps everything from its from-date
-// onward" via the OPEN_ENDED_TO sentinel, without special-casing every
-// comparison that touches it.
-export function effectiveToDate(to: string | null | undefined): string {
-  return to || OPEN_ENDED_TO
-}
 
 interface CartLike {
   product: Product
@@ -68,31 +30,8 @@ interface ActorInfo {
   userName?: string | null
 }
 
-// Holder-level breakdown of active reservations (pending, countered, or
-// accepted) for a product/date window — getReservedQuantity above answers
-// "how many units", this answers "whose, and in what state", so Stock Out's
-// hard block can name exactly which request(s) a walk-in issue would
-// encroach on and point Selouna at the specific one to resolve.
-//
-// Originally (2026-09-20) this only looked at ACCEPTED reservations — an
-// approved, incoming pickup Selouna had already committed to — because a
-// pending/countered proposal wasn't a promise yet, so encroaching on it was
-// only a soft warning she could click past. Per 2026-09-20 follow-up: that
-// let a walk-in silently eat into a pending request's stock, and the only
-// sign of trouble surfaced later on the Loan Requests page (the "Offering"
-// stepper auto-clamping down to 0 with no way back up). So all three active
-// statuses now block identically — `statuses` defaults to all of them, but
-// callers that specifically need only-accepted (or only-pending) can narrow.
-export interface ReservationHolder {
-  requestId: string
-  staffId: string
-  staffName: string
-  quantity: number
-  fromDate: string
-  toDate: string | null   // null = indefinite loan, no return date
-  status: LoanRequestStatus
-}
-
+// Holder-level breakdown of active reservations: getReservedQuantity below answers "how many units", this answers
+// "whose, and in what state" (all three active statuses block identically; callers can narrow `statuses`).
 export async function getReservationHolders(
   productId: string,
   fromDate: string,
@@ -127,35 +66,6 @@ export async function getReservationHolders(
     }
   })
   return holders
-}
-
-// Human-readable label for a ReservationHolder's status — used anywhere a
-// blocking/FYI conflict alert needs to say at a glance whether it's looking
-// at an unapproved proposal or an already-committed pickup (Stock Out,
-// and the Products page quantity-reduction check below).
-export function reservationStatusLabel(status: LoanRequestStatus): string {
-  switch (status) {
-    case 'accepted': return 'approved pickup'
-    case 'countered': return 'countered offer'
-    default: return 'pending request'
-  }
-}
-
-// Where to send Selouna to actually clear a blocking reservation — an
-// approved pickup can only be cancelled from the Dashboard's Incoming
-// Pickups tab (that Cancel button doesn't live on the Loan Requests page —
-// see the 2026-09-20 "Incoming Pickups consolidated onto the Dashboard"
-// change), while a pending/countered proposal is resolved on the Loan
-// Requests page itself. Mixed sets of holders name both, since one sentence
-// pointing at the wrong page for half the holders would send her on a wild
-// goose chase.
-export function resolutionInstruction(holders: ReservationHolder[]): string {
-  const hasAccepted = holders.some((h) => h.status === 'accepted')
-  const hasPending = holders.some((h) => h.status === 'pending' || h.status === 'countered')
-  const fragments: string[] = []
-  if (hasAccepted) fragments.push('cancel the approved pickup(s) on the Dashboard')
-  if (hasPending) fragments.push('approve, counter, or decline the pending request(s) on the Loan Requests page')
-  return fragments.join(', and ')
 }
 
 // A product-quantity edit (Products page — a stocktake correction, writing
@@ -219,17 +129,6 @@ export async function getReservedQuantity(
   return sum
 }
 
-// Per-product reservation window, stripped down to just what a calendar-day
-// availability check needs (date range + quantity) — built once for every
-// product in the cart via getReservationIntervals below, then reused for
-// every candidate day the From/To calendars ask about, rather than
-// re-querying Firestore per day the way looping getReservedQuantity would.
-export interface ReservationInterval {
-  fromDate: string
-  toDate: string
-  quantity: number
-}
-
 // Fetches the active reservation windows for a set of products in one pass
 // (one loan_requests query, then one loan_request_lines query per product,
 // run in parallel) — the same underlying data getReservedQuantity queries,
@@ -267,47 +166,9 @@ export async function getReservationIntervals(
   return result
 }
 
-// Sum of reserved quantity across a product's fetched intervals that
-// overlaps [fromDate, toDate] — the same overlap rule getReservedQuantity
-// uses, just against the already-fetched list from getReservationIntervals
-// instead of a fresh Firestore round trip, so it's cheap enough to call
-// once per calendar day.
-export function reservedQuantityInRange(
-  intervals: ReservationInterval[],
-  fromDate: string,
-  toDate: string,
-): number {
-  return intervals.reduce(
-    (sum, iv) => (fromDate <= iv.toDate && toDate >= iv.fromDate ? sum + iv.quantity : sum),
-    0,
-  )
-}
-
 // 3.2 — Cart validation. Checks each product's own lend window, its own
 // lending interval, and live availability. Collects every failing
-// product's error at once so the UI can show every problem, not just the
-// first.
-// Each product now carries its own lending interval (Products page,
-// 2026-09-20) instead of one flat app-wide MAX_LOAN_DAYS. The cart shares a
-// single From/To pair across every item in it, so the binding rule for the
-// whole cart is the TIGHTEST cap among its items — a mixed cart of a
-// "1 Week" item and an "Indefinitely" item behaves like its most
-// restrictive member, not its most lenient one. Returns null only when
-// EVERY item in the cart is Indefinitely, meaning a To date isn't required
-// at all. Shared between validateCartDates below and the cart page itself
-// (which needs the same number to cap the To-date picker's `max` live, as
-// the cart's contents change, before ever calling validateCartDates).
-export function tightestLendingCap(
-  cartItems: { product: Pick<Product, 'lending_interval'> }[],
-): { value: LendingInterval; label: string; days: number } | null {
-  const finiteCaps = cartItems
-    .map(({ product }) => lendingIntervalInfo(product.lending_interval))
-    .filter((info) => info.days !== null) as { value: LendingInterval; label: string; days: number }[]
-  return finiteCaps.length > 0
-    ? finiteCaps.reduce((min, c) => (c.days < min.days ? c : min))
-    : null
-}
-
+// product's error at once so the UI can show every problem, not just the first.
 export async function validateCartDates(
   cartItems: CartLike[],
   fromDate: string,
@@ -370,40 +231,6 @@ export async function validateCartDates(
   return { valid: errors.length === 0, errors }
 }
 
-// 3.3 — Expiry: min(updated_at + 30 days, from_date). See decision #5 for
-// why a flat SLA that resets on every state change is wrong — capping at
-// from_date keeps a near-term request from outliving its own pickup date.
-// Widened from 7 to 30 days (2026-09-20) — a week was too tight a window
-// for Selouna to respond to a pending/countered request before it silently
-// expired on the staff member.
-export function computeExpiryDate(request: LoanRequest): string | null {
-  if (request.status !== 'pending' && request.status !== 'countered') return null
-  const oneMonthOut = addDaysToDateStr(isoToLocalDateStr(request.updated_at), MAX_LOAN_DAYS)
-  return oneMonthOut < request.from_date ? oneMonthOut : request.from_date
-}
-
-export function isExpired(request: LoanRequest): boolean {
-  const expiry = computeExpiryDate(request)
-  return expiry !== null && todayDateStr() > expiry
-}
-
-// 3.4 — No-show: accepted, the WHOLE approved window has passed, nothing
-// issued against it. Deliberately keyed on the window's end (effectively
-// "To", or "never" if the item's Indefinite — see effectiveToDate above),
-// not "From" + 1 day: the reservation ledger already holds these units for
-// the staff member across the entire From-To range (getReservedQuantity
-// treats an accepted request as occupying that whole window, not just its
-// first day), so flagging no-show the day after From — before anyone else
-// could even have taken the stock — used to bump a staff member who was
-// simply running a few days into a multi-day or Indefinite pickup window.
-// An Indefinite request (to_date null) never auto-flags at all, same as it
-// never auto-expires for a return — that's consistent with "no forced
-// return date" also meaning no forced pickup deadline; an admin can still
-// manually Cancel it from the Dashboard at any time regardless.
-export function isNoShowCandidate(request: LoanRequest): boolean {
-  return request.status === 'accepted' && !request.fulfilled_txn_id && todayDateStr() > effectiveToDate(request.to_date)
-}
-
 // Lazily persists the expiry/no-show transition on next read (see decision
 // #5/§3.4 — both need to be real status values the reservation ledger and
 // list queries can exclude/include on, not just a live display label).
@@ -425,13 +252,6 @@ export function isNoShowCandidate(request: LoanRequest): boolean {
  * cleanly on screen, because the unchanged fields are identical on both
  * sides and FieldDiff filters them out.
  */
-export type RequestSnapshotLine = {
-  product_id: string
-  product_name: string
-  requested_quantity: number
-  offered_quantity: number
-}
-
 function toSnapshotLines(lines: LoanRequestLine[]): RequestSnapshotLine[] {
   return lines.map((l) => ({
     product_id: l.product_id,

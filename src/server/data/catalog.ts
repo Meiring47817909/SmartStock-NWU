@@ -17,6 +17,7 @@ import {
 } from '@/server/db/schema'
 import { writeAudit } from '@/server/data/audit'
 import { openBarcodeQuantities } from '@/lib/transactionLines'
+import { ACTIVE_STATUSES } from '@/lib/loanRequestRules'
 import {
   barcodeConflictMessage,
   categoryInUseMessage,
@@ -28,13 +29,12 @@ import {
   type ProductInput,
   type ReservationHolder,
 } from '@/lib/catalogRules'
-import type { Category, LendingInterval, LoanRequestStatus, Product } from '@/types/database'
+import type { Category, LendingInterval, Product } from '@/types/database'
 
 // `Product.id` is typed `number` in src/types/database.ts but ids are strings (same cast the Firestore code used for its
 // string document ids); the server side says so honestly, and the browser client hands pages the `Product` type they use.
 export type ProductOut = Omit<Product, 'id'> & { id: string }
 
-const ACTIVE_STATUSES: LoanRequestStatus[] = ['pending', 'countered', 'accepted']
 const ID_PATTERN = /^[A-Za-z0-9]{20}$/
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 const DEFAULT_LOCATION = 'NWU - Potchefstroom, Building G4, Room 28' // same default the Products page falls back to

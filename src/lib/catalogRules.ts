@@ -1,6 +1,9 @@
 // Pure catalog types and helpers shared by the server data layer (src/server/data/catalog.ts) and the browser
 // client (src/lib/api/catalog.ts). No server-only or Firebase imports: both sides load this file.
-import type { LendingInterval, LoanRequestStatus } from '@/types/database'
+import { reservationStatusLabel, type ReservationHolder } from '@/lib/loanRequestRules'
+import type { LendingInterval } from '@/types/database'
+
+export type { ReservationHolder }
 
 /** The product form's fields, as sent to create/update. */
 export interface ProductInput {
@@ -41,29 +44,9 @@ export interface BarcodeUnitCount {
   total: number
 }
 
-export interface ReservationHolder {
-  requestId: string
-  staffId: string
-  staffName: string
-  quantity: number
-  fromDate: string
-  toDate: string | null // null = indefinite loan, no return date
-  status: LoanRequestStatus
-}
-
 export interface ProductDeleteBlockers {
   outstanding: OutstandingHolder[]
   reservations: ReservationHolder[]
-}
-
-// Same wording as reservationStatusLabel in src/lib/firebase/loanRequests.ts (which stays until the loan-request
-// task moves it into loanRequestRules.ts).
-function reservationStatusLabel(status: LoanRequestStatus): string {
-  switch (status) {
-    case 'accepted': return 'approved pickup'
-    case 'countered': return 'countered offer'
-    default: return 'pending request'
-  }
 }
 
 // A short, specific reason the product can't be deleted right now, or null once it's clear — names exactly
