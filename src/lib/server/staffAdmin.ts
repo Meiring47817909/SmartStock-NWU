@@ -26,18 +26,34 @@ export class ApiError extends Error {
 // member's full borrow history, not just the caller's own). Throws
 // ApiError on any failure — callers should catch it and turn it into a
 // NextResponse.
-export async function requireSignedIn(request: NextRequest): Promise<{ uid: string }> {
+async function verifyBearer(request: NextRequest) {
   const authHeader = request.headers.get('authorization') ?? ''
   const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
   if (!idToken) {
     throw new ApiError(401, 'Missing Authorization header.')
   }
   try {
-    const decoded = await adminAuth.verifyIdToken(idToken)
-    return { uid: decoded.uid }
+    return await adminAuth.verifyIdToken(idToken)
   } catch {
     throw new ApiError(401, 'Invalid or expired session — please sign in again.')
   }
+}
+
+export async function requireSignedIn(request: NextRequest): Promise<{ uid: string }> {
+  const decoded = await verifyBearer(request)
+  return { uid: decoded.uid }
+}
+
+// Like requireSignedIn, but the user must also have signed in (or re-entered
+// their password) within the last `maxAgeSeconds`, for changes to the login
+// itself such as the email address.
+export async function requireRecentSignIn(request: NextRequest, maxAgeSeconds: number): Promise<{ uid: string }> {
+  const decoded = await verifyBearer(request)
+  const signedInAt = typeof decoded.auth_time === 'number' ? decoded.auth_time : 0
+  if (Date.now() / 1000 - signedInAt > maxAgeSeconds) {
+    throw new ApiError(401, 'For security, enter your current password again and retry.')
+  }
+  return { uid: decoded.uid }
 }
 
 // Verifies the request's `Authorization: Bearer <idToken>` header and that
@@ -46,14 +62,17 @@ export async function requireSignedIn(request: NextRequest): Promise<{ uid: stri
 // callers should catch it and turn it into a NextResponse.
 export async function requireAdmin(request: NextRequest): Promise<{ uid: string }> {
   const { uid } = await requireSignedIn(request)
+  await assertAdmin(uid)
+  return { uid }
+}
 
+// Throws a 403 unless this user's profile has the admin role.
+export async function assertAdmin(uid: string, message = 'Only admins can manage staff logins.'): Promise<void> {
   const profileSnap = await adminDb.collection('profiles').doc(uid).get()
   const role = profileSnap.exists ? profileSnap.data()?.role : null
   if (role !== 'admin') {
-    throw new ApiError(403, 'Only admins can manage staff logins.')
+    throw new ApiError(403, message)
   }
-
-  return { uid }
 }
 
 // Does any `staff` document already have this Firebase Auth UID linked?

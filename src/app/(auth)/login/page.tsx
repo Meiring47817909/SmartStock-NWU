@@ -3,8 +3,9 @@
 import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Image from 'next/image'
-import { signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from 'firebase/auth'
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import { auth, db } from '@/lib/firebase/config'
+import { requestPasswordReset } from '@/lib/firebase/accountEmails'
 import { doc, getDocFromServer, collection, query, where, getDocsFromServer } from 'firebase/firestore'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -127,7 +128,7 @@ function LoginPageInner() {
     setError('')
     setSendingReset(true)
     try {
-      await sendPasswordResetEmail(auth, email)
+      await requestPasswordReset(email)
       toast.success(`Password reset email sent to ${email}.`)
     } catch (err) {
       const code = (err as { code?: string })?.code

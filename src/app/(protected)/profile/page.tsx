@@ -7,9 +7,9 @@ import {
   reauthenticateWithCredential,
   updatePassword,
   validatePassword,
-  verifyBeforeUpdateEmail,
 } from 'firebase/auth'
 import { auth, db } from '@/lib/firebase/config'
+import { requestEmailChange } from '@/lib/firebase/accountEmails'
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, limit } from 'firebase/firestore'
 import { useAuth } from '@/context/AuthContext'
 import { postStaffAdmin } from '@/lib/firebase/staff'
@@ -175,8 +175,8 @@ function ChangeEmailCard({ currentEmail, onEmailChanged }: { currentEmail: strin
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   // Set once a confirmation link has been sent to a new address -- the
-  // account's email does NOT change until she clicks it (verifyBeforeUpdateEmail,
-  // not updateEmail), so this is the address we're waiting to be confirmed,
+  // account's email does NOT change until she clicks it (a confirmation link
+  // rather than an immediate update), so this is the address we're waiting to be confirmed,
   // not the current one. This is deliberately admin-only: staff email changes
   // (made by Selouna on the Staff page) stay immediate/unverified -- a staff
   // member who doesn't get an expected email can just tell her.
@@ -193,7 +193,7 @@ function ChangeEmailCard({ currentEmail, onEmailChanged }: { currentEmail: strin
       // Firebase requires a recent sign-in before it'll let the account
       // change its own email, same as the password change below.
       await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(currentEmail, currentPassword))
-      await verifyBeforeUpdateEmail(auth.currentUser, normalized)
+      await requestEmailChange(auth.currentUser, normalized)
       setPendingEmail(normalized)
       toast.success(`Confirmation link sent to ${normalized}.`)
       setNewEmail('')

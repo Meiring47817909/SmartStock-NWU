@@ -61,7 +61,7 @@ export async function systemFromAddress(): Promise<string | undefined> {
   return fromHeaderFor(snap.data()?.system_from_email)
 }
 
-function isAlreadyExists(err: unknown): boolean {
+export function isAlreadyExists(err: unknown): boolean {
   const e = err as { code?: unknown; message?: unknown }
   return e?.code === 6 || e?.code === 'already-exists' || /ALREADY_EXISTS/.test(String(e?.message ?? ''))
 }

@@ -355,3 +355,30 @@ export function lowStockEmail(i: { products: LowStockProduct[]; buttonUrl: strin
     text,
   }
 }
+
+// ---- Account emails (sign-in security) -------------------------------------
+
+export function passwordResetEmail(input: { link: string }): RenderedEmail {
+  const { html, text } = renderEmailLayout({
+    heading: 'Reset your password',
+    paragraphs: [
+      'We received a request to reset the password for your SmartStock NWU account. Use the button below to choose a new password.',
+      "If you didn't ask for this, you can ignore this email. Your password won't change.",
+    ],
+    button: { label: 'Reset password', url: input.link },
+  })
+  return { subject: 'Reset your SmartStock NWU password', html, text }
+}
+
+export function changeEmailEmail(input: { newEmail: string; link: string }): RenderedEmail {
+  const { html, text } = renderEmailLayout({
+    heading: 'Confirm your new email address',
+    paragraphs: [
+      `You asked to change the login email for your SmartStock NWU account to ${input.newEmail}.`,
+      'Use the button below to confirm. Your login email stays the same until you do.',
+      "If you didn't ask for this, you can ignore this email.",
+    ],
+    button: { label: 'Confirm new email', url: input.link },
+  })
+  return { subject: 'Confirm your new SmartStock NWU email', html, text }
+}

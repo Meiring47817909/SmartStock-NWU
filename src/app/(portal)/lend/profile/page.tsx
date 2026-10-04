@@ -6,10 +6,10 @@ import {
   EmailAuthProvider,
   reauthenticateWithCredential,
   updatePassword,
-  sendPasswordResetEmail,
   validatePassword,
 } from 'firebase/auth'
 import { auth } from '@/lib/firebase/config'
+import { requestPasswordReset } from '@/lib/firebase/accountEmails'
 import { useStaffPortal } from '@/context/StaffPortalContext'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -19,16 +19,6 @@ import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { avatarInitials, avatarColorClass } from '@/lib/utils'
 import { ContactEmailLink } from '@/components/ContactEmailLink'
-
-// Only an account that actually has an email/password credential can
-// change one here — an account signed in via a custom token (historically,
-// NWU-CAS logins, now removed from this app but still possible for any
-// account that was created that way before) has no password to update, so
-// that case gets a "set one up" email instead of a form asking for a
-// current password that doesn't exist.
-function hasPasswordProvider(user: { providerData: { providerId: string }[] } | null): boolean {
-  return !!user?.providerData.some((p) => p.providerId === 'password')
-}
 
 function ChangePasswordCard({ email }: { email: string }) {
   const [currentPassword, setCurrentPassword] = useState('')
@@ -41,7 +31,7 @@ function ChangePasswordCard({ email }: { email: string }) {
   async function handleForgotPassword() {
     setSendingReset(true)
     try {
-      await sendPasswordResetEmail(auth, email)
+      await requestPasswordReset(email)
       toast.success(`Password reset email sent to ${email}.`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to send reset email.')
@@ -170,42 +160,6 @@ function ChangePasswordCard({ email }: { email: string }) {
   )
 }
 
-// The no-password-provider case — no password to change, so this offers
-// the same "set your password" email the admin's Send Login Email button
-// sends, just triggered by the staff member themselves instead of Jonathan.
-function SetUpPasswordCard({ email }: { email: string }) {
-  const [sending, setSending] = useState(false)
-  const [sent, setSent] = useState(false)
-
-  async function handleSend() {
-    setSending(true)
-    try {
-      await sendPasswordResetEmail(auth, email)
-      setSent(true)
-      toast.success('Password setup email sent.')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to send email.')
-    }
-    setSending(false)
-  }
-
-  return (
-    <Card className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
-      <CardHeader>
-        <CardTitle>Change password</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <p className="text-sm text-muted-foreground">
-          You sign in with NWU-CAS, which doesn&apos;t use a password. Set one up to also be able to sign in with your email and a password.
-        </p>
-        <Button type="button" variant="outline" disabled={sending || sent} onClick={handleSend} className="w-full justify-center">
-          {sent ? 'Email sent' : sending ? 'Sending…' : 'Send me a password setup email'}
-        </Button>
-      </CardContent>
-    </Card>
-  )
-}
-
 export default function ProfilePage() {
   const { user, staffMember } = useStaffPortal()
 
@@ -267,7 +221,7 @@ export default function ProfilePage() {
         </div>
 
         <div className="md:w-[480px]">
-          {email && (hasPasswordProvider(user) ? <ChangePasswordCard email={email} /> : <SetUpPasswordCard email={email} />)}
+          {email && <ChangePasswordCard email={email} />}
         </div>
       </div>
     </div>
