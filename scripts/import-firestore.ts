@@ -3,8 +3,9 @@
 //
 // Copies the app's Firestore data into PostgreSQL (spec section 7), keeping every document id.
 //
-//   --source emulator   reads the Firestore emulator at FIRESTORE_EMULATOR_HOST (default 127.0.0.1:8081, must be on
-//                       this machine), project demo-smartstock-nwu.
+//   --source emulator   reads a Firestore emulator at FIRESTORE_EMULATOR_HOST (default 127.0.0.1:8081, must be on this
+//                       machine), project demo-smartstock-nwu. Nothing in this repo starts a Firestore emulator any more
+//                       (firebase.json runs Auth and Storage only): start one yourself on that host first.
 //   --source live       reads the live project with the Admin credentials in .env.local (FIREBASE_ADMIN_PROJECT_ID,
 //                       FIREBASE_ADMIN_CLIENT_EMAIL, FIREBASE_ADMIN_PRIVATE_KEY), loaded the way
 //                       src/lib/firebase/admin.ts reads them. READ-ONLY: every collection is read inside ONE read-only
@@ -36,7 +37,7 @@ import { ImportRefusedError, runImport } from '@/server/import/runImport'
 import { databaseHosts, isLocalHost } from './seed/context'
 
 export const EMULATOR_PROJECT_ID = 'demo-smartstock-nwu'
-export const DEFAULT_EMULATOR_HOST = '127.0.0.1:8081' // firebase.json
+export const DEFAULT_EMULATOR_HOST = '127.0.0.1:8081' // the port firebase.json used to give the Firestore emulator; no longer configured
 export const DEFAULT_DATABASE_URL = 'postgres://postgres:postgres@127.0.0.1:5432/smartstock'
 
 export interface CliArgs {
@@ -152,7 +153,7 @@ async function openSource(kind: CliArgs['source']): Promise<{ source: FirestoreS
     const host = process.env.FIRESTORE_EMULATOR_HOST
     const problem = emulatorHostProblem(host)
     if (problem) throw new Error(problem)
-    if (!(await reachable(host))) throw new Error(`The Firestore emulator (${host}) is not reachable. Start it first with "npm run emulators".`)
+    if (!(await reachable(host))) throw new Error(`The Firestore emulator (${host}) is not reachable. Nothing in this repo starts a Firestore emulator any more (npm run emulators runs Auth and Storage only): start one yourself on that host, or use --source live.`)
     const app = initializeApp({ projectId: EMULATOR_PROJECT_ID }, 'firestore-import')
     return { source: await readFirestoreSnapshot(getFirestore(app)), label: `Firestore emulator ${host}, project ${EMULATOR_PROJECT_ID}` }
   }

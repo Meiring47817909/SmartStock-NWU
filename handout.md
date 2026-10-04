@@ -17,7 +17,8 @@
    - `npm run db` (Docker Desktop must be running). It creates or reuses the container `smartstock-postgres` (image `postgres:17`) on `127.0.0.1:5432`, user and password `postgres`, with two databases: `smartstock` (the app) and `smartstock_test` (the tests). Stop it with `npm run db:stop`; the data is kept in the `smartstock-pg` volume. Or
    - any local PostgreSQL 17 you already have: create the databases `smartstock` and `smartstock_test` yourself.
 3. Set `DATABASE_URL` for the app, for example `postgres://postgres:postgres@127.0.0.1:5432/smartstock`, in `.env.local` (`npm run dev:emulators` already sets this value for itself). The Firebase public settings (`NEXT_PUBLIC_FIREBASE_*`) and, for the real project, `FIREBASE_ADMIN_PROJECT_ID`, `FIREBASE_ADMIN_CLIENT_EMAIL` and `FIREBASE_ADMIN_PRIVATE_KEY` also live in `.env.local`, as before.
-4. `npm run db:migrate` applies the schema (`drizzle/`). `npm run db:reset` empties the app tables again (schema and migrations stay) when you want a clean start.
+4. `npm run db:migrate` applies the schema (`drizzle/`). `npm run db:reset` drops and recreates the schema (the `public` and `drizzle` schemas) and then re-runs every migration, which removes all data in that database; use it only for the local database when you want a clean start.
+   - These scripts (`db:migrate`, `db:reset`, the seeds and the importer) read `DATABASE_URL` from the shell environment, not from `.env.local`. Only Next.js (`npm run dev`, `npm run build`) reads `.env.local`. Without `DATABASE_URL` in the shell they use the local `smartstock` database.
 5. Seed data (the seeds need the Firebase Auth and Storage emulators running first, see below):
    - `npm run seed:comprehensive` fills every status, badge and label the app can show: 31 scenario staff, 25 products, both logins.
    - `npm run seed:demo` is the smaller client demo: the 20 NWU staff, the administrator and Meiring as a portal borrower.
@@ -44,7 +45,8 @@ This is the runbook for moving the live data from Firestore into the production 
 - Create the Cloud SQL for PostgreSQL 17 instance and a database (the commands below assume `smartstock`) and a database user. Check the instance's region, tier and `max_connections` (see the pool note below).
 - Create a service account for the dry runs with only the read-only role `roles/datastore.viewer` on the Firebase project, and put its details in `.env.local` as `FIREBASE_ADMIN_PROJECT_ID`, `FIREBASE_ADMIN_CLIENT_EMAIL` and `FIREBASE_ADMIN_PRIVATE_KEY`. With that role the import cannot change anything in Firestore even by mistake. (Do not use the app's normal admin key for this.)
 - Make sure `FIRESTORE_EMULATOR_HOST` is not set: with `--source live` the importer refuses if it is, because the Admin SDK would read the emulator instead of the live project.
-- `DATABASE_URL` is never read from `.env.local` by the importer; give it in the shell for each command so the target is always deliberate.
+- `DATABASE_URL` is never read from `.env.local` by the importer (nor by `db:migrate`, `db:reset` or the seeds); give it in the shell for each command so the target is always deliberate.
+- `--source emulator` needs a Firestore emulator that you start yourself (it needs Java), with `FIRESTORE_EMULATOR_HOST` pointing at it. `127.0.0.1:8081` is no longer configured anywhere (`npm run emulators` runs Auth and Storage only). For the cut-over, use `--source live` with the read-only account.
 
 **1. Live dry run (reads Firestore, writes nothing).** Save the output.
 ```bash
@@ -64,7 +66,7 @@ The report lists the documents read, the rows it would write, warnings (shown, n
   ```
 - A missing product without a delete entry must be fixed in Firestore first, for example by recreating the product document under the same id.
 
-**3. Optional rehearsal into the local database**
+**3. Optional rehearsal into the local database** (with `DATABASE_URL` unset in this shell, so it is the local `smartstock`; `db:reset` removes all data in it)
 ```bash
 npm run db:reset
 npm run db:import-firestore -- --source live --write [--restore-deleted-products]
@@ -73,6 +75,12 @@ npm run db:import-firestore -- --source live --write [--restore-deleted-products
 **4. Freeze writes on the old app.** Agree a time, then stop anyone using the old (Firestore) app, so nothing changes after the final dry run. The import is a snapshot: one consistent read of Firestore, written to PostgreSQL in one transaction.
 
 **5. Schema, last dry run, then `--write` into Cloud SQL**
+
+First confirm which database you are about to write to, because nothing in the importer can stop you once `--write` starts:
+- If you use the Cloud SQL Auth Proxy, check that its startup output names the intended instance (`<PROJECT>:<REGION>:<INSTANCE>`).
+- Run `psql "<the same DATABASE_URL>" -c "select current_database(), inet_server_addr()"` and check the database name and address.
+- Optional second check: run the import command below with a bare `--replace` (`--write --replace`, no `=<database>`). It connects, prints the `Connected:` line, then refuses with "Nothing was written" (checked in `scripts/import-firestore.ts`; it first needs a dry-run plan with no problems).
+
 ```bash
 # a) schema on Cloud SQL
 DATABASE_URL='postgres://<user>:<password>@<host>:5432/smartstock?sslmode=require' npm run db:migrate
@@ -84,9 +92,18 @@ DATABASE_URL='postgres://<user>:<password>@<host>:5432/smartstock?sslmode=requir
 ```
 ```powershell
 $env:DATABASE_URL = 'postgres://<user>:<password>@<host>:5432/smartstock?sslmode=require'
+# a) schema on Cloud SQL
+npm run db:migrate
+# b) last dry run (read-only)
+npm run db:import-firestore -- --source live --dry-run [--restore-deleted-products]
+# c) the import: one transaction
 npm run db:import-firestore -- --source live --write --allow-non-local-db [--restore-deleted-products]
+# d) always, when done
+Remove-Item Env:DATABASE_URL
 ```
-Through the Cloud SQL Auth Proxy instead (`cloud-sql-proxy <PROJECT>:<REGION>:<INSTANCE> --port 5433`), use `DATABASE_URL=postgres://<user>:<password>@127.0.0.1:5433/smartstock` and leave out `--allow-non-local-db`. The proxy makes the target look local (`127.0.0.1`), so the local-database guard will not ask for `--allow-non-local-db`. **Read the line the importer prints after connecting, `Connected: database ... on server ...`, and check it names the Cloud SQL database you intend before it writes.** The importer first echoes the target host and database (no password) and marks a non-local one with `(NOT this machine)`.
+> **Warning.** While `DATABASE_URL` points at Cloud SQL in your shell, or while the Auth Proxy is running, do not run `npm run db:reset` or the seeds. Through the proxy the target looks like `127.0.0.1`, so their "local database only" guards do not stop them, and `db:reset` would drop the Cloud SQL schema. Unset the variable (or close that terminal) and stop the proxy as soon as you are done.
+
+Through the Cloud SQL Auth Proxy instead of a public address (`cloud-sql-proxy <PROJECT>:<REGION>:<INSTANCE> --port 5433`), use `DATABASE_URL=postgres://<user>:<password>@127.0.0.1:5433/smartstock` and leave out `--allow-non-local-db`. The proxy makes the target look local (`127.0.0.1`), so the importer's local-database guard will not ask for `--allow-non-local-db` and cannot warn you if the proxy points at the wrong instance; the checks above are the protection. The importer echoes the target host and database (no password) and then prints `Connected: database ... on server ...` as the import starts, not before it. Use that line afterwards to confirm what was written to, and if it is wrong, stop and restore from the Cloud SQL backup or rebuild that database.
 
 **6. Replacing a rehearsal import.** The importer refuses to write into a database that already has data. Only before go-live, when you want to redo an import, add `--replace=<database>` with the target's own name:
 ```bash

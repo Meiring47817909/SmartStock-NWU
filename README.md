@@ -20,6 +20,8 @@ npm run mailpit       # optional local inbox at http://localhost:8025 (Docker, o
 npm run dev:emulators # the app on http://localhost:3000, against the emulators and the local database
 ```
 
+The `db:*` scripts, the seeds and the importer read `DATABASE_URL` from the shell environment, not from `.env.local` (only Next.js reads that file); without it they use the local `smartstock` database.
+
 If you do not use `npm run db`, create the databases `smartstock` (the app) and `smartstock_test` (the tests) yourself and set `DATABASE_URL` (and `TEST_DATABASE_URL` for the tests, default `postgres://postgres:postgres@127.0.0.1:5432/smartstock_test`).
 
 Sign in after `seed:demo` as `selouna.visser@nwu.ac.za` / `password123` (administrator), or after `seed:comprehensive` as `jonathan.pritchard@nwu.ac.za` / `password123`. The portal borrower logins are listed in the handout.
@@ -33,7 +35,7 @@ Sign in after `seed:demo` as `selouna.visser@nwu.ac.za` / `password123` (adminis
 | `npm run build` / `npm start` | Production build and server (needs the Firebase public settings and `DATABASE_URL`) |
 | `npm test` | Automated tests (Vitest) against `smartstock_test`; PostgreSQL must be running |
 | `npm run db` / `db:stop` | Start / stop the Docker PostgreSQL |
-| `npm run db:migrate` / `db:reset` | Apply the schema / empty the app tables |
+| `npm run db:migrate` / `db:reset` | Apply the schema / drop and recreate the schema, then re-run the migrations (all data in that database is lost) |
 | `npm run seed:comprehensive` / `seed:demo` | Seed every scenario / the client demo (`-- --reset` to start clean) |
 | `npm run emulators` | Firebase Auth + Storage emulators (Emulator UI on http://127.0.0.1:4000) |
 | `npm run db:import-firestore` | One-off Firestore to PostgreSQL import (see "Cut-over to Cloud SQL" in the handout) |
