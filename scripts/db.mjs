@@ -11,6 +11,10 @@ const IMAGE = 'postgres:17'
 const VOLUME = 'smartstock-pg'
 const DATABASES = ['smartstock', 'smartstock_test']
 const DOCKER_HELP = 'Docker was not found or is not running. Start Docker Desktop and try again.'
+const RUN_HELP =
+  'Docker could not start PostgreSQL (see the message above). If it says port 5432 is not available, another\n' +
+  'PostgreSQL is already running on this machine (on Windows: Get-Service *postgres*). Stop that service while you\n' +
+  'work on SmartStock (Stop-Service <name> in an Administrator PowerShell), then run npm run db again.'
 
 function docker(args, quiet) {
   const res = spawnSync('docker', args, { stdio: quiet ? 'ignore' : 'inherit' })
@@ -38,7 +42,7 @@ if (mode === 'start') {
   const exists = spawnSync('docker', ['container', 'inspect', NAME], { stdio: 'ignore' })
   if (exists.error) fail()
   if (exists.status === 0) {
-    if (!docker(['start', NAME], false)) fail()
+    if (!docker(['start', NAME], false)) fail(RUN_HELP)
   } else if (
     !docker(
       [
@@ -51,7 +55,10 @@ if (mode === 'start') {
       false,
     )
   ) {
-    fail()
+    // docker run can leave a created-but-stopped container behind (e.g. when the port is taken); remove it so the next
+    // attempt starts clean instead of re-starting the broken one.
+    docker(['rm', '-f', NAME], true)
+    fail(RUN_HELP)
   }
 
   // The first start restarts the server once while it initialises, so keep asking until it answers.

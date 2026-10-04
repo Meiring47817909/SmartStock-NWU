@@ -12,6 +12,10 @@
 - Firestore is no longer used by the app. The only code that still reads it is the one-off importer (`scripts/import-firestore.ts`, `src/server/import/*`). `firestore.rules` and `firestore.indexes.json` are gone; the only Firestore deploy left is the one-time write freeze on the old app at cut-over (`scripts/cutover/`, step 4 below).
 
 **Local setup, first time**
+> **PowerShell:** the `npm` command in PowerShell drops a bare `--`, so `npm run seed:demo -- --reset` fails with "Unknown cli flag: --reset". Use `npm.cmd` for any command with `-- ...` in it, for example `npm.cmd run seed:demo -- --reset`.
+>
+> **Port 5432 already in use:** if `npm run db` says port 5432 is not available, another PostgreSQL is running on this machine (`Get-Service *postgres*`). Stop it while you work on SmartStock (`Stop-Service <name>` in an Administrator PowerShell; `Start-Service <name>` afterwards).
+
 1. `npm install`.
 2. Start PostgreSQL 17, either:
    - `npm run db` (Docker Desktop must be running). It creates or reuses the container `smartstock-postgres` (image `postgres:17`) on `127.0.0.1:5432`, user and password `postgres`, with two databases: `smartstock` (the app) and `smartstock_test` (the tests). Stop it with `npm run db:stop`; the data is kept in the `smartstock-pg` volume. Or
