@@ -12,7 +12,7 @@ import {
 import { signOut } from 'firebase/auth'
 import { auth } from '@/lib/firebase/config'
 import { markLoggingOut } from '@/lib/authTransition'
-import { loadDashboardAlertCounts } from '@/lib/firebase/dashboardAlerts'
+import { loadDashboardAlertCounts } from '@/lib/api/dashboard'
 import { loadLoanRequestsAlertCount } from '@/lib/api/loanRequests'
 import { subscribeToAlertsChanged } from '@/lib/alertsBus'
 import { useRole } from '@/context/RoleContext'
@@ -96,7 +96,7 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
   const { canManageProducts, canManageStaff, canViewReports, canManageLoanRequests, canManageSettings } = useRole()
   // Combined total of the Dashboard's four "needs attention" widgets
   // (Outstanding Returns, Low Stock Alerts, Outstanding Loan Requests,
-  // Incoming Pickups) - see lib/firebase/dashboardAlerts.ts. Loaded once
+  // Incoming Pickups) - see src/server/data/dashboard.ts. Loaded once
   // on mount (the Sidebar stays mounted across the whole protected app) and
   // refreshed whenever the admin navigates back to the Dashboard itself,
   // so resolving something there updates the badge without a full reload.

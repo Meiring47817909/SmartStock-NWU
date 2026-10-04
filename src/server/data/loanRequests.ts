@@ -855,6 +855,29 @@ export async function expireIfNeeded(ctx: Ctx, ref: RequestRef): Promise<LoanReq
   return settleExpiry(ctx, row)
 }
 
+/**
+ * The accepted (not yet picked up) requests as they stand after the lazy no-show pass: soonest pickup first. The
+ * Dashboard's Incoming Pickups and its Sidebar badge both start from here, so a request whose whole pickup window has
+ * passed is settled (status change plus audit entry, as the system, once even when several callers race) before it is
+ * shown or counted, and then no longer appears. Admin.
+ */
+export async function listAcceptedPickups(ctx: Ctx): Promise<LoanRequest[]> {
+  assertAdmin(ctx)
+  const today = appCalendarDay(ctx.now())
+  const rows = await ctx.db
+    .select()
+    .from(loanRequests)
+    .where(eq(loanRequests.status, 'accepted'))
+    .orderBy(asc(loanRequests.from_date), asc(loanRequests.created_at), asc(loanRequests.id))
+  const stillAccepted: LoanRequest[] = []
+  for (const row of rows) {
+    const request = toLoanRequest(row)
+    // Only a no-show can be due for an accepted request, so the others need no second read.
+    if (!isNoShowCandidate(request, today) || (await settleExpiry(ctx, row)) === 'accepted') stillAccepted.push(request)
+  }
+  return stillAccepted
+}
+
 // --- Sidebar alert counts ----------------------------------------------------
 
 async function activeRows(c: Ctx, staffId?: string): Promise<RequestRow[]> {

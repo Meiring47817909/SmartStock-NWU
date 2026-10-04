@@ -2,16 +2,15 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import { useExpandedRows } from '@/hooks/useExpandedRows'
-import { formatDateOnly, formatLendWindow, sentenceCase, stockStatusLabel, todayDateStr } from '@/lib/utils'
-import { db } from '@/lib/firebase/config'
-import { collection, query, where, orderBy, getDocs, getCountFromServer } from 'firebase/firestore'
+import { formatDateOnly, formatLendWindow, sentenceCase } from '@/lib/utils'
 import { useTable, type SortingState } from '@tanstack/react-table'
 import { SORTABLE_TABLE_FEATURES, sortableColumnHelper, SortableHead } from '@/components/data-table-helpers'
 import { toast } from 'sonner'
 import { notifyLoanRequestEvent } from '@/lib/firebase/notifyEvent'
-import { expireIfDue, isNoShowCandidate, isStaleRequestError, withdrawRequest, getReservedQuantity, effectiveToDate } from '@/lib/api/loanRequests'
+import { isStaleRequestError, withdrawRequest } from '@/lib/api/loanRequests'
 import { notifyAlertsChanged } from '@/lib/alertsBus'
-import { loadWaivedByTxn, waivedQty, createReturnWaiver } from '@/lib/firebase/waivers'
+import { createReturnWaiver } from '@/lib/api/stock'
+import { loadDashboard, type DashboardData, type IncomingPickupRow, type LowStockStatus, type OutstandingReturnRow, type OutstandingStatus, type PickupLine } from '@/lib/api/dashboard'
 import { loadNotificationSettings } from '@/lib/firebase/notificationSettings'
 import { useAuth } from '@/context/AuthContext'
 import { useRole } from '@/context/RoleContext'
@@ -25,8 +24,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import type { LoanRequest } from '@/types/database'
-import { collapseLinesByProduct } from '@/lib/transactionLines'
 
 // Every row here is still outstanding — nothing has been returned yet — so
 // the label needs to describe urgency going forward, not judge a completed
@@ -35,22 +32,31 @@ import { collapseLinesByProduct } from '@/lib/transactionLines'
 // something already happened. This table only ever shows lines with a
 // remaining balance, so there's no "Partial" case to consider the way there
 // is on the Returns report (every row here already IS the outstanding portion).
-function outstandingStatus(expectedDate: string | null): { label: string; className: string } {
-  // An issue with no Lend To is a deliberate "no return date agreed", not
-  // missing data, so it gets its own neutral label rather than an empty
-  // cell — otherwise the row reads as broken.
-  if (!expectedDate) return { label: 'No Return Date', className: 'bg-slate-100 text-slate-800 border-slate-200/60 px-2.5 font-semibold' }
-  const today = todayDateStr()
-  if (today > expectedDate) return { label: 'Overdue', className: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold' }
-  if (today === expectedDate) return { label: 'Due Today', className: 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold' }
-  return { label: 'Not Due Yet', className: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold' }
+//
+// Which state a row is in (overdue / due today / not due yet / no date) is
+// decided on the server, by the Johannesburg calendar day — see
+// src/server/data/dashboard.ts — so every browser agrees with the server's
+// idea of "today". This only maps that state to its label and colours.
+//
+// An issue with no Lend To is a deliberate "no return date agreed", not
+// missing data, so it gets its own neutral label rather than an empty
+// cell — otherwise the row reads as broken.
+const OUTSTANDING_STATUS: Record<OutstandingStatus, { label: string; className: string }> = {
+  no_return_date: { label: 'No Return Date', className: 'bg-slate-100 text-slate-800 border-slate-200/60 px-2.5 font-semibold' },
+  overdue: { label: 'Overdue', className: 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold' },
+  due_today: { label: 'Due Today', className: 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold' },
+  not_due_yet: { label: 'Not Due Yet', className: 'bg-emerald-100 text-emerald-800 border-emerald-200/60 px-2.5 font-semibold' },
 }
 
-// Same urgency order as outstandingStatus() above returns its labels in —
-// most pressing first — so sorting the Status column reads as "worst first"
-// either direction, not an arbitrary A-Z order over the label text.
-const OUTSTANDING_STATUS_RANK: Record<string, number> = {
-  Overdue: 0, 'Due Today': 1, 'Not Due Yet': 2, 'No Return Date': 3,
+function outstandingStatus(status: OutstandingStatus): { label: string; className: string } {
+  return OUTSTANDING_STATUS[status]
+}
+
+// Same urgency order as the labels above — most pressing first — so sorting
+// the Status column reads as "worst first" either direction, not an
+// arbitrary A-Z order over the label text.
+const OUTSTANDING_STATUS_RANK: Record<OutstandingStatus, number> = {
+  overdue: 0, due_today: 1, not_due_yet: 2, no_return_date: 3,
 }
 
 const OUTSTANDING_RETURNS_COLUMNS = sortableColumnHelper.columns([
@@ -58,12 +64,10 @@ const OUTSTANDING_RETURNS_COLUMNS = sortableColumnHelper.columns([
   sortableColumnHelper.accessor('staff_name', { id: 'staff_name', header: 'Staff', sortFn: 'alphanumeric' }),
   sortableColumnHelper.accessor('qty', { id: 'qty', header: 'Qty', sortFn: (a: any, b: any) => a.original.qty - b.original.qty }),
   sortableColumnHelper.accessor((o: any) => o.expected_date ?? '', { id: 'expected_date', header: 'Expected', sortFn: 'text' }),
-  sortableColumnHelper.accessor((o: any) => outstandingStatus(o.expected_date).label, {
+  sortableColumnHelper.accessor((o: any) => outstandingStatus(o.status).label, {
     id: 'status',
     header: 'Status',
-    sortFn: (a: any, b: any) =>
-      OUTSTANDING_STATUS_RANK[outstandingStatus(a.original.expected_date).label]
-      - OUTSTANDING_STATUS_RANK[outstandingStatus(b.original.expected_date).label],
+    sortFn: (a: any, b: any) => OUTSTANDING_STATUS_RANK[a.original.status as OutstandingStatus] - OUTSTANDING_STATUS_RANK[b.original.status as OutstandingStatus],
   }),
 ])
 
@@ -88,17 +92,18 @@ const INCOMING_PICKUPS_COLUMNS = sortableColumnHelper.columns([
 
 // And Low Stock Alerts' Status column — Out of stock outranks Low stock, so
 // sorting surfaces the most depleted items first.
-const LOW_STOCK_STATUS_RANK: Record<string, number> = { 'Out of stock': 0, 'Low stock': 1, 'In stock': 2 }
+const LOW_STOCK_STATUS: Record<LowStockStatus, { label: string; rank: number }> = {
+  out_of_stock: { label: 'Out of stock', rank: 0 },
+  low_stock: { label: 'Low stock', rank: 1 },
+}
 
 const LOW_STOCK_COLUMNS = sortableColumnHelper.columns([
   sortableColumnHelper.accessor('name', { id: 'name', header: 'Product', sortFn: 'alphanumeric' }),
   sortableColumnHelper.accessor('quantity_on_hand', { id: 'quantity_on_hand', header: 'Qty', sortFn: (a: any, b: any) => a.original.quantity_on_hand - b.original.quantity_on_hand }),
-  sortableColumnHelper.accessor((p: any) => stockStatusLabel(p.quantity_on_hand, p.reorder_threshold), {
+  sortableColumnHelper.accessor((p: any) => LOW_STOCK_STATUS[p.status as LowStockStatus].label, {
     id: 'status',
     header: 'Status',
-    sortFn: (a: any, b: any) =>
-      LOW_STOCK_STATUS_RANK[stockStatusLabel(a.original.quantity_on_hand, a.original.reorder_threshold)]
-      - LOW_STOCK_STATUS_RANK[stockStatusLabel(b.original.quantity_on_hand, b.original.reorder_threshold)],
+    sortFn: (a: any, b: any) => LOW_STOCK_STATUS[a.original.status as LowStockStatus].rank - LOW_STOCK_STATUS[b.original.status as LowStockStatus].rank,
   }),
 ])
 
@@ -112,9 +117,9 @@ export default function DashboardPage() {
     today_transactions: 0,
     total_staff: 0
   })
-  const [outstanding, setOutstanding] = useState<any[]>([])
-  const [lowItems, setLowItems] = useState<any[]>([])
-  const [incomingPickups, setIncomingPickups] = useState<{ id: string; reference_no: string | null; staff_name: string; item_count: number; from_date: string; to_date: string | null; noShow: boolean; insufficient: boolean }[]>([])
+  const [outstanding, setOutstanding] = useState<OutstandingReturnRow[]>([])
+  const [lowItems, setLowItems] = useState<DashboardData['lowStock']>([])
+  const [incomingPickups, setIncomingPickups] = useState<IncomingPickupRow[]>([])
   // The row Selouna has clicked Cancel on, held while the confirmation
   // dialog is open — same pattern as `resolving` above.
   const [cancelling, setCancelling] = useState<{ id: string; staff_name: string; item_count: number; from_date: string; to_date: string | null } | null>(null)
@@ -128,25 +133,25 @@ export default function DashboardPage() {
   // rows — fetched eagerly alongside lineCountByRequest below rather than
   // lazily on expand, since the same loan_request_lines read already
   // happens for the item count.
-  const [pickupLines, setPickupLines] = useState<Record<string, { id: string; product_id: string; product_name: string; offered_quantity: number; available: number; shortBy: number }[]>>({})
+  const [pickupLines, setPickupLines] = useState<Record<string, PickupLine[]>>({})
   // Outstanding-and-overdue return lines, grouped by product — the
   // candidate "likely cause" shown when an Incoming Pickup line comes up
   // short (see the insufficiency check below). Keyed by product_id so an
   // expanded pickup row can look its own products up directly.
-  const [overdueByProduct, setOverdueByProduct] = useState<Record<string, { id: string; staff_name: string; qty: number; expected_date: string; txn_ref: string }[]>>({})
+  const [overdueByProduct, setOverdueByProduct] = useState<DashboardData['overdueByProduct']>({})
   const { isExpanded: isPickupExpanded, toggle: togglePickup } = useExpandedRows()
   const [loading, setLoading] = useState(true)
   // The row Selouna has clicked Resolve on, held while the confirmation
-  // dialog is open. Resolving writes a return_waivers doc — see
-  // lib/firebase/waivers.ts for why that's its own collection.
-  const [resolving, setResolving] = useState<any | null>(null)
+  // dialog is open. Resolving records an append-only return waiver (see
+  // lib/stockRules.ts for why that's its own record, not a RETURN).
+  const [resolving, setResolving] = useState<OutstandingReturnRow | null>(null)
   const [resolveReason, setResolveReason] = useState('')
   const [resolveBusy, setResolveBusy] = useState(false)
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>('outstanding-returns')
   const [outstandingSorting, setOutstandingSorting] = useState<SortingState>([])
   const [pickupsSorting, setPickupsSorting] = useState<SortingState>([])
   const [lowStockSorting, setLowStockSorting] = useState<SortingState>([])
-  const { user, profile } = useAuth()
+  const { user } = useAuth()
   const { isAdmin } = useRole()
 
   // Lifted out of the mount effect so Cancel/Resolve and the tab strip
@@ -160,205 +165,16 @@ export default function DashboardPage() {
   async function getDashboardData(opts: { silent?: boolean } = {}) {
       if (!opts.silent) setLoading(true)
       try {
-        const today = new Date()
-        today.setHours(0, 0, 0, 0)
-
-        const productsRef = collection(db, 'products')
-        const transactionsRef = collection(db, 'transactions')
-        const staffRef = collection(db, 'staff')
-
-        // Fetch counts
-        const totalProductsSnap = await getCountFromServer(query(productsRef))
-        const totalStaffSnap = await getCountFromServer(query(staffRef, where('is_active', '==', true)))
-        const todayTxnSnap = await getCountFromServer(query(transactionsRef, where('created_at', '>=', today.toISOString())))
-
-        // Fetch products to calculate stock & low stock
-        const productsSnap = await getDocs(query(productsRef))
-        let totalStock = 0
-        let lowStockCount = 0
-        const items: any[] = []
-        // Live quantity_on_hand per product, reused below by the Incoming
-        // Pickups insufficiency check so it doesn't need its own fetch.
-        const productsById: Record<string, { quantity_on_hand: number }> = {}
-
-        productsSnap.forEach(doc => {
-          const p = doc.data()
-          productsById[doc.id] = { quantity_on_hand: p.quantity_on_hand || 0 }
-          totalStock += (p.quantity_on_hand || 0)
-          if (p.quantity_on_hand <= p.reorder_threshold) {
-            lowStockCount++
-            items.push({ id: doc.id, ...p })
-          }
-        })
-
-        // Sort low items by qty ascending — every low-stock item is kept
-        // (the card scrolls instead of truncating; see the badge-vs-row-count
-        // note on Outstanding Returns above for why a hidden cap is a trap).
-        items.sort((a, b) => a.quantity_on_hand - b.quantity_on_hand)
-        const topLowItems = items
-
-        // Outstanding returns: every OUT transaction line whose issued
-        // quantity hasn't been fully returned yet — scoped per originating
-        // OUT transaction via linked_txn_id, same correctly-scoped logic as
-        // returns/page.tsx and the Reports Returns tab (a flat per-product
-        // total here would incorrectly let a return against one loan cancel
-        // out an unrelated later loan of the same product).
-        const outSnap = await getDocs(query(transactionsRef, where('transaction_type', '==', 'OUT')))
-        const returnSnap = await getDocs(query(transactionsRef, where('transaction_type', '==', 'RETURN')))
-        const outTxns = outSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
-        const returnTxns = returnSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[]
-
-        const linesSnap = await getDocs(collection(db, 'transaction_lines'))
-        const linesByTxn: Record<string, any[]> = {}
-        linesSnap.forEach(d => {
-          const l = d.data()
-          ;(linesByTxn[l.transaction_id] ??= []).push(l)
-        })
-
-        const returnedByTxn: Record<string, Record<string, number>> = {}
-        returnTxns.forEach(t => {
-          if (!t.linked_txn_id) return
-          const bucket = (returnedByTxn[t.linked_txn_id] ??= {})
-          ;(linesByTxn[t.id] || []).forEach((l: any) => {
-            bucket[l.product_id] = (bucket[l.product_id] ?? 0) + (l.quantity || 0)
-          })
-        })
-
-        // Written-off lines (Selouna agreed the staff member keeps the
-        // item) are subtracted alongside returns, so a resolved row leaves
-        // this table for good without any RETURN transaction existing.
-        const waivedByTxn = await loadWaivedByTxn()
-
-        const outstandingList: any[] = []
-        outTxns.forEach(t => {
-          collapseLinesByProduct(linesByTxn[t.id] || []).forEach((l: any) => {
-            const issued = l.quantity || 0
-            const returned = returnedByTxn[t.id]?.[l.product_id] ?? 0
-            const waived = waivedQty(waivedByTxn, t.id, l.product_id)
-            const remaining = issued - returned - waived
-            if (remaining <= 0) return
-            outstandingList.push({
-              id: `${t.id}_${l.product_id}`,
-              txn_id: t.id,
-              product_id: l.product_id,
-              product_name: l.product_name ?? 'Unknown',
-              staff_id: t.staff_id ?? null,
-              staff_name: t.staff_name ?? '—',
-              qty: remaining,
-              expected_date: t.lend_to ?? null,
-              txn_ref: t.reference_no ?? '',
-            })
-          })
-        })
-        // Most urgent first — overdue/soonest-due at the top, undated
-        // (pre-Stage A) loans pushed to the end since there's nothing to sort them by.
-        outstandingList.sort((a, b) => {
-          if (!a.expected_date && !b.expected_date) return 0
-          if (!a.expected_date) return 1
-          if (!b.expected_date) return -1
-          return a.expected_date.localeCompare(b.expected_date)
-        })
-
-        // Overdue outstanding returns, grouped by product — the candidate
-        // "likely cause" an Incoming Pickup can point to when it comes up
-        // short below. Deliberately OVERDUE only, not every outstanding
-        // return: a return that isn't due yet is expected to still be out,
-        // so it isn't a "problem" explaining a shortfall the same way an
-        // overdue one is.
-        const overdueByProduct: Record<string, { id: string; staff_name: string; qty: number; expected_date: string; txn_ref: string }[]> = {}
-        outstandingList.forEach(o => {
-          if (o.expected_date && todayDateStr() > o.expected_date) {
-            (overdueByProduct[o.product_id] ??= []).push({
-              id: o.id, staff_name: o.staff_name, qty: o.qty, expected_date: o.expected_date, txn_ref: o.txn_ref,
-            })
-          }
-        })
-
-        // Incoming Pickups — accepted requests only. Outstanding Loan
-        // Requests (pending/countered) moved off the Dashboard entirely on
-        // 2026-09-20 — that's the Loan Requests page's own job now, which
-        // already lazily transitions those two statuses itself. Dashboard
-        // only still needs to check accepted -> no_show (a pickup window
-        // that's passed with nothing issued), so the fetch is scoped down
-        // to accepted requests before doing that check, not all three.
-        const loanReqSnap = await getDocs(collection(db, 'loan_requests'))
-        let loanReqs = loanReqSnap.docs
-          .map(d => ({ id: d.id, ...d.data() }) as LoanRequest)
-          .filter(r => r.status === 'accepted')
-        loanReqs = await Promise.all(loanReqs.map(async (r) => {
-          const next = await expireIfDue(r)
-          return next !== r.status ? { ...r, status: next } : r
-        }))
-        const loanReqLinesSnap = await getDocs(collection(db, 'loan_request_lines'))
-        const lineCountByRequest: Record<string, number> = {}
-        const linesByRequest: Record<string, { id: string; product_id: string; product_name: string; offered_quantity: number; available: number; shortBy: number }[]> = {}
-        loanReqLinesSnap.forEach(d => {
-          const l = d.data() as any
-          const requestId = l.request_id as string
-          lineCountByRequest[requestId] = (lineCountByRequest[requestId] ?? 0) + 1
-          ;(linesByRequest[requestId] ??= []).push({
-            id: d.id, product_id: l.product_id, product_name: l.product_name ?? 'Unknown', offered_quantity: l.offered_quantity ?? 0,
-            // Filled in by the still-accepted check below — 0/0 here just
-            // keeps the type happy for a request that turns out to have
-            // expired/no-showed and never gets that check run on it.
-            available: 0, shortBy: 0,
-          })
-        })
-
-        // Does *current* stock still cover what each still-accepted
-        // request was promised, once other active requests' holds on the
-        // same product are netted out? An accepted request's offer was
-        // only ever checked against live stock at approval time (see
-        // assertStillAvailable) — if a same-product return that was due
-        // back by now hasn't come in, the promise here can quietly fall
-        // short of what's actually on the shelf, with nothing else in the
-        // app catching it since no NEW action (a walk-in issue, a manual
-        // qty edit) is what caused it. Reuses the exact same
-        // getReservedQuantity the rest of the app validates availability
-        // with, excluding each request's own hold on the product so it
-        // isn't counted against itself.
-        const stillAccepted = loanReqs.filter(r => r.status === 'accepted')
-        await Promise.all(stillAccepted.map(async (r) => {
-          const lines = linesByRequest[r.id] ?? []
-          const uniqueProductIds = Array.from(new Set(lines.map(l => l.product_id)))
-          const availableByProduct: Record<string, number> = {}
-          await Promise.all(uniqueProductIds.map(async (pid) => {
-            const onHand = productsById[pid]?.quantity_on_hand ?? 0
-            const reserved = await getReservedQuantity(pid, r.from_date, effectiveToDate(r.to_date), r.id)
-            availableByProduct[pid] = Math.max(0, onHand - reserved)
-          }))
-          lines.forEach((l) => {
-            l.available = availableByProduct[l.product_id] ?? 0
-            l.shortBy = Math.max(0, l.offered_quantity - l.available)
-          })
-        }))
-
-        // Soonest pickup first. The `noShow` flag here is
-        // belt-and-suspenders: the transition pass just above should
-        // already have flipped any genuine no-show out of 'accepted'
-        // entirely, so in practice this should rarely fire.
-        const pickups = loanReqs
-          .filter(r => r.status === 'accepted')
-          .map(r => ({
-            id: r.id, reference_no: r.reference_no ?? null,
-            staff_name: r.staff_name, item_count: lineCountByRequest[r.id] ?? 0,
-            from_date: r.from_date, to_date: r.to_date, noShow: isNoShowCandidate(r),
-            insufficient: (linesByRequest[r.id] ?? []).some(l => l.shortBy > 0),
-          }))
-          .sort((a, b) => a.from_date.localeCompare(b.from_date))
-
-        setStats({
-          total_products: totalProductsSnap.data().count,
-          total_stock: totalStock,
-          low_stock: lowStockCount,
-          today_transactions: todayTxnSnap.data().count,
-          total_staff: totalStaffSnap.data().count
-        })
-        setOutstanding(outstandingList)
-        setOverdueByProduct(overdueByProduct)
-        setLowItems(topLowItems)
-        setIncomingPickups(pickups)
-        setPickupLines(linesByRequest)
+        // Everything — the stats, the three tables' rows and each row's
+        // badge — is computed on the server in one call (see
+        // src/server/data/dashboard.ts); this page only displays it.
+        const data = await loadDashboard()
+        setStats(data.stats)
+        setOutstanding(data.outstandingReturns)
+        setOverdueByProduct(data.overdueByProduct)
+        setLowItems(data.lowStock)
+        setIncomingPickups(data.incomingPickups)
+        setPickupLines(data.pickupLines)
       } catch (err) {
         console.error("Failed to load dashboard data", err)
       } finally {
@@ -539,7 +355,7 @@ export default function DashboardPage() {
                   <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">Nothing outstanding ✓</TableCell></TableRow>
                 )}
                 {sortedOutstanding.map((o) => {
-                  const status = outstandingStatus(o.expected_date)
+                  const status = outstandingStatus(o.status)
                   return (
                     <TableRow key={o.id} className="hover:bg-[#FAF7FC]">
                       <TableCell className="max-w-xs font-medium whitespace-normal break-words">{o.product_name}</TableCell>
@@ -687,7 +503,7 @@ export default function DashboardPage() {
                     </TableCell>
                     <TableCell>
                       <Badge className={p.quantity_on_hand === 0 ? 'bg-red-100 text-red-800 border-red-200/60 px-2.5 font-semibold' : 'bg-amber-100 text-amber-800 border-amber-200/60 px-2.5 font-semibold'}>
-                        {stockStatusLabel(p.quantity_on_hand, p.reorder_threshold)}
+                        {LOW_STOCK_STATUS[p.status as LowStockStatus].label}
                       </Badge>
                     </TableCell>
                   </TableRow>
@@ -740,16 +556,13 @@ export default function DashboardPage() {
                 if (!resolving) return
                 setResolveBusy(true)
                 try {
+                  // The server fills in the product and staff names from the
+                  // Stock Out itself and records the signed-in admin.
                   await createReturnWaiver({
                     transactionId: resolving.txn_id,
                     productId: resolving.product_id,
-                    productName: resolving.product_name,
-                    staffId: resolving.staff_id ?? null,
-                    staffName: resolving.staff_name === '\u2014' ? null : resolving.staff_name,
                     quantity: resolving.qty,
                     reason: resolveReason.trim() || null,
-                    actorUid: user?.uid,
-                    actorName: profile?.full_name ?? user?.email,
                   })
                   // Drop the row locally rather than refetching the whole
                   // dashboard — nothing else on this page depends on it,

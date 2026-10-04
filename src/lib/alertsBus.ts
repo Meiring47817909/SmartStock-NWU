@@ -4,7 +4,7 @@
 // refresh those counts right away, without a full page reload.
 //
 // Why this exists: the Sidebar loads its two badge counts (Dashboard,
-// Loan Requests — see dashboardAlerts.ts / loanRequests.ts's
+// Loan Requests — see src/server/data/dashboard.ts / loanRequests.ts's
 // loadLoanRequestsAlertCount) once on mount and again whenever the admin
 // navigates to/from the page that badge is for. That's enough to catch a
 // change made on a *different* page (Stock Out issuing units that push a
