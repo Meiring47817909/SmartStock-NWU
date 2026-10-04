@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { Plus, Pencil, Tag, Trash2 } from 'lucide-react'
-import { db } from '@/lib/firebase/config'
-import { collection, query, where, orderBy, getDocs, getCountFromServer, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore'
-import { logAudit } from '@/lib/firebase/audit'
-import { useAuth } from '@/context/AuthContext'
+import {
+  listCategories, listProducts, createCategory, updateCategory, deleteCategory,
+} from '@/lib/api/catalog'
 import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
@@ -22,7 +21,6 @@ type FormData = { name: string; description: string }
 const EMPTY_FORM: FormData = { name: '', description: '' }
 
 export default function CategoriesPage() {
-  const { user, profile } = useAuth()
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -38,9 +36,11 @@ export default function CategoriesPage() {
 
   async function load() {
     setLoading(true)
-    const snap = await getDocs(query(collection(db, 'categories'), orderBy('name')))
-    setCategories(snap.docs.map(d => ({ id: d.id, ...d.data() })) as unknown as Category[])
-    setLoading(false)
+    try {
+      setCategories(await listCategories())
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [])
@@ -70,8 +70,8 @@ export default function CategoriesPage() {
     setDeleteError('')
     setCheckingDelete(true)
     try {
-      const snap = await getCountFromServer(query(collection(db, 'products'), where('category_id', '==', c.id)))
-      setProductCount(snap.data().count)
+      const all = await listProducts()
+      setProductCount(all.filter(p => p.category_id === c.id).length)
     } catch {
       setDeleteError("Could not check this category's products.")
       setDeleting(null)
@@ -90,13 +90,7 @@ export default function CategoriesPage() {
     if (!deleting || productCount === null || productCount > 0) return
     setDeleteBusy(true)
     try {
-      await deleteDoc(doc(db, 'categories', deleting.id))
-      logAudit({
-        userId: user?.uid, userName: profile?.full_name ?? user?.email,
-        action: 'delete', entityType: 'category', entityId: deleting.id,
-        before: { name: deleting.name, description: deleting.description },
-        after: null,
-      })
+      await deleteCategory(deleting.id)
       closeDelete()
       load()
     } catch (err) {
@@ -115,21 +109,9 @@ export default function CategoriesPage() {
     }
     try {
       if (editing) {
-        await updateDoc(doc(db, 'categories', editing.id), payload)
-        logAudit({
-          userId: user?.uid, userName: profile?.full_name ?? user?.email,
-          action: 'update', entityType: 'category', entityId: editing.id,
-          before: { name: editing.name, description: editing.description },
-          after: payload,
-        })
+        await updateCategory(editing.id, payload)
       } else {
-        const created = { ...payload, created_at: new Date().toISOString() }
-        const catRef = await addDoc(collection(db, 'categories'), created)
-        logAudit({
-          userId: user?.uid, userName: profile?.full_name ?? user?.email,
-          action: 'create', entityType: 'category', entityId: catRef.id,
-          before: null, after: created,
-        })
+        await createCategory(payload)
       }
       setShowModal(false)
       load()

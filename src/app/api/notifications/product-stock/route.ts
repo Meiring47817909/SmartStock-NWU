@@ -1,17 +1,11 @@
 import 'server-only'
 import { NextRequest, NextResponse } from 'next/server'
-import { adminDb } from '@/lib/firebase/admin'
+import { getRouteDb, loadCaller } from '@/server/context'
+import { getProduct } from '@/server/data/catalog'
 import { requireAdmin, ApiError } from '@/lib/server/staffAdmin'
 import { isMailEnabled, MailUnreachableError, MailConfigError } from '@/lib/server/mailer'
 import { lowStockEmail } from '@/lib/server/emailTemplates'
 import { deliver, appBaseUrl, adminInboxEmail, type SkipReason } from '@/lib/server/notificationDelivery'
-
-interface ProductDoc {
-  name?: string
-  quantity_on_hand?: number
-  reorder_threshold?: number
-  updated_at?: string
-}
 
 function isCount(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
@@ -22,7 +16,7 @@ function isCount(value: unknown): value is number {
  * (Stock Out has its own route; this covers quantity or threshold edits that
  * do not go through a transaction.) Called in the background once the edit is
  * saved; the edit never depends on this succeeding. Admin only. Read-only: no
- * product document is modified.
+ * product row is modified.
  *
  * Body: { productId, previousQuantity, previousThreshold } — the values the
  * page held before the edit. The product's current values are read here.
@@ -34,7 +28,7 @@ function isCount(value: unknown): value is number {
  */
 export async function POST(request: NextRequest) {
   try {
-    await requireAdmin(request)
+    const { uid } = await requireAdmin(request)
 
     const body = await request.json().catch(() => null)
     const productId = typeof body?.productId === 'string' ? body.productId : ''
@@ -48,9 +42,9 @@ export async function POST(request: NextRequest) {
     // Cheapest check first: with the mailer off (production) nothing is read.
     if (!isMailEnabled()) return NextResponse.json({ sent: false, reason: 'mail_disabled' satisfies SkipReason })
 
-    const snap = await adminDb.collection('products').doc(productId).get()
-    if (!snap.exists) throw new ApiError(404, 'Product not found.')
-    const product = snap.data() as ProductDoc
+    const db = getRouteDb()
+    const product = await getProduct({ db, caller: await loadCaller(db, uid), now: () => new Date() }, productId)
+    if (!product) throw new ApiError(404, 'Product not found.')
     const onHand = Number(product.quantity_on_hand ?? 0)
     const threshold = Number(product.reorder_threshold ?? 0)
 
@@ -62,7 +56,7 @@ export async function POST(request: NextRequest) {
     // sends once and a later edit can send again.
     const result = await deliver({
       toggle: 'low_stock_alert',
-      dedupeKey: `low_stock__product-${productId}__${product.updated_at ?? onHand}`,
+      dedupeKey: `low_stock__product-${productId}__${product.updated_at}`,
       recipient: adminInboxEmail,
       render: async () =>
         lowStockEmail({

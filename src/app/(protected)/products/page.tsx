@@ -11,28 +11,23 @@ import {
   sortableColumnHelper,
   SortableHead,
 } from "@/components/data-table-helpers";
-import { db, storage } from "@/lib/firebase/config";
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  doc,
-  orderBy,
-} from "firebase/firestore";
+import { storage } from "@/lib/firebase/config";
 import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { storageDownloadUrl } from "@/lib/firebase/storage";
 import {
+  createProduct,
+  deleteProduct,
   findBarcodeConflict,
   getBarcodeUnitCounts,
   getProductDeleteBlockers,
+  listCategories,
+  listProducts,
+  newProductId,
   productDeleteBlockReason,
+  updateProduct,
   type ProductDeleteBlockers,
   type BarcodeUnitCount,
-} from "@/lib/firebase/products";
+} from "@/lib/api/catalog";
 import {
   findQuantityReductionConflicts,
   reservationStatusLabel,
@@ -41,7 +36,6 @@ import {
   type ReservationHolder,
 } from "@/lib/firebase/loanRequests";
 import type { LendingInterval } from "@/types/database";
-import { logAudit } from "@/lib/firebase/audit";
 import { notifyProductStockChange } from "@/lib/firebase/notifyEvent";
 import { useAuth } from "@/context/AuthContext";
 import { useRole } from "@/context/RoleContext";
@@ -344,7 +338,7 @@ function formsEqual(a: FormData, b: FormData): boolean {
 }
 
 export default function ProductsPage() {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const { isAdmin } = useRole();
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -393,41 +387,34 @@ export default function ProductsPage() {
 
   async function load() {
     setLoading(true);
-    const productsRef = collection(db, "products");
+    try {
+      // We fetch all products and filter client-side (search matches name and any barcode).
+      let data: Product[] = await listProducts();
+      if (catFilter) {
+        data = data.filter((p) => p.category_id === catFilter);
+      }
 
-    // We fetch all products (Firestore queries are limited for client-side search)
-    let q = query(productsRef);
-    if (catFilter) {
-      q = query(productsRef, where("category_id", "==", catFilter));
+      // Map category names and do client-side search for ilike
+      const s = search.toLowerCase();
+      if (s) {
+        data = data.filter(
+          (p) =>
+            (p.name && p.name.toLowerCase().includes(s)) ||
+            productBarcodes(p).some((b) => b.toLowerCase().includes(s)),
+        );
+      }
+
+      // Sort by name
+      data.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+      setProducts(data);
+    } finally {
+      setLoading(false);
     }
-
-    const snap = await getDocs(q);
-    let data = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as any[];
-
-    // Map category names and do client-side search for ilike
-    const s = search.toLowerCase();
-    if (s) {
-      data = data.filter(
-        (p) =>
-          (p.name && p.name.toLowerCase().includes(s)) ||
-          productBarcodes(p).some((b) => b.toLowerCase().includes(s)),
-      );
-    }
-
-    // Sort by name
-    data.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-
-    setProducts(data as Product[]);
-    setLoading(false);
   }
 
   async function loadCats() {
-    const snap = await getDocs(
-      query(collection(db, "categories"), orderBy("name")),
-    );
-    setCategories(
-      snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as any[],
-    );
+    setCategories(await listCategories());
   }
 
   useEffect(() => {
@@ -573,35 +560,17 @@ export default function ProductsPage() {
     if (!deleting || !deleteBlockers || productDeleteBlockReason(deleteBlockers)) return;
     setDeleteBusy(true);
     try {
-      // Best-effort — a photo that fails to delete shouldn't stop the
-      // product record itself from going, same tolerance handleSave
-      // already gives removed-image cleanup on a plain edit.
+      // The server refuses (409) to delete a product that has stock history or is
+      // still out / reserved, so it goes first; the photos are only removed once the
+      // product is really gone. Best-effort — a photo that fails to delete shouldn't
+      // fail a delete that already succeeded, same tolerance handleSave gives
+      // removed-image cleanup on a plain edit.
+      await deleteProduct(deleting.id.toString());
       await Promise.all(
         (deleting.images ?? []).map((path) =>
           deleteObject(ref(storage, path)).catch(() => {}),
         ),
       );
-      const productId = deleting.id.toString();
-      await deleteDoc(doc(db, "products", productId));
-      logAudit({
-        userId: user?.uid,
-        userName: profile?.full_name ?? user?.email,
-        action: "delete",
-        entityType: "product",
-        entityId: productId,
-        before: {
-          name: deleting.name,
-          barcodes: productBarcodes(deleting),
-          category_id: deleting.category_id ?? null,
-          category_name: deleting.category_name ?? null,
-          description: deleting.description ?? "",
-          quantity_on_hand: deleting.quantity_on_hand ?? 0,
-          reorder_threshold: deleting.reorder_threshold ?? 0,
-          available: deleting.available ?? true,
-          location: deleting.location ?? DEFAULT_LOCATION,
-        },
-        after: null,
-      });
       toast.success(`${deleting.name} deleted.`);
       closeDelete();
       load();
@@ -685,13 +654,10 @@ export default function ProductsPage() {
         return;
       }
 
-      const catName =
-        categories.find((c) => c.id === form.category_id)?.name || null;
       const basePayload = {
         name: form.name,
         barcodes: form.barcodes,
         category_id: form.category_id || null,
-        category_name: catName, // Denormalized for easier rendering
         description: form.description,
         quantity_on_hand: Number(form.quantity_on_hand),
         reorder_threshold: Number(form.reorder_threshold),
@@ -700,40 +666,62 @@ export default function ProductsPage() {
         lend_from: form.lend_from || null,
         lend_to: form.lend_to || null,
         lending_interval: form.lending_interval,
-        updated_at: new Date().toISOString(),
+      };
+
+      const discardUploads = (paths: string[]) =>
+        Promise.all(paths.map((p) => deleteObject(ref(storage, p)).catch(() => {})));
+
+      // Upload any newly-picked files under products/<productId>/, keep existing
+      // paths as-is. If the save below fails, the files uploaded here are removed
+      // again (best-effort) so a rejected save doesn't leave orphans in Storage.
+      const uploadImages = async (productId: string): Promise<{ images: string[]; uploaded: string[] }> => {
+        const images: string[] = [];
+        const uploaded: string[] = [];
+        try {
+          for (let i = 0; i < form.images.length; i++) {
+            const img = form.images[i];
+            if (img.file) {
+              const path = `products/${productId}/${Date.now()}-${i}-${img.file.name}`;
+              await uploadBytes(ref(storage, path), img.file);
+              uploaded.push(path);
+              images.push(path);
+            } else {
+              images.push(img.url);
+            }
+          }
+        } catch (err) {
+          await discardUploads(uploaded);
+          throw err;
+        }
+        return { images, uploaded };
       };
 
       if (editing) {
         const productId = editing.id.toString();
+        const { images, uploaded } = await uploadImages(productId);
 
-        // Remove any images the admin dropped from the list.
+        let saved: Product;
+        try {
+          // The server writes the audit entry (the change reason rides along for it).
+          saved = await updateProduct(productId, {
+            ...basePayload,
+            images,
+            ...(form.quantity_reason.trim() ? { quantity_reason: form.quantity_reason.trim() } : {}),
+          });
+        } catch (err) {
+          await discardUploads(uploaded);
+          throw err;
+        }
+
+        // Remove any images the admin dropped from the list — only now that the
+        // product is saved without them.
         const keptPaths = new Set(
           form.images.filter((img) => !img.file).map((img) => img.url),
         );
-        const removedPaths = (editing.images ?? []).filter(
-          (p) => !keptPaths.has(p),
-        );
-        await Promise.all(
-          removedPaths.map((p) =>
-            deleteObject(ref(storage, p)).catch(() => {}),
-          ),
+        await discardUploads(
+          (editing.images ?? []).filter((p) => !keptPaths.has(p)),
         );
 
-        // Upload any newly-picked files, keep existing paths as-is.
-        const images: string[] = [];
-        for (let i = 0; i < form.images.length; i++) {
-          const img = form.images[i];
-          if (img.file) {
-            const path = `products/${productId}/${Date.now()}-${i}-${img.file.name}`;
-            await uploadBytes(ref(storage, path), img.file);
-            images.push(path);
-          } else {
-            images.push(img.url);
-          }
-        }
-
-        const payload = { ...basePayload, images };
-        await updateDoc(doc(db, "products", productId), payload);
         // Low stock email: only when this edit left the product at or below
         // its reorder threshold after it was above it (the server re-checks).
         // Background and best-effort; the edit is already saved.
@@ -742,73 +730,22 @@ export default function ProductsPage() {
           (editing.quantity_on_hand ?? 0) > (editing.reorder_threshold ?? 0)
         ) {
           notifyProductStockChange(user, {
-            productId,
+            productId: saved.id.toString(),
             previousQuantity: editing.quantity_on_hand ?? 0,
             previousThreshold: editing.reorder_threshold ?? 0,
           });
         }
-        // The change-reason is only ever meaningful for this one audit
-        // entry — it isn't a product field, so it never goes into the
-        // Firestore payload, only into the `after` snapshot logged below.
-        const auditAfter = form.quantity_reason.trim()
-          ? { ...payload, reason: form.quantity_reason.trim() }
-          : payload;
-        logAudit({
-          userId: user?.uid,
-          userName: profile?.full_name ?? user?.email,
-          action: "update",
-          entityType: "product",
-          entityId: productId,
-          before: {
-            name: editing.name,
-            barcodes: productBarcodes(editing),
-            category_id: editing.category_id ?? null,
-            description: editing.description ?? "",
-            quantity_on_hand: editing.quantity_on_hand ?? 0,
-            reorder_threshold: editing.reorder_threshold ?? 0,
-            available: editing.available ?? true,
-            location: editing.location ?? DEFAULT_LOCATION,
-            lend_from: editing.lend_from ?? null,
-            lend_to: editing.lend_to ?? null,
-            lending_interval: editing.lending_interval ?? "week_1",
-            images: editing.images ?? [],
-          },
-          after: auditAfter,
-        });
       } else {
-        const createPayload = {
-          ...basePayload,
-          created_at: new Date().toISOString(),
-          images: [] as string[],
-        };
-        const productRef = await addDoc(
-          collection(db, "products"),
-          createPayload,
-        );
-
-        // Images are uploaded under products/<id>/... so we need the doc ID
-        // first — upload happens after create, then a follow-up update
-        // attaches the resulting storage paths.
-        const images: string[] = [];
-        for (let i = 0; i < form.images.length; i++) {
-          const img = form.images[i];
-          if (img.file) {
-            const path = `products/${productRef.id}/${Date.now()}-${i}-${img.file.name}`;
-            await uploadBytes(ref(storage, path), img.file);
-            images.push(path);
-          }
+        // Photos upload under the final id first, so the product is created once
+        // (the server writes the audit entry).
+        const productId = newProductId();
+        const { images, uploaded } = await uploadImages(productId);
+        try {
+          await createProduct({ ...basePayload, id: productId, images });
+        } catch (err) {
+          await discardUploads(uploaded);
+          throw err;
         }
-        if (images.length) await updateDoc(productRef, { images });
-
-        logAudit({
-          userId: user?.uid,
-          userName: profile?.full_name ?? user?.email,
-          action: "create",
-          entityType: "product",
-          entityId: productRef.id,
-          before: null,
-          after: { ...createPayload, images },
-        });
       }
 
       setShowModal(false);

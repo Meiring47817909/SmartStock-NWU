@@ -1,8 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { db } from '@/lib/firebase/config'
-import { collection, getDocs } from 'firebase/firestore'
+import { listProducts } from '@/lib/api/catalog'
 import { storageDownloadUrl } from '@/lib/firebase/storage'
 import { formatLendWindow, formatDateOnly } from '@/lib/utils'
 import { lendingIntervalLabel } from '@/lib/firebase/loanRequests'
@@ -47,45 +46,45 @@ export default function LendBrowsePage() {
   useEffect(() => {
     async function load() {
       setLoading(true)
-      // Every product, not just `available == true` — the Availability
-      // filter below needs both sides to filter between. The lend_from
-      // requirement (a fully-checked-out item is still shown, an item with
-      // no lend window set yet is not) is unrelated to that toggle and
-      // still applies unconditionally.
-      const snap = await getDocs(collection(db, 'products'))
-      // Product.id is typed `number` but products are created via addDoc,
-      // so the runtime value is actually the Firestore string doc ID — same
-      // "cast through any" convention as products/page.tsx's own load().
-      const items = (snap.docs.map((d) => ({ id: d.id, ...d.data() })) as unknown as Product[])
-        .filter((p) => p.lend_from)
-      setProducts(items)
+      try {
+        // Every product, not just `available == true` — the Availability
+        // filter below needs both sides to filter between. The lend_from
+        // requirement (a fully-checked-out item is still shown, an item with
+        // no lend window set yet is not) is unrelated to that toggle and
+        // still applies unconditionally.
+        // Product.id is typed `number` but the runtime value is the string
+        // product id (see src/lib/api/catalog.ts).
+        const items = (await listProducts()).filter((p) => p.lend_from)
+        setProducts(items)
 
-      const outOfStockIds = items
-        .filter((p) => (p.available ?? true) && p.quantity_on_hand <= 0)
-        .map((p) => String(p.id))
-      // `transactions` is admin-only in firestore.rules (it's every staff
-      // member's full borrow history) — a portal borrower's own client
-      // can't query it directly, so this goes through an API route running
-      // with Admin SDK privileges instead of a direct Firestore read. See
-      // lib/server/availability.ts for why.
-      if (outOfStockIds.length > 0 && user) {
-        try {
-          const idToken = await user.getIdToken()
-          const res = await fetch('/api/products/expected-return-dates', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-            body: JSON.stringify({ productIds: outOfStockIds }),
-          })
-          if (res.ok) {
-            const data = await res.json()
-            setExpectedReturn(data.expectedReturn ?? {})
+        const outOfStockIds = items
+          .filter((p) => (p.available ?? true) && p.quantity_on_hand <= 0)
+          .map((p) => String(p.id))
+        // `transactions` is admin-only in firestore.rules (it's every staff
+        // member's full borrow history) — a portal borrower's own client
+        // can't query it directly, so this goes through an API route running
+        // with Admin SDK privileges instead of a direct Firestore read. See
+        // lib/server/availability.ts for why.
+        if (outOfStockIds.length > 0 && user) {
+          try {
+            const idToken = await user.getIdToken()
+            const res = await fetch('/api/products/expected-return-dates', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+              body: JSON.stringify({ productIds: outOfStockIds }),
+            })
+            if (res.ok) {
+              const data = await res.json()
+              setExpectedReturn(data.expectedReturn ?? {})
+            }
+          } catch {
+            // Non-critical — the card still shows "Unavailable" either way,
+            // just without a specific date.
           }
-        } catch {
-          // Non-critical — the card still shows "Unavailable" either way,
-          // just without a specific date.
         }
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     }
     load()
   }, [user])
