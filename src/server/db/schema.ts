@@ -267,6 +267,7 @@ export const loanRequestLines = pgTable(
       .notNull()
       .references(() => products.id),
     product_name: text('product_name').notNull(),
+    line_no: integer('line_no').notNull(), // 0-based position in the cart; lines read back in this order
     requested_quantity: integer('requested_quantity').notNull(),
     offered_quantity: integer('offered_quantity').notNull(),
     created_at: timestamptz('created_at').notNull().defaultNow(),

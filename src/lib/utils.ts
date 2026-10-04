@@ -102,8 +102,27 @@ function dateStrFromDate(d: Date): string {
 // pickers. Deliberately avoids `new Date().toISOString()`, which reports the
 // UTC date and can be a day off from "today" depending on the viewer's
 // timezone.
-export function todayDateStr(now: Date = new Date()): string {
-  return dateStrFromDate(now)
+export function todayDateStr(): string {
+  return dateStrFromDate(new Date())
+}
+
+// The time zone the business runs in. Anything that decides by calendar day (a request expiring, a pickup window
+// having passed) uses this zone, not the machine's: the server in production runs in UTC and its time zone can't be
+// changed, and the browser can be anywhere. Same answer wherever the code runs.
+export const APP_TIME_ZONE = 'Africa/Johannesburg'
+
+const appDayParts = new Intl.DateTimeFormat('en-CA', {
+  timeZone: APP_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+// The YYYY-MM-DD calendar day of an instant (a Date or an ISO string; default now) in APP_TIME_ZONE.
+export function appCalendarDay(instant: Date | string = new Date()): string {
+  const parts = appDayParts.formatToParts(typeof instant === 'string' ? new Date(instant) : instant)
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
+  return `${part('year')}-${part('month')}-${part('day')}`
 }
 
 // Converts a full ISO datetime string (e.g. a `created_at` timestamp) to a

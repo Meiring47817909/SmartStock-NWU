@@ -1,4 +1,4 @@
-import { asc, eq, sql } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
   createReturnWaiver,
@@ -27,6 +27,7 @@ import { closeDb, getDb, type Db } from '@/server/db/client'
 import { DataError, type Caller, type Ctx } from '@/server/context'
 import { waivedQty } from '@/lib/stockRules'
 import { closeTestDb, resetTestDb, TEST_DATABASE_URL } from '../helpers/db'
+import { raceBehindLock } from '../helpers/locks'
 
 let db: Db
 // Two more pools on the same database: a transaction on each really runs on its own connection, so row locks contend.
@@ -58,52 +59,8 @@ async function expectDataError(p: Promise<unknown>, status: number, message?: st
 const audits = () => db.select().from(auditLog).orderBy(asc(auditLog.created_at), asc(auditLog.id))
 const qty = async (id: string) => (await db.select().from(products).where(eq(products.id, id)))[0].quantity_on_hand
 
-/** Hold `FOR UPDATE` on one row from another connection until released, so later transactions queue behind it. */
-async function holdRowLock(on: Db, table: 'products' | 'transactions', id: string) {
-  let release!: () => void
-  const released = new Promise<void>((r) => (release = r))
-  let locked!: () => void
-  const gotLock = new Promise<void>((r) => (locked = r))
-  const done = on.transaction(async (tx) => {
-    await tx.execute(sql`select 1 from ${sql.raw(table)} where id = ${id} for update`)
-    locked()
-    await released
-  })
-  await gotLock
-  return { release, done }
-}
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-
-/** Wait until `count` database sessions are blocked waiting for a lock (polls pg_stat_activity; fails after `timeoutMs`). */
-async function waitForLockWaiters(count: number, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    const res = await db.execute(
-      sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`,
-    )
-    const waiting = (res.rows[0] as { n: number }).n
-    if (waiting >= count) return
-    if (Date.now() > deadline) throw new Error(`Timed out: ${waiting} of ${count} sessions waiting on a lock.`)
-    await sleep(10)
-  }
-}
-
-/**
- * Hold FOR UPDATE on a row from a third connection, start every attempt, wait until all of them are blocked on that lock,
- * then release it and settle them. Without the row lock in the code under test the attempts never block, and this times out.
- */
-async function raceBehindLock<T>(table: 'products' | 'transactions', id: string, attempts: (() => Promise<T>)[]) {
-  const held = await holdRowLock(dbC, table, id)
-  try {
-    const all = Promise.allSettled(attempts.map((a) => a()))
-    await waitForLockWaiters(attempts.length)
-    held.release()
-    await held.done
-    return await all
-  } finally {
-    held.release()
-  }
-}
+const raceOnRow = <T>(table: 'products' | 'transactions', id: string, attempts: (() => Promise<T>)[]) =>
+  raceBehindLock(db, dbC, table, id, attempts)
 
 beforeAll(async () => {
   db = await resetTestDb()
@@ -416,7 +373,7 @@ describe('recordStockOut', () => {
     const attempt = (on: Db) =>
       recordStockOut(adminCtx(on), { staffId: 'staff-1', items: [{ productId: 'p1', quantity: 1, barcodes: ['P1A'] }], lendFrom: '2026-10-04' })
     // Both callers are provably in flight (waiting on the lock held from a third connection) before it is released.
-    const results = await raceBehindLock('products', 'p1', [() => attempt(db), () => attempt(dbB)])
+    const results = await raceOnRow('products', 'p1', [() => attempt(db), () => attempt(dbB)])
 
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
     const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
@@ -450,6 +407,7 @@ describe('recordStockOut', () => {
       request_id: 'req1',
       product_id: 'p1',
       product_name: 'Projector',
+      line_no: 0,
       requested_quantity: 2,
       offered_quantity: 2,
     })
@@ -748,7 +706,7 @@ describe('recordReturn', () => {
     const attempt = (on: Db) =>
       recordReturn(adminCtx(on), { staffId: 'staff-1', linkedTxnId: out.id, items: [{ productId: 'p2', quantity: 1, barcodes: ['C1'] }] })
     // Both callers are provably in flight (waiting on the lock held from a third connection) before it is released.
-    const results = await raceBehindLock('transactions', out.id, [() => attempt(db), () => attempt(dbB)])
+    const results = await raceOnRow('transactions', out.id, [() => attempt(db), () => attempt(dbB)])
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
     const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
     expect((rejected[0].reason as DataError).status).toBe(400)
@@ -860,7 +818,7 @@ describe('return waivers', () => {
     await db.delete(auditLog)
     const attempt = (on: Db) => createReturnWaiver(adminCtx(on), { transactionId: out.id, productId: 'p2', quantity: 1 })
     // Both callers are provably in flight (waiting on the lock held from a third connection) before it is released.
-    const results = await raceBehindLock('transactions', out.id, [() => attempt(db), () => attempt(dbB)])
+    const results = await raceOnRow('transactions', out.id, [() => attempt(db), () => attempt(dbB)])
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
     const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
     expect((rejected[0].reason as DataError).status).toBe(409)
@@ -876,7 +834,7 @@ describe('return waivers', () => {
     })
     const attempt = (on: Db) => resolveHeldItem(adminCtx(on), 'staff-1', { transactionId: out.id, productId: 'p2', quantity: 1 })
     // Both callers are provably in flight (waiting on the lock held from a third connection) before it is released.
-    const results = await raceBehindLock('transactions', out.id, [() => attempt(db), () => attempt(dbB)])
+    const results = await raceOnRow('transactions', out.id, [() => attempt(db), () => attempt(dbB)])
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
     expect(await db.select().from(returnWaivers)).toHaveLength(1)
   })

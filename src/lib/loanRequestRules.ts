@@ -1,8 +1,9 @@
 // Pure loan-request helpers and shapes shared by the server data layer (src/server/data/loanRequests.ts), the browser
 // client (src/lib/api/loanRequests.ts) and, until the pages move over, src/lib/firebase/loanRequests.ts. No Firebase,
-// no database. Moved verbatim from src/lib/firebase/loanRequests.ts; the only addition is the optional `today`
-// argument on isExpired / isNoShowCandidate, so the server can decide from its own clock (ctx.now()).
-import { todayDateStr, addDaysToDateStr, isoToLocalDateStr } from '@/lib/utils'
+// no database. Moved from src/lib/firebase/loanRequests.ts. Expiry and no-show decide by calendar day in
+// APP_TIME_ZONE (Africa/Johannesburg), not the machine's zone, and isExpired / isNoShowCandidate take an optional
+// `today` so the server can decide from its own clock (ctx.now()).
+import { appCalendarDay, addDaysToDateStr } from '@/lib/utils'
 import type { Product, LoanRequest, LoanRequestStatus, LendingInterval } from '@/types/database'
 
 export const ACTIVE_STATUSES: LoanRequestStatus[] = ['pending', 'countered', 'accepted']
@@ -154,12 +155,12 @@ export function tightestLendingCap(
 // expired on the staff member.
 export function computeExpiryDate(request: LoanRequest): string | null {
   if (request.status !== 'pending' && request.status !== 'countered') return null
-  const oneMonthOut = addDaysToDateStr(isoToLocalDateStr(request.updated_at), MAX_LOAN_DAYS)
+  const oneMonthOut = addDaysToDateStr(appCalendarDay(request.updated_at), MAX_LOAN_DAYS)
   return oneMonthOut < request.from_date ? oneMonthOut : request.from_date
 }
 
-/** `today` is a YYYY-MM-DD string; the server passes the day of its own clock, the browser leaves it out. */
-export function isExpired(request: LoanRequest, today: string = todayDateStr()): boolean {
+/** `today` is a YYYY-MM-DD calendar day in APP_TIME_ZONE (default: now), so the browser and the server agree on the day. */
+export function isExpired(request: LoanRequest, today: string = appCalendarDay()): boolean {
   const expiry = computeExpiryDate(request)
   return expiry !== null && today > expiry
 }
@@ -177,7 +178,7 @@ export function isExpired(request: LoanRequest, today: string = todayDateStr()):
 // return — that's consistent with "no forced return date" also meaning no
 // forced pickup deadline; an admin can still manually Cancel it from the
 // Dashboard at any time regardless.
-export function isNoShowCandidate(request: LoanRequest, today: string = todayDateStr()): boolean {
+export function isNoShowCandidate(request: LoanRequest, today: string = appCalendarDay()): boolean {
   return request.status === 'accepted' && !request.fulfilled_txn_id && today > effectiveToDate(request.to_date)
 }
 

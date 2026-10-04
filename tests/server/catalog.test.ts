@@ -513,6 +513,7 @@ describe('outstanding holders, unit counts and delete blockers', () => {
         request_id: id,
         product_id: p.id,
         product_name: 'p',
+        line_no: 0,
         requested_quantity: qty,
         offered_quantity: qty,
       })
@@ -539,7 +540,7 @@ describe('outstanding holders, unit counts and delete blockers', () => {
       id: 'rq1', staff_id: 'staff-2', staff_name: 'Bo Rrower', status: 'accepted', from_date: '2026-11-01', original_from_date: '2026-11-01',
     })
     await db.insert(loanRequestLines).values({
-      id: 'rql1', request_id: 'rq1', product_id: p.id, product_name: 'p', requested_quantity: 1, offered_quantity: 1,
+      id: 'rql1', request_id: 'rq1', product_id: p.id, product_name: 'p', line_no: 0, requested_quantity: 1, offered_quantity: 1,
     })
     const expected =
       'Still in use — 2 unit(s) checked out with Sam Staff (OUT-77); 1 unit(s) on a approved pickup for Bo Rrower. Resolve or cancel these first.'

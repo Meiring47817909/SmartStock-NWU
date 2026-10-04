@@ -54,7 +54,7 @@ export const GET = route<Query>('signed-in', async (ctx, q) => {
     case 'intervals':
       return getReservationIntervals(ctx, list(q.productIds))
     case 'quantityConflicts':
-      return findQuantityReductionConflicts(ctx, q.productId ?? '', Number(q.quantity))
+      return findQuantityReductionConflicts(ctx, q.productId ?? '', q.quantity !== undefined && /^\d+$/.test(q.quantity) ? Number(q.quantity) : NaN)
     case 'alertCount':
       return { count: await loadLoanRequestsAlertCount(ctx) }
     case 'myAlertCount':

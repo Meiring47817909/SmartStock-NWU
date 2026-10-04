@@ -648,7 +648,7 @@ async function computeReservationHolders(ctx: Ctx, productId: string): Promise<R
         sql`${loanRequestLines.offered_quantity} > 0`,
       ),
     )
-    .orderBy(asc(loanRequests.created_at), asc(loanRequests.id))
+    .orderBy(asc(loanRequests.created_at), asc(loanRequests.id), asc(loanRequestLines.line_no), asc(loanRequestLines.id))
   return rows
 }
 

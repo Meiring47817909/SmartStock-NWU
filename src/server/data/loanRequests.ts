@@ -5,7 +5,7 @@ import { toIso, withTx, type Db } from '@/server/db/client'
 import { newId } from '@/server/db/ids'
 import { LOAN_REQUEST_STATUSES, loanRequestLines, loanRequests, products, staff } from '@/server/db/schema'
 import { writeAudit } from '@/server/data/audit'
-import { addDaysToDateStr, genRequestRef, todayDateStr } from '@/lib/utils'
+import { addDaysToDateStr, appCalendarDay, genRequestRef } from '@/lib/utils'
 import {
   ACTIVE_STATUSES,
   ALL_TIME_FROM,
@@ -164,7 +164,7 @@ async function linesOf(c: Ctx, requestId: string): Promise<LineRow[]> {
     .select()
     .from(loanRequestLines)
     .where(eq(loanRequestLines.request_id, requestId))
-    .orderBy(asc(loanRequestLines.created_at), asc(loanRequestLines.id))
+    .orderBy(asc(loanRequestLines.line_no), asc(loanRequestLines.id))
 }
 
 // --- Audit snapshot ----------------------------------------------------------
@@ -285,7 +285,7 @@ async function holdersOf(
         overlaps(fromDate, toDate),
       ),
     )
-    .orderBy(asc(loanRequests.created_at), asc(loanRequests.id), asc(loanRequestLines.id))
+    .orderBy(asc(loanRequests.created_at), asc(loanRequests.id), asc(loanRequestLines.line_no), asc(loanRequestLines.id))
 }
 
 async function reservedQuantity(c: Ctx, productId: string, fromDate: string, toDate: string, excludeRequestId?: string): Promise<number> {
@@ -354,7 +354,7 @@ export async function getReservationIntervals(ctx: Ctx, productIds: string[]): P
         sql`${loanRequestLines.offered_quantity} > 0`,
       ),
     )
-    .orderBy(asc(loanRequests.created_at), asc(loanRequests.id), asc(loanRequestLines.id))
+    .orderBy(asc(loanRequests.created_at), asc(loanRequests.id), asc(loanRequestLines.line_no), asc(loanRequestLines.id))
   for (const r of rows) {
     result[r.productId].push({ fromDate: r.fromDate, toDate: effectiveToDate(r.toDate), quantity: r.quantity })
   }
@@ -369,6 +369,7 @@ export async function getReservationIntervals(ctx: Ctx, productIds: string[]): P
  */
 export async function findQuantityReductionConflicts(ctx: Ctx, productId: string, newQuantity: number): Promise<ReservationHolder[]> {
   assertAdmin(ctx)
+  if (!Number.isInteger(newQuantity) || newQuantity < 0) throw new DataError(400, 'Quantity must be a whole number, zero or more.')
   const holders = await holdersOf(ctx, productId, ALL_TIME_FROM, OPEN_ENDED_TO, ACTIVE_STATUSES)
   const offenders: ReservationHolder[] = []
   for (const holder of holders) {
@@ -525,8 +526,8 @@ export async function submitLoanRequest(ctx: Ctx, input: SubmitLoanRequestInput)
         fulfilled_txn_id: null,
       })
       .returning()
-    // A line's created_at is its place in the cart: lines read back in the order they were added, which is how the
-    // request, its emails and its audit snapshots list them. One millisecond apart.
+    // line_no is the line's place in the cart: lines read back in the order they were added, which is how the request,
+    // its emails and its audit snapshots list them.
     await c.db.insert(loanRequestLines).values(
       items.map((item, i) => ({
         id: newId(),
@@ -535,7 +536,8 @@ export async function submitLoanRequest(ctx: Ctx, input: SubmitLoanRequestInput)
         product_name: item.product.name,
         requested_quantity: item.quantity,
         offered_quantity: item.quantity,
-        created_at: new Date(at.getTime() + i),
+        line_no: i,
+        created_at: at,
       })),
     )
     // The cart IS the line set at submission: requested and offered are equal until the admin counters.
@@ -590,12 +592,25 @@ async function assertStillAvailable(
   }
 }
 
+/**
+ * Run a decision on a locked request. The work returns `null` when it found the request past its expiry date and
+ * settled it as expired instead (see settleIfDue): that status change is committed together with this transaction (it
+ * is not thrown away by an error), and only then is the caller told, with the same 409 as any other lost race. So an
+ * expired request is expired for good, whoever got to it first.
+ */
+async function transitionTx(ctx: Ctx, work: (c: Ctx) => Promise<LoanRequest | null>): Promise<LoanRequest> {
+  const result = await inTx(ctx, work)
+  if (!result) throw new DataError(409, CHANGED)
+  return result
+}
+
 /** Approve a pending request exactly as asked. Admin. */
 export async function approveAsIs(ctx: Ctx, ref: RequestRef): Promise<LoanRequest> {
   assertAdmin(ctx)
-  return inTx(ctx, async (c) => {
+  return transitionTx(ctx, async (c) => {
     const req = await lockRequest(c, idOf(ref))
     assertStatus(req, ['pending'])
+    if (await settleIfDue(c, req)) return null
     const lines = await linesOf(c, req.id)
     await assertStillAvailable(c, req.id, lines, req.from_date, req.to_date)
     const updated = await setRequest(c, req, { status: 'accepted' })
@@ -623,9 +638,10 @@ export async function sendCounter(ctx: Ctx, ref: RequestRef, input: CounterInput
   const newTo = input?.toDate === undefined ? undefined : dateOrNull(input.toDate, 'To date')
   const adminMessage = typeof input?.message === 'string' ? input.message.trim() || null : null
 
-  return inTx(ctx, async (c) => {
+  return transitionTx(ctx, async (c) => {
     const req = await lockRequest(c, idOf(ref))
     assertStatus(req, ['pending'])
+    if (await settleIfDue(c, req)) return null
     const fromDate = newFrom ?? req.from_date
     const toDate = newTo !== undefined ? newTo : req.to_date
     if (toDate && toDate < fromDate) throw new DataError(400, "To date can't be before the From date.")
@@ -722,10 +738,11 @@ function assertOwner(c: Ctx, row: RequestRow): void {
 }
 
 async function answerCounter(ctx: Ctx, ref: RequestRef, next: 'accepted' | 'declined'): Promise<LoanRequest> {
-  return inTx(ctx, async (c) => {
+  return transitionTx(ctx, async (c) => {
     const req = await lockRequest(c, idOf(ref))
     assertOwner(c, req)
     assertStatus(req, ['countered'])
+    if (await settleIfDue(c, req)) return null
     const updated = await setRequest(c, req, { status: next })
     const lines = (await linesOf(c, req.id)).map(toSnapshotLine)
     await writeAudit(c, {
@@ -783,33 +800,51 @@ function nextExpiryStatus(row: RequestRow, today: string): 'expired' | 'no_show'
 }
 
 /**
- * The lazy expiry / no-show pass for one request, on the server's clock (ctx.now()). Recorded as the system, never as
- * whoever's page ran it. Both transitions need to be real status values the reservation ledger and the lists can rely
- * on, not just a display label, so the first read after the date passes writes them.
+ * The expiry / no-show change for a request already locked by `c`, if it is due on the server's clock: writes the
+ * status and its audit entry, recorded as the system (never as whoever's page or action got here: `c`'s caller is
+ * swapped for SYSTEM_ACTOR for the audit write only). Resolves to the new status, or null when nothing was due.
+ * "Today" is the calendar day in APP_TIME_ZONE (Africa/Johannesburg) of ctx.now(), whatever zone the server runs in.
+ */
+async function settleLocked(c: Ctx, locked: RequestRow): Promise<'expired' | 'no_show' | null> {
+  const next = nextExpiryStatus(locked, appCalendarDay(c.now()))
+  if (!next) return null
+  await setRequest(c, locked, { status: next })
+  // Everything except the line items is already on the row; the lines are one extra read. Freezing it all (rather than
+  // joining at display time) keeps the entry standing on its own in a CSV export. fulfilled_txn_id is null here by
+  // definition (a no-show needs nothing issued, an expiry is never accepted), so stock never moved.
+  const lines = (await linesOf(c, locked.id)).map(toSnapshotLine)
+  await writeAudit({ ...c, caller: SYSTEM_ACTOR }, {
+    action: 'update',
+    entityType: 'loan_request',
+    entityId: locked.id,
+    before: await requestAuditSnapshot(c, locked, {}, lines),
+    after: await requestAuditSnapshot(c, locked, { status: next }, lines),
+  })
+  return next
+}
+
+/**
+ * A decision on a pending / countered request (approve, counter, accept or decline a counter) re-checks expiry under
+ * the request lock: one past its expiry date is settled as expired right here and the decision must not go ahead.
+ * True when it was settled.
+ */
+async function settleIfDue(c: Ctx, locked: RequestRow): Promise<boolean> {
+  return (await settleLocked(c, locked)) !== null
+}
+
+/**
+ * The lazy expiry / no-show pass for one request, on the server's clock (ctx.now()). Both transitions need to be real
+ * status values the reservation ledger and the lists can rely on, not just a display label, so the first read after
+ * the date passes writes them.
  *
  * Two callers racing on the same request: the request row is locked and re-read under the lock, so the second one finds
  * the first one's change and does nothing: exactly one status change and one audit entry.
  */
 async function settleExpiry(ctx: Ctx, row: RequestRow): Promise<LoanRequestStatus> {
-  const today = todayDateStr(ctx.now())
-  if (!nextExpiryStatus(row, today)) return row.status
-  return inTx({ ...ctx, caller: SYSTEM_ACTOR }, async (c) => {
+  if (!nextExpiryStatus(row, appCalendarDay(ctx.now()))) return row.status
+  return inTx(ctx, async (c) => {
     const locked = await lockRequest(c, row.id)
-    const next = nextExpiryStatus(locked, today)
-    if (!next) return locked.status
-    await setRequest(c, locked, { status: next })
-    // Everything except the line items is already on the row; the lines are one extra read. Freezing it all (rather than
-    // joining at display time) keeps the entry standing on its own in a CSV export. fulfilled_txn_id is null here by
-    // definition (a no-show needs nothing issued, an expiry is never accepted), so stock never moved.
-    const lines = (await linesOf(c, locked.id)).map(toSnapshotLine)
-    await writeAudit(c, {
-      action: 'update',
-      entityType: 'loan_request',
-      entityId: locked.id,
-      before: await requestAuditSnapshot(c, locked, {}, lines),
-      after: await requestAuditSnapshot(c, locked, { status: next }, lines),
-    })
-    return next
+    return (await settleLocked(c, locked)) ?? locked.status
   })
 }
 

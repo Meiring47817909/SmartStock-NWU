@@ -72,7 +72,7 @@ const CHANGED = 'This request has already changed — reload to see its current 
 const audits = () => db.select().from(auditLog).orderBy(asc(auditLog.created_at), asc(auditLog.id))
 const requestRow = async (id: string) => (await db.select().from(loanRequests).where(eq(loanRequests.id, id)))[0]
 const offered = async (requestId: string) =>
-  (await db.select().from(loanRequestLines).where(eq(loanRequestLines.request_id, requestId)).orderBy(asc(loanRequestLines.created_at))).map(
+  (await db.select().from(loanRequestLines).where(eq(loanRequestLines.request_id, requestId)).orderBy(asc(loanRequestLines.line_no))).map(
     (l) => [l.product_id, l.offered_quantity],
   )
 
@@ -117,7 +117,8 @@ async function seedRequest(r: SeedRequest) {
       product_name: names[productId],
       requested_quantity: requested,
       offered_quantity: off ?? requested,
-      created_at: new Date(updated.getTime() + i),
+      line_no: i,
+      created_at: updated,
     })),
   )
 }
@@ -199,6 +200,10 @@ describe('submitLoanRequest', () => {
     expect(row.created_at).toEqual(NOW)
     expect(row.updated_at).toEqual(NOW)
 
+    // Cart order is stored, not inferred from timestamps: every line has the same created_at.
+    const stored = await db.select().from(loanRequestLines).where(eq(loanRequestLines.request_id, id)).orderBy(asc(loanRequestLines.line_no))
+    expect(stored.map((l) => [l.line_no, l.product_id])).toEqual([[0, 'p2'], [1, 'p1']])
+    expect(new Set(stored.map((l) => l.created_at.getTime())).size).toBe(1)
     const lines = (await getRequestLines(adminCtx(), id)).map((l) => [l.product_id, l.product_name, l.requested_quantity, l.offered_quantity])
     expect(lines).toEqual([
       ['p2', 'Cable', 1, 1],
@@ -812,6 +817,82 @@ describe('expireIfNeeded', () => {
   })
 })
 
+// Production runs in UTC; the business runs in Johannesburg (UTC+2). 23:30 UTC on the 4th is 01:30 SAST on the 5th.
+describe('expiry follows Johannesburg calendar days', () => {
+  const at = (iso: string) => ctxAs(admin, db, new Date(iso))
+
+  it('"today" is the SAST day: 23:30 UTC already counts as tomorrow', async () => {
+    // updated 2026-09-04 (SAST) + 30 days: expires after 2026-10-04.
+    await seedRequest({ id: 'r1', status: 'pending', updated: '2026-09-04T08:00:00.000Z', from: '2026-10-20' })
+    expect(await expireIfNeeded(at('2026-10-04T21:30:00.000Z'), 'r1')).toBe('pending') // 23:30 SAST on the 4th
+    expect(await audits()).toHaveLength(0)
+    expect(await expireIfNeeded(at('2026-10-04T23:30:00.000Z'), 'r1')).toBe('expired') // 01:30 SAST on the 5th
+    expect(await audits()).toHaveLength(1)
+  })
+
+  it("a request last changed in the 00:00-01:59 SAST window counts from SAST's day, not UTC's (no early expiry)", async () => {
+    // Changed 2026-09-04T23:30Z = 01:30 SAST on 2026-09-05: expires after 2026-10-05, not after 2026-10-04.
+    await seedRequest({ id: 'r1', status: 'pending', updated: '2026-09-04T23:30:00.000Z', from: '2026-10-20' })
+    expect(await expireIfNeeded(at('2026-10-04T23:30:00.000Z'), 'r1')).toBe('pending') // the 5th in SAST: the last good day
+    expect(await expireIfNeeded(at('2026-10-05T21:30:00.000Z'), 'r1')).toBe('pending') // 23:30 SAST on the 5th
+    expect(await audits()).toHaveLength(0)
+    expect(await expireIfNeeded(at('2026-10-05T22:30:00.000Z'), 'r1')).toBe('expired') // 00:30 SAST on the 6th
+  })
+
+  it('no-show: the window ends with the SAST day', async () => {
+    await seedRequest({ id: 'r1', status: 'accepted', from: '2026-09-20', to: '2026-10-04' })
+    expect(await expireIfNeeded(at('2026-10-04T21:30:00.000Z'), 'r1')).toBe('accepted')
+    expect(await expireIfNeeded(at('2026-10-04T23:30:00.000Z'), 'r1')).toBe('no_show')
+  })
+})
+
+describe('a decision on an expired request settles it instead', () => {
+  const SYSTEM_NAME = 'System (automatic)'
+  const expiredPending = (id = 'r1') => seedRequest({ id, status: 'pending', updated: '2026-09-01T08:00:00.000Z', from: '2026-10-10', lines: [['p1', 2]] })
+  const expiredCountered = (id = 'r1') =>
+    seedRequest({ id, status: 'countered', updated: '2026-09-01T08:00:00.000Z', from: '2026-10-10', lines: [['p1', 2, 1]] })
+
+  async function expectSettled(id: string, p: Promise<unknown>) {
+    await expectDataError(p, 409, CHANGED)
+    // The expiry itself committed even though the caller got the 409, with the same audit entry expireIfNeeded writes.
+    expect((await requestRow(id)).status).toBe('expired')
+    const entries = await audits()
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({ action: 'update', entity_id: id, user_id: null, user_name: SYSTEM_NAME })
+    expect((entries[0].after as { status: string }).status).toBe('expired')
+    // Reloading shows the truth, and asking again changes nothing more.
+    expect(await expireIfNeeded(adminCtx(), id)).toBe('expired')
+    expect(await audits()).toHaveLength(1)
+  }
+
+  it('approveAsIs', async () => {
+    await expiredPending()
+    await expectSettled('r1', approveAsIs(adminCtx(), 'r1'))
+  })
+
+  it('sendCounter', async () => {
+    await expiredPending()
+    await expectSettled('r1', sendCounter(adminCtx(), 'r1', { lines: [{ lineId: 'r1-l0', product_id: 'p1', offered_quantity: 1 }], message: 'x' }))
+    expect(await offered('r1')).toEqual([['p1', 2]])
+  })
+
+  it('acceptCounter', async () => {
+    await expiredCountered()
+    await expectSettled('r1', acceptCounter(samCtx(), 'r1'))
+  })
+
+  it('declineCounter', async () => {
+    await expiredCountered()
+    await expectSettled('r1', declineCounter(samCtx(), 'r1'))
+  })
+
+  it('a request that is not yet due is decided as usual', async () => {
+    await seedRequest({ id: 'r1', status: 'pending', updated: '2026-10-01T08:00:00.000Z', from: '2026-10-20' })
+    expect((await approveAsIs(adminCtx(), 'r1')).status).toBe('accepted')
+    expect(await audits()).toHaveLength(1)
+  })
+})
+
 // --- Sidebar counts ------------------------------------------------------------------------------------------------
 
 describe('alert counts', () => {
@@ -886,6 +967,14 @@ describe('reservation ledger', () => {
       p3: [],
     })
     expect(await getReservationIntervals(samCtx(), [])).toEqual({})
+  })
+
+  it('findQuantityReductionConflicts refuses a quantity that is not a whole number of zero or more', async () => {
+    for (const bad of [Number.NaN, -1, 1.5, Infinity]) {
+      await expectDataError(findQuantityReductionConflicts(adminCtx(), 'p1', bad), 400, 'Quantity must be a whole number, zero or more.')
+    }
+    // Zero is a real answer: everything on the product would be broken.
+    expect((await findQuantityReductionConflicts(adminCtx(), 'p1', 0)).map((h) => h.requestId)).toEqual(['a', 'b'])
   })
 
   it('findQuantityReductionConflicts: only requests whose own window the new quantity would break', async () => {

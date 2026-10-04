@@ -148,6 +148,13 @@ describe('/api/loan-requests', () => {
     })
     expect((await json(await listGET(request('GET', '/api/loan-requests?kind=quantityConflicts&productId=p1&quantity=0', 'admin-uid')))).body).toHaveLength(1)
     expect((await json(await listGET(request('GET', '/api/loan-requests?kind=nope', 'admin-uid')))).status).toBe(400)
+    // A missing or malformed quantity is a 400, never "no conflicts".
+    for (const q of ['', '&quantity=', '&quantity=abc', '&quantity=-1', '&quantity=1.5', '&quantity=1e3']) {
+      expect(await json(await listGET(request('GET', `/api/loan-requests?kind=quantityConflicts&productId=p1${q}`, 'admin-uid')))).toEqual({
+        status: 400,
+        body: { error: 'Quantity must be a whole number, zero or more.' },
+      })
+    }
 
     // withdraw by the owner, with the lazy expiry pass available as an action
     expect(await transition(id, 'sam-uid', { action: 'expire' })).toEqual({ status: 200, body: { status: 'accepted' } })
