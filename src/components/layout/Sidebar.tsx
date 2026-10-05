@@ -1,21 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import {
-  LayoutDashboard, Package, LogOut, ArrowUpFromLine, ArrowDownToLine,
-  Users, RotateCcw, BarChart2, ScrollText, Tag, ClipboardList, User as UserIcon,
-  ChevronLeft, ChevronRight, Settings,
-} from 'lucide-react'
-import { signOut } from 'firebase/auth'
-import { auth } from '@/lib/firebase/config'
-import { markLoggingOut } from '@/lib/authTransition'
-import { loadDashboardAlertCounts } from '@/lib/api/dashboard'
-import { loadLoanRequestsAlertCount } from '@/lib/api/loanRequests'
-import { subscribeToAlertsChanged } from '@/lib/alertsBus'
+import { LogOut, User as UserIcon, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useRole } from '@/context/RoleContext'
+import { isAdminNavActive, signOutAdmin, visibleAdminNav, type AdminNavCounts } from '@/components/layout/adminNav'
 import {
   Sidebar as SidebarPrimitive, SidebarContent, SidebarFooter, SidebarGroup,
   SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu,
@@ -83,7 +73,7 @@ function SidebarCollapseToggle() {
   )
 }
 
-export default function Sidebar({ profile }: { profile: Profile | null }) {
+export default function Sidebar({ profile, counts }: { profile: Profile | null; counts: AdminNavCounts }) {
   const pathname = usePathname()
   const router = useRouter()
   const { state: sidebarState } = useSidebar()
@@ -93,92 +83,9 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
   // component's other collapsed-only overrides for why this is inline
   // style rather than a class.
   const collapsedBadgeStyle = railCollapsed ? { left: '3rem', right: 'auto' } : undefined
-  const { canManageProducts, canManageStaff, canViewReports, canManageLoanRequests, canManageSettings } = useRole()
-  // Combined total of the Dashboard's four "needs attention" widgets
-  // (Outstanding Returns, Low Stock Alerts, Outstanding Loan Requests,
-  // Incoming Pickups) - see src/server/data/dashboard.ts. Loaded once
-  // on mount (the Sidebar stays mounted across the whole protected app) and
-  // refreshed whenever the admin navigates back to the Dashboard itself,
-  // so resolving something there updates the badge without a full reload.
-  const [alertCount, setAlertCount] = useState<number | null>(null)
-  // Combined total of Loan Requests' three actionable tabs (Needs Review,
-  // Sent Counters, Incoming Pickups) — History is excluded, see
-  // lib/api/loanRequests.ts's loadLoanRequestsAlertCount().
-  const [loanRequestCount, setLoanRequestCount] = useState<number | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    loadDashboardAlertCounts().then(counts => {
-      if (!cancelled) setAlertCount(counts.total)
-    }).catch(() => {
-      // Best-effort: the badge just stays hidden if this fails, the
-      // Dashboard page itself is still the source of truth.
-    })
-    return () => { cancelled = true }
-  }, [pathname === '/dashboard'])
-
-  useEffect(() => {
-    if (!canManageLoanRequests) return
-    let cancelled = false
-    loadLoanRequestsAlertCount().then(count => {
-      if (!cancelled) setLoanRequestCount(count)
-    }).catch(() => {
-      // Best-effort, same reasoning as the Dashboard badge above.
-    })
-    return () => { cancelled = true }
-  }, [pathname === '/loan-requests', canManageLoanRequests])
-
-  // Catches a count-changing mutation made in place on the Dashboard or
-  // Loan Requests page itself (e.g. resolving an Outstanding Return),
-  // where the pathname never changes so the two effects above never
-  // re-fire on their own — see alertsBus.ts for why this is needed
-  // alongside them rather than instead of them.
-  useEffect(() => {
-    return subscribeToAlertsChanged(() => {
-      loadDashboardAlertCounts().then(counts => setAlertCount(counts.total)).catch(() => {})
-      if (canManageLoanRequests) {
-        loadLoanRequestsAlertCount().then(setLoanRequestCount).catch(() => {})
-      }
-    })
-  }, [canManageLoanRequests])
-
-  // Staff can accept a counter offer or send a new request at any time
-  // from their own device, which never goes through this admin's alertsBus.
-  // So besides the mount / navigation / in-app refreshes above, re-check
-  // whenever the admin comes back to this tab and every minute while it is
-  // open, so the Loan Requests and Dashboard badges don't sit stale.
-  useEffect(() => {
-    function refresh() {
-      if (document.visibilityState === 'hidden') return
-      loadDashboardAlertCounts().then(counts => setAlertCount(counts.total)).catch(() => {})
-      if (canManageLoanRequests) {
-        loadLoanRequestsAlertCount().then(setLoanRequestCount).catch(() => {})
-      }
-    }
-    const timer = window.setInterval(refresh, 60_000)
-    window.addEventListener('focus', refresh)
-    document.addEventListener('visibilitychange', refresh)
-    return () => {
-      window.clearInterval(timer)
-      window.removeEventListener('focus', refresh)
-      document.removeEventListener('visibilitychange', refresh)
-    }
-  }, [canManageLoanRequests])
-
-  async function handleLogout() {
-    // Admins land on the public home page after signing out, not back on
-    // the login screen — this sidebar is admin-only (see the ROLE_BADGE_CLASS
-    // comment above), so there's no other role to special-case here.
-    // markLoggingOut() has to run before signOut() — see authTransition.ts —
-    // or (protected)/layout.tsx's own "no user, bounce to /login" effect wins
-    // the race against this push and this never sticks.
-    markLoggingOut()
-    await signOut(auth)
-    router.push('/')
-  }
-
-  const isActive = (href: string) =>
-    pathname === href || pathname.startsWith(href + '/')
+  // The page list lives in adminNav.ts (shared with AdminTopBar, the
+  // narrow-screen nav); the badge counts come from (protected)/layout.tsx.
+  const groups = visibleAdminNav(useRole())
 
   const role = profile?.role ?? 'staff'
 
@@ -238,112 +145,32 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
         </SidebarHeader>
 
         <SidebarContent className="px-1.5 py-2 group-data-[collapsible=icon]:overflow-x-hidden group-data-[collapsible=icon]:overflow-y-auto">
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton render={<Link href="/dashboard" />} isActive={isActive('/dashboard')} className={SIDEBAR_ICON_BUTTON_CLASS} size="lg" tooltip="Dashboard">
-                    <LayoutDashboard className="size-5 lg:size-7" />
-                    <span className="text-sm lg:text-base group-data-[collapsible=icon]:hidden">Dashboard</span>
-                  </SidebarMenuButton>
-                  {!!alertCount && (
-                    <SidebarMenuBadge className={`bg-(--nwu-turquoise) text-white text-sm ${SIDEBAR_ICON_BADGE_CLASS}`} style={collapsedBadgeStyle}>{alertCount}</SidebarMenuBadge>
-                  )}
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-
-          <SidebarGroup>
-            <SidebarGroupLabel className="text-[11px] font-bold tracking-wider text-purple-200/50 uppercase lg:text-xs">Stock</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton render={<Link href="/stock-out" />} isActive={isActive('/stock-out')} className={SIDEBAR_ICON_BUTTON_CLASS} size="lg" tooltip="Stock Out">
-                    <ArrowUpFromLine className="size-5 lg:size-7" /> <span className="text-sm lg:text-base group-data-[collapsible=icon]:hidden">Stock Out</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton render={<Link href="/stock-in" />} isActive={isActive('/stock-in')} className={SIDEBAR_ICON_BUTTON_CLASS} size="lg" tooltip="Stock In">
-                    <ArrowDownToLine className="size-5 lg:size-7" /> <span className="text-sm lg:text-base group-data-[collapsible=icon]:hidden">Stock In</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton render={<Link href="/returns" />} isActive={isActive('/returns')} className={SIDEBAR_ICON_BUTTON_CLASS} size="lg" tooltip="Returns">
-                    <RotateCcw className="size-5 lg:size-7" /> <span className="text-sm lg:text-base group-data-[collapsible=icon]:hidden">Returns</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-
-          {canManageProducts && (
-            <SidebarGroup>
-              <SidebarGroupLabel className="text-[11px] font-bold tracking-wider text-purple-200/50 uppercase lg:text-xs">Catalogue</SidebarGroupLabel>
+          {groups.map((group) => (
+            <SidebarGroup key={group.label ?? 'home'}>
+              {group.label && (
+                <SidebarGroupLabel className="text-[11px] font-bold tracking-wider text-purple-200/50 uppercase lg:text-xs">{group.label}</SidebarGroupLabel>
+              )}
               <SidebarGroupContent>
                 <SidebarMenu>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton render={<Link href="/products" />} isActive={isActive('/products')} className={SIDEBAR_ICON_BUTTON_CLASS} size="lg" tooltip="Products">
-                      <Package className="size-5 lg:size-7" /> <span className="text-sm lg:text-base group-data-[collapsible=icon]:hidden">Products</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton render={<Link href="/categories" />} isActive={isActive('/categories')} className={SIDEBAR_ICON_BUTTON_CLASS} size="lg" tooltip="Categories">
-                      <Tag className="size-5 lg:size-7" /> <span className="text-sm lg:text-base group-data-[collapsible=icon]:hidden">Categories</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
+                  {group.items.map((item) => {
+                    const Icon = item.icon
+                    const badge = item.badge ? counts[item.badge] : null
+                    return (
+                      <SidebarMenuItem key={item.href}>
+                        <SidebarMenuButton render={<Link href={item.href} />} isActive={isAdminNavActive(pathname, item.href)} className={SIDEBAR_ICON_BUTTON_CLASS} size="lg" tooltip={item.label}>
+                          <Icon className="size-5 lg:size-7" />
+                          <span className="text-sm lg:text-base group-data-[collapsible=icon]:hidden">{item.label}</span>
+                        </SidebarMenuButton>
+                        {!!badge && (
+                          <SidebarMenuBadge className={`bg-(--nwu-turquoise) text-white text-sm ${SIDEBAR_ICON_BADGE_CLASS}`} style={collapsedBadgeStyle}>{badge}</SidebarMenuBadge>
+                        )}
+                      </SidebarMenuItem>
+                    )
+                  })}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
-          )}
-
-          {(canViewReports || canManageStaff || canManageSettings) && (
-            <SidebarGroup>
-              <SidebarGroupLabel className="text-[11px] font-bold tracking-wider text-purple-200/50 uppercase lg:text-xs">Admin</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {canManageStaff && (
-                    <SidebarMenuItem>
-                      <SidebarMenuButton render={<Link href="/staff" />} isActive={isActive('/staff')} className={SIDEBAR_ICON_BUTTON_CLASS} size="lg" tooltip="Staff">
-                        <Users className="size-5 lg:size-7" /> <span className="text-sm lg:text-base group-data-[collapsible=icon]:hidden">Staff</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )}
-                  {canViewReports && (
-                    <SidebarMenuItem>
-                      <SidebarMenuButton render={<Link href="/reports" />} isActive={isActive('/reports')} className={SIDEBAR_ICON_BUTTON_CLASS} size="lg" tooltip="Reports">
-                        <BarChart2 className="size-5 lg:size-7" /> <span className="text-sm lg:text-base group-data-[collapsible=icon]:hidden">Reports</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )}
-                  {canManageLoanRequests && (
-                    <SidebarMenuItem>
-                      <SidebarMenuButton render={<Link href="/loan-requests" />} isActive={isActive('/loan-requests')} className={SIDEBAR_ICON_BUTTON_CLASS} size="lg" tooltip="Loan Requests">
-                        <ClipboardList className="size-5 lg:size-7" /> <span className="text-sm lg:text-base group-data-[collapsible=icon]:hidden">Loan Requests</span>
-                      </SidebarMenuButton>
-                      {!!loanRequestCount && (
-                        <SidebarMenuBadge className={`bg-(--nwu-turquoise) text-white text-sm ${SIDEBAR_ICON_BADGE_CLASS}`} style={collapsedBadgeStyle}>{loanRequestCount}</SidebarMenuBadge>
-                      )}
-                    </SidebarMenuItem>
-                  )}
-                  {canManageStaff && (
-                    <SidebarMenuItem>
-                      <SidebarMenuButton render={<Link href="/audit-log" />} isActive={isActive('/audit-log')} className={SIDEBAR_ICON_BUTTON_CLASS} size="lg" tooltip="Audit Log">
-                        <ScrollText className="size-5 lg:size-7" /> <span className="text-sm lg:text-base group-data-[collapsible=icon]:hidden">Audit Log</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )}
-                  {canManageSettings && (
-                    <SidebarMenuItem>
-                      <SidebarMenuButton render={<Link href="/settings/notifications" />} isActive={isActive('/settings/notifications')} className={SIDEBAR_ICON_BUTTON_CLASS} size="lg" tooltip="Notifications">
-                        <Settings className="size-5 lg:size-7" /> <span className="text-sm lg:text-base group-data-[collapsible=icon]:hidden">Notifications</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          )}
+          ))}
         </SidebarContent>
 
         <SidebarFooter className="border-t border-white/10 bg-[#2E1242]/70 p-3">
@@ -375,7 +202,7 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
               <DropdownMenuItem render={<Link href="/profile" />}>
                 <UserIcon className="size-3.5" /> Profile
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleLogout}>
+              <DropdownMenuItem onClick={() => signOutAdmin(router)}>
                 <LogOut className="size-3.5" /> Sign out
               </DropdownMenuItem>
             </DropdownMenuContent>

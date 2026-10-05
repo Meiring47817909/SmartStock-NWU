@@ -1,10 +1,13 @@
 'use client'
 
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { FileQuestion } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { RoleProvider } from '@/context/RoleContext'
 import Sidebar from '@/components/layout/Sidebar'
+import AdminTopBar from '@/components/layout/AdminTopBar'
+import { useAdminNavCounts } from '@/components/layout/adminNav'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { Button } from '@/components/ui/button'
 import type { Profile, Role } from '@/types/database'
@@ -23,6 +26,7 @@ export default function NotFound() {
   // borrower who mistyped a /lend/... URL) lands on the lending portal,
   // since that's this site's normal home now, not a login wall.
   const isAdmin = !!user && profile?.role === 'admin'
+  const navCounts = useAdminNavCounts(usePathname(), isAdmin)
 
   const message = (
     <div className="flex h-full min-h-screen flex-col items-center justify-center gap-3 p-8 text-center">
@@ -50,10 +54,13 @@ export default function NotFound() {
   return (
     <RoleProvider role={role}>
       <SidebarProvider style={{ minHeight: '100vh', height: '100vh', overflow: 'hidden' } as React.CSSProperties}>
-        <Sidebar profile={profile as Profile | null} />
-        <main className="flex-1 overflow-y-auto">
-          {message}
-        </main>
+        <Sidebar profile={profile as Profile | null} counts={navCounts} />
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <AdminTopBar profile={profile as Profile | null} counts={navCounts} />
+          <main className="flex-1 overflow-y-auto">
+            {message}
+          </main>
+        </div>
       </SidebarProvider>
     </RoleProvider>
   )

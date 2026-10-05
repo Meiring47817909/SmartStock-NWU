@@ -3,6 +3,8 @@
 import { useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Sidebar from '@/components/layout/Sidebar'
+import AdminTopBar from '@/components/layout/AdminTopBar'
+import { useAdminNavCounts } from '@/components/layout/adminNav'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { RoleProvider } from '@/context/RoleContext'
 import { useAuth } from '@/context/AuthContext'
@@ -20,6 +22,9 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   const pathname = usePathname()
 
   const role = (profile?.role ?? 'staff') as Role
+  // Nav badge counts, shared by the Sidebar and the narrow-screen top bar.
+  // Only fetched once an admin is signed in.
+  const navCounts = useAdminNavCounts(pathname, role === 'admin' && !!user)
 
   // Route-specific NWU-purple-tinted canvas gradients (per the design
   // refresh) -- everything not listed here keeps the plain --nwu-bg
@@ -87,9 +92,11 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
           '--sidebar-width-icon': '6.5rem',
         } as React.CSSProperties}
       >
-        <Sidebar profile={profile as Profile | null} />
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '1.5rem 2rem', background: pageBackground }}>
+        <Sidebar profile={profile as Profile | null} counts={navCounts} />
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* Below md the Sidebar is hidden; this horizontal bar replaces it. */}
+          <AdminTopBar profile={profile as Profile | null} counts={navCounts} />
+          <main className="flex flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6 md:px-8 md:py-6" style={{ background: pageBackground }}>
             {children}
           </main>
         </div>
