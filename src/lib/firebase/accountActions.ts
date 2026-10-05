@@ -1,6 +1,6 @@
 import { applyActionCode, checkActionCode, confirmPasswordReset, verifyPasswordResetCode } from 'firebase/auth'
 import { auth } from '@/lib/firebase/config'
-import { newPasswordProblem } from '@/lib/firebase/passwordRules'
+import { newPasswordProblem, PASSWORD_RULE_TEXT } from '@/lib/firebase/passwordRules'
 
 // Helpers for the /auth/action page, which handles the links in the account
 // emails (reset password, confirm new email, restore email). Firebase still
@@ -59,7 +59,7 @@ export function actionErrorMessage(err: unknown): string {
     case 'auth/user-not-found':
       return 'This account no longer exists.'
     case 'auth/weak-password':
-      return 'That password is too weak. Use 6 to 20 characters.'
+      return `That password is too weak. Use ${PASSWORD_RULE_TEXT}.`
     case 'auth/email-already-in-use':
       return 'That email address is already used by another account.'
     default:

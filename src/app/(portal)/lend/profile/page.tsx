@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { updatePassword } from 'firebase/auth'
 import { auth } from '@/lib/firebase/config'
-import { newPasswordProblem } from '@/lib/firebase/passwordRules'
+import { newPasswordProblem, PASSWORD_MIN_LENGTH, PASSWORD_RULE_TEXT } from '@/lib/firebase/passwordRules'
 import { confirmCurrentPassword } from '@/lib/firebase/reauth'
 import { requestPasswordReset } from '@/lib/firebase/accountEmails'
 import { useStaffPortal } from '@/context/StaffPortalContext'
@@ -39,7 +39,7 @@ function ChangePasswordCard({ email }: { email: string }) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-    // Live password policy, or the same 6-20 rule when running against
+    // Live password policy, or the same FR-002 rule when running against
     // the Auth emulator (see passwordRules.ts).
     const problem = await newPasswordProblem(auth, newPassword)
     if (problem) {
@@ -68,7 +68,7 @@ function ChangePasswordCard({ email }: { email: string }) {
       if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
         setError('Current password is incorrect.')
       } else if (code === 'auth/weak-password' || code === 'auth/password-does-not-meet-requirements') {
-        setError("That new password doesn't meet the requirements — use 6-20 characters with an uppercase letter, a lowercase letter, a number and a special character.")
+        setError(`That new password doesn't meet the requirements — use ${PASSWORD_RULE_TEXT}.`)
       } else if (code === 'auth/too-many-requests') {
         setError('Too many attempts — please wait a moment and try again.')
       } else {
@@ -103,9 +103,8 @@ function ChangePasswordCard({ email }: { email: string }) {
               type="password"
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="6-20 chars, upper/lower/number/symbol"
-              minLength={6}
-              maxLength={20}
+              placeholder={`${PASSWORD_MIN_LENGTH}+ chars, upper/lower/number/symbol`}
+              minLength={PASSWORD_MIN_LENGTH}
               required
             />
           </div>

@@ -1,4 +1,4 @@
-// Port of the scratch harness check-password-rules.mts (4 checks), same assertions. firebase/auth is replaced by a fake
+// Checks for newPasswordProblem (FR-002 rule). firebase/auth is replaced by a fake
 // validatePassword so no Firebase runs.
 import assert from 'node:assert/strict'
 import { beforeEach, describe, it, vi } from 'vitest'
@@ -19,7 +19,7 @@ vi.mock('firebase/auth', () => ({
 }))
 
 import type { Auth } from 'firebase/auth'
-import { newPasswordProblem } from '@/lib/firebase/passwordRules'
+import { localPasswordMissing, newPasswordProblem, PASSWORD_MIN_LENGTH, PASSWORD_RULE_TEXT } from '@/lib/firebase/passwordRules'
 
 const auth = { stub: 'auth' } as unknown as Auth
 const EMU = { throws: 'auth/identitytoolkit.getpasswordpolicy-is-not-implemented-in-the-auth-emulator.' }
@@ -29,18 +29,31 @@ beforeEach(() => {
 })
 
 describe('newPasswordProblem', () => {
-  it('emulator (no password policy endpoint): does not throw, applies 6-20 locally', async () => {
+  it('emulator (no password policy endpoint): does not throw, applies the FR-002 rule locally', async () => {
     fb.vp = EMU
-    assert.equal(await newPasswordProblem(auth, 'abc'), 'New password needs at least 6 characters.')
-    assert.equal(await newPasswordProblem(auth, 'abcdef'), null)
-    assert.equal(await newPasswordProblem(auth, 'x'.repeat(20)), null)
-    assert.equal(await newPasswordProblem(auth, 'x'.repeat(21)), 'New password needs at most 20 characters.')
+    assert.equal(
+      await newPasswordProblem(auth, 'abc'),
+      'New password needs at least 12 characters, an uppercase letter, a number, a symbol.',
+    )
+    assert.equal(await newPasswordProblem(auth, 'password123'), 'New password needs at least 12 characters, an uppercase letter, a symbol.')
+    assert.equal(await newPasswordProblem(auth, 'Password1234'), 'New password needs a symbol.')
+    assert.equal(await newPasswordProblem(auth, 'PASSWORD123!'), 'New password needs a lowercase letter.')
+    assert.equal(await newPasswordProblem(auth, 'Password123!'), null)
+    // No upper limit any more (the old rule capped at 20).
+    assert.equal(await newPasswordProblem(auth, 'Aa1!' + 'x'.repeat(40)), null)
   })
 
   it('any other policy lookup failure also falls back to the local rule', async () => {
     fb.vp = { throws: 'auth/network-request-failed' }
-    assert.equal(await newPasswordProblem(auth, 'abcdef'), null)
-    assert.equal(await newPasswordProblem(auth, 'ab'), 'New password needs at least 6 characters.')
+    assert.equal(await newPasswordProblem(auth, 'Password123!'), null)
+    assert.equal(await newPasswordProblem(auth, 'Pass1!'), 'New password needs at least 12 characters.')
+  })
+
+  it('FR-002 rule text and helper agree', () => {
+    assert.equal(PASSWORD_MIN_LENGTH, 12)
+    assert.equal(PASSWORD_RULE_TEXT, 'at least 12 characters, with an uppercase letter, a lowercase letter, a number and a symbol')
+    assert.deepEqual(localPasswordMissing('Password123!'), [])
+    assert.deepEqual(localPasswordMissing('my password!'), ['an uppercase letter', 'a number'])
   })
 
   it('live policy, valid password -> null', async () => {

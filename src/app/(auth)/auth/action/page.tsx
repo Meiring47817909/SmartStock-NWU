@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { PASSWORD_RULE_TEXT } from '@/lib/firebase/passwordRules'
 import {
   actionErrorMessage,
   applyEmailAction,
@@ -94,7 +95,7 @@ function ResetPasswordForm({ oobCode, email, onDone }: { oobCode: string; email:
   return (
     <>
       <Heading>Choose a new password</Heading>
-      <p className="mb-5 text-center text-sm text-muted-foreground">For {email}. Use 6 to 20 characters.</p>
+      <p className="mb-5 text-center text-sm text-muted-foreground">For {email}. Use {PASSWORD_RULE_TEXT}.</p>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="grid gap-1.5">
           <Label htmlFor="new-password">New password</Label>

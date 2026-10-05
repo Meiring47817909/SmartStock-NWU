@@ -8,17 +8,16 @@
 // src/app/api/staff/send-reset-email/route.ts and
 // src/app/(portal)/lend/profile/page.tsx.
 //
-// Mirrors the in-app rule already enforced in ChangePasswordCard on the
-// Profile page: 6-20 characters, no character-class requirements. The
-// composition flags below are set explicitly to false -- Identity
-// Platform's own API defaults an omitted flag to true (a stricter
-// "strong password" baseline) the first time ENFORCE is turned on for a
-// project, which is why an earlier run of this script against a fresh
-// project silently left uppercase + symbol requirements in place even
-// though only minLength/maxLength were specified here. Confirmed via a
-// live "password123" rejection: PASSWORD_DOES_NOT_MEET_REQUIREMENTS --
-// Missing [uppercase, non-alphanumeric] -- so those two must be pinned
-// to false, not just left out, to actually match the in-app rule.
+// Mirrors the in-app rule in src/lib/firebase/passwordRules.ts, which is
+// FR-002 of the Functional Specification: at least 12 characters, with an
+// uppercase letter, a lowercase letter, a number and a symbol. Every flag is
+// set explicitly (Identity Platform defaults an omitted flag on its own),
+// and maxLength is set to Firebase's own ceiling so the old 20-character cap
+// is lifted.
+//
+// forceUpgradeOnSignin stays false: existing accounts keep signing in with
+// their current password; the rule applies whenever a password is set or
+// changed (profile page, reset link, new staff login).
 //
 // Run once, deliberately, against the live project:
 //   node scripts/set-password-policy.mjs
@@ -53,13 +52,14 @@ console.log(`Setting password policy on live project: ${projectId}`)
 await auth.projectConfigManager().updateProjectConfig({
   passwordPolicyConfig: {
     enforcementState: 'ENFORCE',
+    forceUpgradeOnSignin: false,
     constraints: {
-      minLength: 6,
-      maxLength: 20,
-      requireLowercase: false,
-      requireUppercase: false,
-      requireNumeric: false,
-      requireNonAlphanumeric: false,
+      minLength: 12,
+      maxLength: 4096,
+      requireLowercase: true,
+      requireUppercase: true,
+      requireNumeric: true,
+      requireNonAlphanumeric: true,
     },
   },
 })

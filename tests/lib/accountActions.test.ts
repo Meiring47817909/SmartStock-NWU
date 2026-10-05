@@ -70,20 +70,20 @@ describe('account actions (/auth/action page helpers)', () => {
     assert.deepEqual(fb.calls, [])
   })
 
-  it('finishPasswordReset: too short / too long under the emulator -> rule message, nothing saved', async () => {
-    assert.equal(await A.finishPasswordReset('c1', 'abc', 'abc'), 'New password needs at least 6 characters.')
-    assert.equal(await A.finishPasswordReset('c1', 'x'.repeat(21), 'x'.repeat(21)), 'New password needs at most 20 characters.')
+  it('finishPasswordReset: below the FR-002 rule under the emulator -> rule message, nothing saved', async () => {
+    assert.equal(await A.finishPasswordReset('c1', 'Abc1!', 'Abc1!'), 'New password needs at least 12 characters.')
+    assert.equal(await A.finishPasswordReset('c1', 'password1234', 'password1234'), 'New password needs an uppercase letter, a symbol.')
     assert.deepEqual(fb.calls, [])
   })
 
   it('finishPasswordReset: valid -> confirmPasswordReset with the code and password, returns null', async () => {
-    assert.equal(await A.finishPasswordReset('c1', 'newpass1', 'newpass1'), null)
-    assert.deepEqual(fb.calls, [['confirmPasswordReset', 'c1', 'newpass1']])
+    assert.equal(await A.finishPasswordReset('c1', 'NewPass1234!', 'NewPass1234!'), null)
+    assert.deepEqual(fb.calls, [['confirmPasswordReset', 'c1', 'NewPass1234!']])
   })
 
   it('finishPasswordReset: Firebase errors propagate (expired link)', async () => {
     fb.error = 'auth/expired-action-code'
-    assert.equal((await rejects(A.finishPasswordReset('c1', 'newpass1', 'newpass1'))).code, 'auth/expired-action-code')
+    assert.equal((await rejects(A.finishPasswordReset('c1', 'NewPass1234!', 'NewPass1234!'))).code, 'auth/expired-action-code')
   })
 
   it('describeEmailAction: new and previous address from checkActionCode', async () => {
@@ -103,7 +103,7 @@ describe('account actions (/auth/action page helpers)', () => {
     assert.equal(A.actionErrorMessage({ code: 'auth/invalid-action-code' }), used)
     assert.equal(A.actionErrorMessage({ code: 'auth/user-disabled' }), 'This account has been disabled.')
     assert.equal(A.actionErrorMessage({ code: 'auth/user-not-found' }), 'This account no longer exists.')
-    assert.equal(A.actionErrorMessage({ code: 'auth/weak-password' }), 'That password is too weak. Use 6 to 20 characters.')
+    assert.equal(A.actionErrorMessage({ code: 'auth/weak-password' }), 'That password is too weak. Use at least 12 characters, with an uppercase letter, a lowercase letter, a number and a symbol.')
     assert.equal(A.actionErrorMessage({ code: 'auth/email-already-in-use' }), 'That email address is already used by another account.')
     assert.equal(A.actionErrorMessage(new Error('boom')), 'Something went wrong. Please try again.')
   })
