@@ -209,7 +209,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Same SmartStock-NWU lockup as the login page and the admin
+            {/* Same SmartStock lockup as the login page and the admin
                 sidebar, swapped in for the old plain-text "NWU Lending"
                 wordmark — fixed height/auto width so it sits naturally in
                 this horizontal header, next to the nav buttons, rather than
@@ -221,8 +221,8 @@ function PortalShell({ children }: { children: React.ReactNode }) {
                   icon -- see public/smartstock-nwu-icon.svg). */}
               <Image
                 src="/smartstock-nwu-logo.svg"
-                alt="SmartStock-NWU"
-                width={460}
+                alt="SmartStock"
+                width={360}
                 height={120}
                 priority
                 unoptimized
@@ -230,7 +230,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
               />
               <Image
                 src="/smartstock-nwu-icon.svg"
-                alt="SmartStock-NWU"
+                alt="SmartStock"
                 width={100}
                 height={100}
                 priority
@@ -347,10 +347,10 @@ function PortalShell({ children }: { children: React.ReactNode }) {
         <div className={`mx-auto flex flex-col items-center justify-between gap-4 px-5 sm:px-6 md:px-8 lg:px-10 xl:px-14 py-8 sm:flex-row ${CONTENT_MAX_WIDTH}`}>
           <div className="flex flex-col items-center gap-2 text-center sm:flex-row sm:gap-4 sm:text-left">
             <div className="flex items-center gap-2">
-              <span className="text-base font-semibold text-foreground">SmartStock-NWU</span>
+              <span className="text-base font-semibold text-foreground">SmartStock</span>
               {/* NWU's own acronym wordmark (supplied by the user from NWU's
                   brand assets), cropped to its visible artwork so it sits at
-                  a natural size next to the SmartStock-NWU text. */}
+                  a natural size next to the SmartStock text. */}
               <Image
                 src="/nwu-wordmark.png"
                 alt="North-West University"

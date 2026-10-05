@@ -40,12 +40,12 @@ function Shell({ children }: { children: React.ReactNode }) {
         <CardContent className="p-6">
           <Image
             src="/smartstock-nwu-logo.svg"
-            alt="SmartStock-NWU"
-            width={460}
+            alt="SmartStock"
+            width={360}
             height={120}
             priority
             unoptimized
-            className="mx-auto mb-6 h-auto w-[240px]"
+            className="mx-auto mb-6 h-auto w-[188px]"
           />
           {children}
         </CardContent>

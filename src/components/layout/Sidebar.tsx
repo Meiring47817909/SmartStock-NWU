@@ -201,7 +201,7 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
               colours, recoloured text/hairlines) rather than the plain
               logo used on the login page and the lending portal header,
               both of which sit on light backgrounds. */}
-          <div className="max-w-[150px] group-data-[collapsible=icon]:hidden lg:max-w-none">
+          <div className="max-w-[117px] group-data-[collapsible=icon]:hidden lg:max-w-[176px]">
             {/* Scales to the header's full width at lg and up (SidebarHeader
                 is a flex-col, so this wrapper stretches to it); capped
                 narrower below that so its aspect-ratio-driven height doesn't
@@ -210,8 +210,8 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
                 ratio to size height from. */}
             <Image
               src="/smartstock-nwu-logo-light.svg"
-              alt="SmartStock-NWU"
-              width={460}
+              alt="SmartStock"
+              width={360}
               height={120}
               priority
               unoptimized
@@ -225,7 +225,7 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
           <div className="hidden justify-center group-data-[collapsible=icon]:flex">
             <Image
               src="/smartstock-nwu-icon.svg"
-              alt="SmartStock-NWU"
+              alt="SmartStock"
               width={100}
               height={100}
               priority
