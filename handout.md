@@ -153,6 +153,23 @@ Tip: naming the production database something other than `smartstock` (for examp
 
 Then redeploy; these values are read when the server starts, so a redeploy is needed for a changed value to take effect. Check how Vercel will reach Cloud SQL first (see the pool note below). After the redeploy, sign in and open the Dashboard and Products pages as a smoke test, then lift the write freeze on the new app and keep the old one read-only (or off) for a while.
 
+## Loading the demo data onto the live site
+
+`seed:demo` can fill Cloud SQL instead of the local database, replacing everything in it (products, staff, requests, audit log) with the demo data: the 20 NWU staff, Selouna Visser as administrator, Meiring as portal borrower, the scenario products and Bostik Glu Dots.
+
+- Logins: it only looks up the existing live Firebase accounts by email (Selouna's and Meiring's) and links them. It never creates an account and never changes a password; if either account is missing it stops before writing anything (create it in the Firebase console under Authentication, Add user, then run again).
+- Photos: the product photos are uploaded to the live Storage bucket (`NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` in `.env.local`) as new files. Firestore is not touched.
+- It refuses to run if any emulator variable is set, and `--reset=` must name the target database exactly.
+
+First make an on-demand backup in the Cloud SQL console (Backups, Create backup). Then, with the Auth Proxy running on port 5433:
+```powershell
+$env:DATABASE_URL = 'postgres://smartstock_app:<password>@127.0.0.1:5433/smartstock'
+npm.cmd run seed:demo -- --target live --reset=smartstock
+npm run db:check
+Remove-Item Env:DATABASE_URL
+```
+Sign in on the live site with each account's own password (not `password123`).
+
 ## PostgreSQL pool on Vercel
 
 `src/server/db/client.ts` creates one `pg` pool per server process with `DATABASE_POOL_MAX` connections (default 5) and a 10-second idle timeout, so idle connections are closed when an instance goes quiet. On Vercel every running function instance is its own process with its own pool, so the number of database connections is roughly (instances running at the same time) x (up to `DATABASE_POOL_MAX`). A burst of traffic that starts many instances can therefore open many connections at once, and Cloud SQL accepts only as many as its `max_connections` allows. Things to check, none of which are verified here:

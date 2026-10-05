@@ -67,6 +67,7 @@ import {
   type SeedBucket,
 } from './context'
 import { assertResettableDatabase } from '../dbGuard'
+import { castLoginEmails, createLiveAuthAndBucket, liveSeedEnvProblem, liveStorageBucket, loadAdminCredentials, missingLiveLogins } from './live'
 import type { Caller } from '@/server/context'
 import { closeDb, getDb, type Db } from '@/server/db/client'
 import { newId } from '@/server/db/ids'
@@ -1370,30 +1371,102 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
 // ---------------------------------------------------------------------------
 // Command line (shared with seed:demo, which passes its own seed function)
 // ---------------------------------------------------------------------------
-export async function runSeedCli(seed: (deps: SeedDeps) => Promise<SeedSummary>): Promise<void> {
-  const args = process.argv.slice(2)
-  const url = process.env.DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/smartstock'
+export interface SeedCliOptions {
+  argv?: string[]
+  env?: Record<string, string | undefined>
+  log?: (line: string) => void
+  /** Live Firebase wiring (tests pass a fake; the default loads firebase-admin with the .env.local credentials). */
+  createLive?: () => Promise<{ auth: SeedAuth; bucket: SeedBucket; label: string }>
+}
+
+/** `--target live` / `--target=live`; anything else but `local` is refused. */
+export function parseSeedTarget(args: string[]): 'local' | 'live' {
+  const i = args.findIndex((a) => a === '--target' || a.startsWith('--target='))
+  if (i === -1) return 'local'
+  const value = args[i].includes('=') ? args[i].slice('--target='.length) : args[i + 1]
+  if (value === 'live' || value === 'local') return value
+  throw new Error(`Unknown --target "${value ?? ''}": use --target live (or leave it out for the local emulators).`)
+}
+
+/** null: no --reset. database null: a bare --reset (fine locally, refused for a live run). */
+export function parseSeedReset(args: string[]): { database: string | null } | null {
+  const arg = args.find((a) => a === '--reset' || a.startsWith('--reset='))
+  if (!arg) return null
+  return { database: arg === '--reset' ? null : arg.slice('--reset='.length) || null }
+}
+
+export async function runSeedCli(
+  seed: (deps: SeedDeps) => Promise<SeedSummary>,
+  cast: SeedCast,
+  options: SeedCliOptions = {},
+): Promise<void> {
+  const args = options.argv ?? process.argv.slice(2)
+  const env = options.env ?? process.env
+  const log = options.log ?? ((line: string) => console.log(line))
+  const target = parseSeedTarget(args)
+  const live = target === 'live'
+  const reset = parseSeedReset(args)
+  const dryAuth = args.includes('--dry-auth')
   const allowNonLocalDb = args.includes('--allow-non-local-db')
+
+  if (live) {
+    if (dryAuth) throw new Error('--dry-auth and --target live cannot be combined.')
+    const problem = liveSeedEnvProblem(env)
+    if (problem) throw new Error(problem)
+    if (!env.DATABASE_URL) throw new Error('A live run needs DATABASE_URL set to the target database (Cloud SQL through the Auth Proxy).')
+    if (reset && reset.database === null) {
+      throw new Error('A live run needs the database named: --reset=<database> (e.g. --reset=smartstock), not a bare --reset.')
+    }
+  }
+  const url = env.DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/smartstock'
   assertLocalDatabaseUrl(url, allowNonLocalDb)
 
-  // Emulator hosts default to the standard local ports, like the old seed; a different local host can be set beforehand.
-  process.env.FIREBASE_AUTH_EMULATOR_HOST ||= '127.0.0.1:9099'
-  process.env.FIREBASE_STORAGE_EMULATOR_HOST ||= '127.0.0.1:9199'
-
-  const dryAuth = args.includes('--dry-auth')
-  const { auth, bucket } = dryAuth ? createFakeAuthAndBucket() : await createEmulatorAuthAndBucket()
-  if (dryAuth) console.log('--dry-auth: Auth and Storage are in-memory stand-ins; no logins or photos exist outside this run.\n')
+  let auth: SeedAuth
+  let bucket: SeedBucket
+  if (live) {
+    const wired = await (options.createLive ?? (() => createLiveAuthAndBucket(loadAdminCredentials(env), liveStorageBucket(env))))()
+    // Every login the cast links must already exist on the live project: checked before anything is written.
+    const missing = await missingLiveLogins(wired.auth, castLoginEmails(cast))
+    if (missing.length > 0) {
+      throw new Error(
+        `No live Firebase login for: ${missing.join(', ')}. A live run never creates accounts. ` +
+          'Create each one first (Firebase console -> Authentication -> Add user), then run again. Nothing was written.',
+      )
+    }
+    ;({ auth, bucket } = wired)
+    log(`${wired.label}\n`)
+  } else {
+    // Emulator hosts default to the standard local ports, like the old seed; a different local host can be set beforehand.
+    process.env.FIREBASE_AUTH_EMULATOR_HOST ||= '127.0.0.1:9099'
+    process.env.FIREBASE_STORAGE_EMULATOR_HOST ||= '127.0.0.1:9199'
+    ;({ auth, bucket } = dryAuth ? createFakeAuthAndBucket() : await createEmulatorAuthAndBucket())
+    if (dryAuth) log('--dry-auth: Auth and Storage are in-memory stand-ins; no logins or photos exist outside this run.\n')
+  }
 
   const db = getDb(url)
   try {
-    if (args.includes('--reset')) {
+    if (live) {
+      const { rows } = await db.$client.query('select current_database() as name, inet_server_addr()::text as addr')
+      const name = String(rows[0]?.name ?? '')
+      log(`Target database: "${name}" on ${rows[0]?.addr ?? 'a local socket'}`)
+      if (reset && reset.database !== name) {
+        throw new Error(`--reset=${reset.database} does not match the target database "${name}". Nothing was written.`)
+      }
+    }
+    if (reset) {
       // The host check above cannot tell Cloud SQL behind the Auth Proxy from the local database; the name can.
       await assertResettableDatabase(db.$client, args.includes('--force'), 'clear (--reset)')
       await resetAppTables(db)
     }
     await assertEmptyDatabase(db)
     const summary = await seed({ db, auth, bucket, allowNonLocalDb })
-    for (const line of summaryLines(summary)) console.log(line)
+    const shown = live ? { ...summary, password: '(their own live password, unchanged)' } : summary
+    for (const line of summaryLines(shown)) log(line)
+    if (live) {
+      log('')
+      log('LIVE: the logins above are the existing live Firebase accounts, linked by email; no account or password was changed.')
+      log('      Sign in on the live site, not localhost. Product photos were uploaded to the live Storage bucket.')
+    }
   } finally {
     await closeDb(url)
   }
@@ -1401,7 +1474,7 @@ export async function runSeedCli(seed: (deps: SeedDeps) => Promise<SeedSummary>)
 
 // Run only when started as a script (not when a test imports this file).
 if (/[\\/]seed[\\/]comprehensive\.ts$/.test(process.argv[1] ?? '')) {
-  runSeedCli(seedComprehensive)
+  runSeedCli(seedComprehensive, COMPREHENSIVE_CAST)
     .then(() => process.exit(0))
     .catch((err) => {
       console.error('Seed failed:', err)

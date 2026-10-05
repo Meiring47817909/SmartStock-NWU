@@ -139,7 +139,7 @@ export function seedDemo(deps: SeedDemoDeps): Promise<SeedSummary> {
 
 // Run only when started as a script (not when a test imports this file).
 if (/[\\/]seed[\\/]demo\.ts$/.test(process.argv[1] ?? '')) {
-  runSeedCli(seedDemo)
+  runSeedCli(seedDemo, DEMO_CAST)
     .then(() => process.exit(0))
     .catch((err) => {
       console.error('Seed failed:', err)

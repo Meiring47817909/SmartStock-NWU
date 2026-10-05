@@ -27,16 +27,14 @@
 //
 // DATABASE_URL is taken from the environment only (never from .env.local), defaulting to the local development database.
 // Server modules import 'server-only': run with `tsx --conditions=react-server` (the npm script does).
-import { existsSync, readFileSync } from 'node:fs'
 import net from 'node:net'
-import path from 'node:path'
-import { parseEnv } from 'node:util'
 import { sql } from 'drizzle-orm'
 import { parse as parseConnectionString } from 'pg-connection-string'
 import { closeDb, getDb } from '@/server/db/client'
 import { planImport, readFirestoreSnapshot, type FirestoreSource, type ImportPlan } from '@/server/import/mapFirestore'
 import { ImportRefusedError, runImport } from '@/server/import/runImport'
 import { databaseHosts, isLocalHost } from './seed/context'
+import { loadAdminCredentials } from './seed/live'
 
 export const EMULATOR_PROJECT_ID = 'demo-smartstock-nwu'
 export const DEFAULT_EMULATOR_HOST = '127.0.0.1:8081' // the port firebase.json used to give the Firestore emulator; no longer configured
@@ -115,21 +113,6 @@ export function liveEnvProblem(env: Record<string, string | undefined>): string 
     : null
 }
 
-/** FIREBASE_ADMIN_* from the environment, else from .env.local (the environment wins, as in Next.js). */
-function adminCredentials(): { projectId: string; clientEmail: string; privateKey: string } {
-  const file = path.resolve(process.cwd(), '.env.local')
-  const fromFile = existsSync(file) ? parseEnv(readFileSync(file, 'utf8')) : {}
-  const get = (name: string) => process.env[name] || fromFile[name]
-  const projectId = get('FIREBASE_ADMIN_PROJECT_ID')
-  const clientEmail = get('FIREBASE_ADMIN_CLIENT_EMAIL')
-  // Same unescaping as src/lib/firebase/admin.ts.
-  const privateKey = get('FIREBASE_ADMIN_PRIVATE_KEY')?.replace(/\\n/g, '\n')
-  if (!projectId || !clientEmail || !privateKey) {
-    throw new Error('Missing Firebase Admin credentials. Set FIREBASE_ADMIN_PROJECT_ID, FIREBASE_ADMIN_CLIENT_EMAIL and FIREBASE_ADMIN_PRIVATE_KEY in .env.local.')
-  }
-  return { projectId, clientEmail, privateKey }
-}
-
 function reachable(hostPort: string, timeoutMs = 3000): Promise<boolean> {
   const m = /^(?:\[(.*)\]|([^:]*))(?::(\d+))?$/.exec(hostPort.replace(/^\w+:\/\//, '').replace(/\/.*$/, ''))
   const host = (m?.[1] ?? m?.[2]) || '127.0.0.1'
@@ -161,7 +144,7 @@ async function openSource(kind: CliArgs['source']): Promise<{ source: FirestoreS
   }
   const problem = liveEnvProblem(process.env)
   if (problem) throw new Error(problem)
-  const creds = adminCredentials()
+  const creds = loadAdminCredentials()
   const app = initializeApp({ credential: cert(creds) }, 'firestore-import')
   return { source: await readFirestoreSnapshot(getFirestore(app)), label: `LIVE Firestore, project ${creds.projectId} (read-only)` }
 }
