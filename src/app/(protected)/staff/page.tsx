@@ -141,6 +141,10 @@ type FormData = {
   department: string; card_uid: string
 }
 
+function staffDisplayName(s: { full_name?: string | null; name?: string | null; surname?: string | null }): string {
+  return s.full_name || [s.name, s.surname].filter(Boolean).join(' ') || 'This staff member'
+}
+
 const EMPTY_FORM: FormData = { name: '', surname: '', email: '', department: '', card_uid: '' }
 
 export default function StaffPage() {
@@ -179,6 +183,9 @@ export default function StaffPage() {
   const [resolving, setResolving] = useState<{ staffId: string; staffName: string; item: LentItem } | null>(null)
   const [resolveReason, setResolveReason] = useState('')
   const [resolveBusy, setResolveBusy] = useState(false)
+  // NFR-010: Deactivate/Activate asks first; this is the staff member awaiting confirmation.
+  const [confirmingToggle, setConfirmingToggle] = useState<StaffMember | null>(null)
+  const [toggleBusy, setToggleBusy] = useState(false)
   const [sorting, setSorting] = useState<SortingState>([])
 
   async function load() {
@@ -307,15 +314,23 @@ export default function StaffPage() {
     setSaving(false)
   }
 
+  // Runs once the confirmation dialog is accepted.
   async function toggleActive(s: StaffMember) {
+    const who = staffDisplayName(s)
+    setToggleBusy(true)
     try {
       // The server writes the activate/deactivate audit entry, including who
       // this actually was (not just the boolean flip) — audit-log/page.tsx's
       // StaffStatusSummary reads name/surname/email straight off `after`.
       await setStaffActive(s.id.toString(), !s.is_active)
+      toast.success(`${who} ${s.is_active ? 'deactivated' : 'activated'}.`)
+      setConfirmingToggle(null)
       load()
     } catch (e) {
       console.error(e)
+      toast.error(`Could not ${s.is_active ? 'deactivate' : 'activate'} ${who}. ${e instanceof Error ? e.message : ''}`)
+    } finally {
+      setToggleBusy(false)
     }
   }
 
@@ -522,7 +537,7 @@ export default function StaffPage() {
                       className={s.is_active
                         ? 'h-7 rounded-lg border-[#D5C6E0] bg-[#F0EBF5] px-3 text-sm font-semibold text-red-600 hover:bg-[#E4D9EE] hover:text-red-700'
                         : 'h-7 rounded-lg border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800'}
-                      onClick={() => toggleActive(s)}
+                      onClick={() => setConfirmingToggle(s)}
                     >
                       {s.is_active ? 'Deactivate' : 'Activate'}
                     </Button>
@@ -632,6 +647,40 @@ export default function StaffPage() {
               <Button type="submit" disabled={saving}>{saving ? 'Saving…' : editing ? 'Save Changes' : 'Add Staff'}</Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* NFR-010: explicit confirmation before a staff member is deactivated or activated. */}
+      <Dialog open={confirmingToggle !== null} onOpenChange={(open) => { if (!open && !toggleBusy) setConfirmingToggle(null) }}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>{confirmingToggle?.is_active ? 'Deactivate staff member?' : 'Activate staff member?'}</DialogTitle>
+            <DialogDescription>
+              {confirmingToggle && (
+                <>
+                  <strong className="text-foreground">{staffDisplayName(confirmingToggle)}</strong>
+                  {confirmingToggle.email ? ` (${confirmingToggle.email})` : ''}
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {confirmingToggle?.is_active
+              ? 'They will be marked Deactivated and no login email can be sent to them. Their record and history are kept, and you can activate them again at any time.'
+              : 'They will be marked Active again.'}
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmingToggle(null)} disabled={toggleBusy}>Cancel</Button>
+            <Button
+              variant={confirmingToggle?.is_active ? 'destructive' : 'default'}
+              disabled={toggleBusy}
+              onClick={() => { if (confirmingToggle) toggleActive(confirmingToggle) }}
+            >
+              {toggleBusy
+                ? (confirmingToggle?.is_active ? 'Deactivating…' : 'Activating…')
+                : (confirmingToggle?.is_active ? 'Deactivate' : 'Activate')}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
