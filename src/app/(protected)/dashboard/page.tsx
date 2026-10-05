@@ -19,6 +19,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
 import { Card, CardContent } from '@/components/ui/card'
+import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from '@/components/ui/carousel'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -283,16 +284,25 @@ export default function DashboardPage() {
         <p className="text-sm text-[#5B4F67]">NWU IT Store · Potchefstroom</p>
       </div>
 
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {statCards.map(c => (
-          <Card key={c.label} className="rounded-xl border border-[#E2D8E9] bg-white shadow-sm transition-shadow hover:shadow-md">
-            <CardContent>
-              <div className={`text-3xl font-extrabold ${c.className}`}>{c.value}</div>
-              <div className="mt-1 text-sm font-semibold text-muted-foreground">{c.label}</div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+      {/* The four summary cards stay on one row at every width: a swipeable
+          carousel that shows as many as fit (with the next one peeking in)
+          and all four from lg up, where the arrows are no longer needed. */}
+      <Carousel opts={{ align: 'start' }} className="mb-6">
+        <CarouselContent className="-ml-3 py-1">
+          {statCards.map(c => (
+            <CarouselItem key={c.label} className="basis-[46%] pl-3 sm:basis-1/3 lg:basis-1/4">
+              <Card className="h-full rounded-xl border border-[#E2D8E9] bg-white shadow-sm transition-shadow hover:shadow-md">
+                <CardContent>
+                  <div className={`text-3xl font-extrabold ${c.className}`}>{c.value}</div>
+                  <div className="mt-1 text-sm font-semibold text-muted-foreground">{c.label}</div>
+                </CardContent>
+              </Card>
+            </CarouselItem>
+          ))}
+        </CarouselContent>
+        <CarouselPrevious className="-left-3 bg-white shadow-md disabled:hidden lg:hidden" />
+        <CarouselNext className="-right-3 bg-white shadow-md disabled:hidden lg:hidden" />
+      </Carousel>
 
       {/* One table visible at a time, tab-selected — same pattern as the
           Reports page — instead of four permanently-visible cards competing
