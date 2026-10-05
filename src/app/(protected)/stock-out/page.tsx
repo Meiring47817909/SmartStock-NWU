@@ -102,6 +102,9 @@ export default function StockOutPage() {
     const GAP = 80, MIN = 6
     function onKey(e: KeyboardEvent) {
       if (e.ctrlKey || e.altKey || e.metaKey) return
+      // Browser autofill (e.g. Chrome filling a saved value) fires a keydown
+      // with no key at all; that is never scanner input.
+      if (typeof e.key !== 'string') return
       if (e.key.length > 1 && e.key !== 'Enter') return
       const tag = (document.activeElement as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
