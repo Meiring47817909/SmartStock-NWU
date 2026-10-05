@@ -179,10 +179,10 @@ function EmailActionConfirm({
       <Heading>{restoring ? 'Restore your login email' : 'Confirm your new email'}</Heading>
       <p className="mb-5 text-center text-sm text-muted-foreground">
         {restoring
-          ? `Change your SmartStock NWU login email back to ${email ?? 'your previous address'}?`
+          ? `Change your SmartStock login email back to ${email ?? 'your previous address'}?`
           : previousEmail
-            ? `Change your SmartStock NWU login email from ${previousEmail} to ${email ?? 'the new address'}?`
-            : `Change your SmartStock NWU login email to ${email ?? 'the new address'}?`}
+            ? `Change your SmartStock login email from ${previousEmail} to ${email ?? 'the new address'}?`
+            : `Change your SmartStock login email to ${email ?? 'the new address'}?`}
       </p>
       {error && (
         <Alert variant="destructive" className="mb-4">

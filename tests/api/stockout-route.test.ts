@@ -285,7 +285,7 @@ describe('POST /api/notifications/stock-out', () => {
     await call({ transactionId: 't1' })
     expect(sent).toHaveLength(2)
     for (const m of sent) {
-      expect(m.from).toMatchObject({ value: [{ address: 'system@nwu.test', name: 'SmartStock NWU' }] })
+      expect(m.from).toMatchObject({ value: [{ address: 'system@nwu.test', name: 'SmartStock' }] })
     }
     await setup(withAdmin())
     await call({ transactionId: 't1' })

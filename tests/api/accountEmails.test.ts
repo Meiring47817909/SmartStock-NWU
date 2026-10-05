@@ -117,7 +117,7 @@ describe('templates', () => {
   it('passwordResetEmail: subject, button, plain text carries the link, no name needed', () => {
     const link = 'http://127.0.0.1:9099/emulator/action?mode=resetPassword&oobCode=abc'
     const e = passwordResetEmail({ link })
-    expect(e.subject).toBe('Reset your SmartStock NWU password')
+    expect(e.subject).toBe('Reset your SmartStock password')
     expect(e.html).toContain('Reset password')
     expect(e.html).toContain(link.replace(/&/g, '&amp;'))
     expect(e.text).toContain(link)
@@ -127,7 +127,7 @@ describe('templates', () => {
   it('changeEmailEmail: names the new address, escapes it, carries the link', () => {
     const link = 'http://127.0.0.1:9099/emulator/action?mode=verifyAndChangeEmail&oobCode=x'
     const e = changeEmailEmail({ newEmail: 'a<b>@x.com', link })
-    expect(e.subject).toBe('Confirm your new SmartStock NWU email')
+    expect(e.subject).toBe('Confirm your new SmartStock email')
     expect(e.text).toContain('a<b>@x.com')
     expect(e.text).toContain(link)
     expect(e.html).toContain('a&lt;b&gt;@x.com')
@@ -160,7 +160,7 @@ describe('forgot-password', () => {
     const m = sent()[0]
     expect(addr(m.to)).toBe('jessica@example.com')
     expect(addr(m.from)).toBe(SYSTEM)
-    expect(m.subject).toBe('Reset your SmartStock NWU password')
+    expect(m.subject).toBe('Reset your SmartStock password')
     expect(m.text).toContain('http://localhost:3000/auth/action?mode=resetPassword&oobCode=RESET-jessica%40example.com')
     expect(m.text, 'link must point at the app, not the emulator').not.toContain(':9099')
   })
@@ -269,7 +269,7 @@ describe('change-email', () => {
     expect((m.to as { value: unknown[] }).value).toHaveLength(1)
     expect(addr(m.to)).toBe('new.address@x.com')
     expect(addr(m.from)).toBe(SYSTEM)
-    expect(m.subject).toBe('Confirm your new SmartStock NWU email')
+    expect(m.subject).toBe('Confirm your new SmartStock email')
     expect(m.text).toContain('new.address@x.com')
     expect(m.text).toContain('http://localhost:3000/auth/action?mode=verifyAndChangeEmail&oobCode=CHANGE-new.address%40x.com')
     expect(m.text, 'link must point at the app, not the emulator').not.toContain(':9099')

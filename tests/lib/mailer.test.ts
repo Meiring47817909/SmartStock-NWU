@@ -19,7 +19,7 @@ describe('mailer', () => {
 
   it('resolveSmtpConfig defaults', () => {
     assert.deepEqual(resolveSmtpConfig(env({ MAIL_TRANSPORT: 'smtp' })), {
-      host: '127.0.0.1', port: 1025, from: 'SmartStock NWU <no-reply@smartstock.local>', security: 'none',
+      host: '127.0.0.1', port: 1025, from: 'SmartStock <no-reply@smartstock.local>', security: 'none',
     })
   })
 
@@ -78,9 +78,9 @@ describe('mailer', () => {
     })
     const port = await listen(sink)
     try {
-      assert.equal(await sendMail({ ...msg, from: 'SmartStock NWU <selouna@nwu.test>' }, env({ MAIL_TRANSPORT: 'smtp', SMTP_PORT: String(port), MAIL_FROM: 'Other <other@x.test>' })), true)
+      assert.equal(await sendMail({ ...msg, from: 'SmartStock <selouna@nwu.test>' }, env({ MAIL_TRANSPORT: 'smtp', SMTP_PORT: String(port), MAIL_FROM: 'Other <other@x.test>' })), true)
       assert.deepEqual(froms, ['selouna@nwu.test'])
-      assert.ok(bodies[0].includes('From: SmartStock NWU <selouna@nwu.test>'), bodies[0].slice(0, 300))
+      assert.ok(bodies[0].includes('From: SmartStock <selouna@nwu.test>'), bodies[0].slice(0, 300))
       bodies.length = 0; froms.length = 0
       assert.equal(await sendMail(msg, env({ MAIL_TRANSPORT: 'smtp', SMTP_PORT: String(port) })), true)
       assert.deepEqual(froms, ['no-reply@smartstock.local'])

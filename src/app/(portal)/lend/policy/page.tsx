@@ -34,7 +34,7 @@ export default function LendingPolicyPage() {
           </h1>
 
           <p className="mt-4 text-sm text-muted-foreground">
-            This page covers how borrowing works through the SmartStock-NWU lending portal —
+            This page covers how borrowing works through the SmartStock lending portal —
             what you can request, how approval works, and what happens at pickup. It applies to
             every loan request submitted through this portal.
           </p>
@@ -48,7 +48,7 @@ export default function LendingPolicyPage() {
 
           <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">2. Who Can Borrow</h2>
           <p className="mb-4 text-sm text-muted-foreground">
-            Only NWU staff members with a linked SmartStock-NWU account can submit loan requests.
+            Only NWU staff members with a linked SmartStock account can submit loan requests.
             If you can sign in but see a message that your account isn&apos;t linked to a staff
             record, email the address under Enquiries below to have it set up.
           </p>

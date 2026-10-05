@@ -212,7 +212,7 @@ export default function NotificationSettingsPage() {
             <CardContent>
               <form onSubmit={handleSaveSystemEmail} className="flex flex-col gap-2">
                 <p className="text-sm text-[#5B4F67]">
-                  The address SmartStock NWU sends every email from — loan request emails, Stock Out
+                  The address SmartStock sends every email from — loan request emails, Stock Out
                   confirmations and staff login emails.
                 </p>
                 <div className="flex items-end gap-3">

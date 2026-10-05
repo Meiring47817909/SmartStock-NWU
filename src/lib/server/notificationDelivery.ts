@@ -38,7 +38,7 @@ export async function adminInboxEmail(db: Db | Tx = getRouteDb()): Promise<strin
 }
 
 // The saved system sending address becomes the From header of every email, shown as
-// "SmartStock NWU <address>". Anything that is not a plain address (angle
+// "SmartStock <address>". Anything that is not a plain address (angle
 // brackets, quotes, whitespace, commas) is ignored so it can never break or
 // inject into the header; the mailer then falls back to MAIL_FROM.
 const SAFE_ADDRESS = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/
@@ -51,7 +51,7 @@ export function safeAddress(address: unknown): string | undefined {
 
 export function fromHeaderFor(address: unknown): string | undefined {
   const safe = safeAddress(address)
-  return safe ? `SmartStock NWU <${safe}>` : undefined
+  return safe ? `SmartStock <${safe}>` : undefined
 }
 
 // Read from its own field, never from the administrator inbox address.

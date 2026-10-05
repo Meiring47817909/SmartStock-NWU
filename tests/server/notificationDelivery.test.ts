@@ -218,9 +218,9 @@ describe('settings-backed helpers', () => {
     expect(await adminInboxEmail()).toBe('')
   })
 
-  it('fromHeaderFor: a valid address becomes "SmartStock NWU <address>"; anything unsafe or missing -> undefined', () => {
-    expect(fromHeaderFor('selouna@nwu.test')).toBe('SmartStock NWU <selouna@nwu.test>')
-    expect(fromHeaderFor('  selouna@nwu.test  ')).toBe('SmartStock NWU <selouna@nwu.test>')
+  it('fromHeaderFor: a valid address becomes "SmartStock <address>"; anything unsafe or missing -> undefined', () => {
+    expect(fromHeaderFor('selouna@nwu.test')).toBe('SmartStock <selouna@nwu.test>')
+    expect(fromHeaderFor('  selouna@nwu.test  ')).toBe('SmartStock <selouna@nwu.test>')
     for (const bad of ['', '   ', undefined, null, 5, 'not an email', 'a<b@c.test', 'a b@c.test', 'x@y', 'a@b.test>\r\nBcc: z@z.test', '"x"@c.test']) {
       expect(fromHeaderFor(bad), String(bad)).toBeUndefined()
     }
@@ -228,7 +228,7 @@ describe('settings-backed helpers', () => {
 
   it('systemFromAddress reads the saved system address (not the admin inbox); unset -> undefined', async () => {
     await putNotificationSettings(db, { system_from_email: ' system@nwu.test ', admin_notification_email: 'selouna@nwu.test' })
-    expect(await systemFromAddress()).toBe('SmartStock NWU <system@nwu.test>')
+    expect(await systemFromAddress()).toBe('SmartStock <system@nwu.test>')
     await putNotificationSettings(db, { admin_notification_email: 'selouna@nwu.test' })
     expect(await systemFromAddress()).toBeUndefined()
     await putNotificationSettings(db, null)
@@ -239,7 +239,7 @@ describe('settings-backed helpers', () => {
     await putNotificationSettings(db, { system_from_email: 'system@nwu.test', admin_notification_email: 'selouna@nwu.test' })
     await deliver(opts())
     expect((sent()[0].to as { value: { address: string }[] }).value[0].address).toBe('jessica@example.com')
-    expect(sent()[0].from).toMatchObject({ value: [{ address: 'system@nwu.test', name: 'SmartStock NWU' }] })
+    expect(sent()[0].from).toMatchObject({ value: [{ address: 'system@nwu.test', name: 'SmartStock' }] })
 
     sink.sent.length = 0
     await putNotificationSettings(db, { admin_notification_email: 'selouna@nwu.test' })

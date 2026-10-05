@@ -1,6 +1,6 @@
 import 'server-only'
 
-// Pure email templates: one shared SmartStock NWU layout (HTML + plain text)
+// Pure email templates: one shared SmartStock layout (HTML + plain text)
 // and the emails built on it. Every interpolated value is HTML-escaped; styles
 // are inline because mail clients ignore stylesheets.
 
@@ -16,7 +16,7 @@ export interface StockOutEmailLine {
 }
 
 const PURPLE = '#8046B5'
-const DEFAULT_FOOTER = 'Sent by SmartStock NWU'
+const DEFAULT_FOOTER = 'Sent by SmartStock'
 
 function escapeHtml(value: string): string {
   return value
@@ -74,7 +74,7 @@ export function renderEmailLayout(opts: {
     `<!doctype html><html><body style="margin:0;padding:24px;background:#f4f1f8;font-family:Arial,Helvetica,sans-serif">` +
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">` +
     `<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden">` +
-    `<tr><td style="background:${PURPLE};padding:16px 24px;color:#ffffff;font-size:18px;font-weight:bold">SmartStock NWU</td></tr>` +
+    `<tr><td style="background:${PURPLE};padding:16px 24px;color:#ffffff;font-size:18px;font-weight:bold">SmartStock</td></tr>` +
     `<tr><td style="padding:24px"><h1 style="margin:0 0 16px;font-size:20px;color:#1a1a1a">${escapeHtml(opts.heading)}</h1>` +
     `${paragraphsHtml}${itemsHtml}${buttonHtml}</td></tr>` +
     `<tr><td style="padding:16px 24px;font-size:12px;color:#6b6b6b;border-top:1px solid #eeeeee">${escapeHtml(footer)}</td></tr>` +
@@ -93,12 +93,12 @@ export function loginEmail(input: { name: string; link: string }): RenderedEmail
     heading: 'Set up your lending portal login',
     paragraphs: [
       `Hi ${input.name},`,
-      'An administrator has set up your SmartStock NWU lending portal login. Use the button below to choose your password.',
+      'An administrator has set up your SmartStock lending portal login. Use the button below to choose your password.',
       "If you weren't expecting this email, you can ignore it.",
     ],
     button: { label: 'Set your password', url: input.link },
   })
-  return { subject: 'Set your SmartStock NWU password', html, text }
+  return { subject: 'Set your SmartStock password', html, text }
 }
 
 export function stockOutConfirmationEmail(input: {
@@ -362,23 +362,23 @@ export function passwordResetEmail(input: { link: string }): RenderedEmail {
   const { html, text } = renderEmailLayout({
     heading: 'Reset your password',
     paragraphs: [
-      'We received a request to reset the password for your SmartStock NWU account. Use the button below to choose a new password.',
+      'We received a request to reset the password for your SmartStock account. Use the button below to choose a new password.',
       "If you didn't ask for this, you can ignore this email. Your password won't change.",
     ],
     button: { label: 'Reset password', url: input.link },
   })
-  return { subject: 'Reset your SmartStock NWU password', html, text }
+  return { subject: 'Reset your SmartStock password', html, text }
 }
 
 export function changeEmailEmail(input: { newEmail: string; link: string }): RenderedEmail {
   const { html, text } = renderEmailLayout({
     heading: 'Confirm your new email address',
     paragraphs: [
-      `You asked to change the login email for your SmartStock NWU account to ${input.newEmail}.`,
+      `You asked to change the login email for your SmartStock account to ${input.newEmail}.`,
       'Use the button below to confirm. Your login email stays the same until you do.',
       "If you didn't ask for this, you can ignore this email.",
     ],
     button: { label: 'Confirm new email', url: input.link },
   })
-  return { subject: 'Confirm your new SmartStock NWU email', html, text }
+  return { subject: 'Confirm your new SmartStock email', html, text }
 }
