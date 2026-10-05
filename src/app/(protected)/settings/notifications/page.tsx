@@ -173,14 +173,15 @@ export default function NotificationSettingsPage() {
               <CardTitle>Admin notification address</CardTitle>
             </CardHeader>
             <CardContent>
+              {/* Save sits beside the address field; on phones it moves underneath. */}
               <form onSubmit={handleSaveEmail} className="flex flex-col gap-2">
                 <p className="text-sm text-[#5B4F67]">
                   Where the five &quot;Emails to Administrators&quot; below are delivered. Change this if
                   administration duties move to someone else — the toggles below stay as they are and will send
                   to the new address.
                 </p>
-                <div className="flex items-end gap-3">
-                  <div className="grid flex-1 gap-1.5">
+                <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-end">
+                  <div className="grid w-full flex-1 gap-1.5">
                     <Label htmlFor="admin-notification-email">Email address</Label>
                     <Input
                       id="admin-notification-email"
@@ -215,8 +216,8 @@ export default function NotificationSettingsPage() {
                   The address SmartStock sends every email from — loan request emails, Stock Out
                   confirmations and staff login emails.
                 </p>
-                <div className="flex items-end gap-3">
-                  <div className="grid flex-1 gap-1.5">
+                <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-end">
+                  <div className="grid w-full flex-1 gap-1.5">
                     <Label htmlFor="system-from-email">System sending address</Label>
                     <Input
                       id="system-from-email"
