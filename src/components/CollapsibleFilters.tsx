@@ -5,10 +5,12 @@ import { ChevronDown, SlidersHorizontal } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /**
- * The inside of a search/filter card. On phones (below md, 768px) the
- * filters fold away behind a one-line "Search & filters" bar that drops
- * them open when tapped, so the table below keeps the screen. From md up
- * the bar is hidden and the filters always show, exactly as before.
+ * The inside of a search/filter card. On phones the filters fold away
+ * behind a one-line "Search & filters" bar that drops them open when
+ * tapped, so the table below keeps the screen. On a "roomy" screen (at
+ * least 768px wide and 500px tall, see globals.css) the bar is hidden and
+ * the filters always show. A phone turned sideways is wide but short, so
+ * it keeps the bar.
  *
  * The card itself (border, background, padding) stays with the page; pass
  * the filters' own layout in `className` without a display class (this
@@ -40,7 +42,7 @@ export function CollapsibleFilters({
         aria-expanded={open}
         aria-controls={contentId}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-[#6C3D91]/50 md:hidden"
+        className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-[#6C3D91]/50 roomy:hidden"
       >
         <SlidersHorizontal className="size-4 shrink-0 text-[#6C3D91]" />
         <span className="shrink-0 text-sm font-semibold text-[#22162B]">{label}</span>
@@ -54,7 +56,7 @@ export function CollapsibleFilters({
         id={contentId}
         className={cn(
           open ? 'mt-3 flex animate-in fade-in-0 slide-in-from-top-1' : 'hidden',
-          'md:mt-0 md:flex md:animate-none',
+          'roomy:mt-0 roomy:flex roomy:animate-none',
           className,
         )}
       >

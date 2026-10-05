@@ -76,15 +76,17 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
   }, [user, profile, role, loading, router])
 
   if (loading || !user || !profile || role !== 'admin') {
-    return <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center' }}>Loading...</div>
+    return <div style={{ display: 'flex', height: '100dvh', alignItems: 'center', justifyContent: 'center' }}>Loading...</div>
   }
 
   return (
     <RoleProvider role={role}>
       <SidebarProvider
         style={{
-          minHeight: '100vh',
-          height: '100vh',
+          // dvh (the height actually visible right now), not vh: on phones
+          // 100vh includes the space behind the browser's address bar.
+          minHeight: '100dvh',
+          height: '100dvh',
           overflow: 'hidden',
           // Wider than the shadcn default (3rem) — see Sidebar.tsx's
           // SIDEBAR_ICON_BUTTON_CLASS/SIDEBAR_ICON_BADGE_CLASS, which size
@@ -97,7 +99,14 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
           {/* Below md the Sidebar is hidden; this horizontal bar replaces it. */}
           <AdminTopBar profile={profile as Profile | null} counts={navCounts} />
           <main className="flex flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6 md:px-8 md:py-6" style={{ background: pageBackground }}>
-            {children}
+            {/* Most pages fill the screen and let their table scroll inside
+                it. On a short screen (a phone turned sideways) that would
+                squeeze the table to nothing, so the page is never laid out
+                shorter than 640px: below that, the whole page scrolls
+                instead and the table keeps a usable height. */}
+            <div className="flex min-h-[640px] flex-1 flex-col">
+              {children}
+            </div>
           </main>
         </div>
       </SidebarProvider>

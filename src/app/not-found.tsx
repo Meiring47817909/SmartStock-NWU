@@ -53,7 +53,7 @@ export default function NotFound() {
 
   return (
     <RoleProvider role={role}>
-      <SidebarProvider style={{ minHeight: '100vh', height: '100vh', overflow: 'hidden' } as React.CSSProperties}>
+      <SidebarProvider style={{ minHeight: '100dvh', height: '100dvh', overflow: 'hidden' } as React.CSSProperties}>
         <Sidebar profile={profile as Profile | null} counts={navCounts} />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <AdminTopBar profile={profile as Profile | null} counts={navCounts} />

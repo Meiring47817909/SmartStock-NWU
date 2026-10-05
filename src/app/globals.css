@@ -5,6 +5,14 @@
  ---break---
  */
 @custom-variant dark (&:is(.dark *));
+/* A screen with room for always-open search/filter cards: at least 768px wide
+   AND 500px tall. A phone turned sideways is wide but short, so it keeps the
+   folded filter bar (see CollapsibleFilters). */
+@custom-variant roomy {
+  @media (min-width: 768px) and (min-height: 500px) {
+    @slot;
+  }
+}
 
 /*
  * NWU official brand palette — sourced from services.nwu.ac.za/drupal-nwu.
