@@ -369,7 +369,10 @@ export default function StockOutPage() {
       </div>
 
       {/* Step indicator — spread across the full card width, each bubble
-          clickable to jump back to a step already visited (see goToStep). */}
+          clickable to jump back to a step already visited (see goToStep).
+          Below sm the label sits under its number, so all three steps fit
+          a phone screen and line up with the card's edges instead of
+          pushing the page sideways. */}
       <div className="mb-6 flex w-full items-center">
         {STEPS.map((s, i) => {
           const done = stepIndex > i
@@ -386,7 +389,7 @@ export default function StockOutPage() {
                   // Every step keeps the same padding + (transparent) border so
                   // nothing shifts when a step becomes clickable; a clickable
                   // one gets a visible rectangular outline so it reads as a button.
-                  'flex shrink-0 items-center gap-2 rounded-lg border-2 px-3 py-1.5 transition-colors',
+                  'flex shrink-0 flex-col items-center gap-1 rounded-lg border-2 px-2 py-1 transition-colors sm:flex-row sm:gap-2 sm:px-3 sm:py-1.5',
                   clickable
                     ? 'cursor-pointer border-primary/50 bg-white/60 hover:border-primary hover:bg-primary/10'
                     : 'cursor-default border-transparent',
@@ -399,11 +402,11 @@ export default function StockOutPage() {
                 )}>
                   {i + 1}
                 </span>
-                <span className={cn('text-sm whitespace-nowrap', active ? 'font-semibold text-primary' : 'text-muted-foreground')}>
+                <span className={cn('text-xs whitespace-nowrap sm:text-sm', active ? 'font-semibold text-primary' : 'text-muted-foreground')}>
                   {STEP_LABELS[i]}
                 </span>
               </button>
-              {i < STEPS.length - 1 && <div className="mx-3 h-px flex-1 bg-border" />}
+              {i < STEPS.length - 1 && <div className="mx-1.5 h-px min-w-3 flex-1 bg-border sm:mx-3" />}
             </Fragment>
           )
         })}
