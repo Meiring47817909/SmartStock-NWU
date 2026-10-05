@@ -29,6 +29,7 @@ import {
   type BarcodeUnitCount,
 } from "@/lib/api/catalog";
 import { findQuantityReductionConflicts } from "@/lib/api/loanRequests";
+import { isLendableNow } from "@/lib/catalogRules";
 import {
   reservationStatusLabel,
   resolutionInstruction,
@@ -142,7 +143,8 @@ const PRODUCTS_COLUMNS = sortableColumnHelper.columns([
       PRODUCT_STATUS_RANK[stockStatusLabel(a.original.quantity_on_hand, a.original.reorder_threshold)] -
       PRODUCT_STATUS_RANK[stockStatusLabel(b.original.quantity_on_hand, b.original.reorder_threshold)],
   }),
-  sortableColumnHelper.accessor((p: any) => (p.available ?? true ? "Available" : "Unavailable"), {
+  // Available means lendable right now: switched on AND in stock (same rule as the product preview and the portal).
+  sortableColumnHelper.accessor((p: any) => (isLendableNow(p) ? "Available" : "Unavailable"), {
     id: "available",
     header: "Available",
     sortFn: "alphanumeric",
@@ -769,7 +771,7 @@ export default function ProductsPage() {
   const filteredProducts = products.filter(
     (p) =>
       statusFilter.has(stockStatusLabel(p.quantity_on_hand, p.reorder_threshold)) &&
-      availableFilter.has(p.available ?? true ? "Available" : "Unavailable"),
+      availableFilter.has(isLendableNow(p) ? "Available" : "Unavailable"),
   );
 
   const table = useTable({
@@ -971,8 +973,8 @@ export default function ProductsPage() {
                   </Badge>
                 </TableCell>
                 <TableCell className="py-4">
-                  <Badge className={AVAILABLE_BADGE_CLASS(p.available ?? true)}>
-                    {p.available ?? true ? "Available" : "Unavailable"}
+                  <Badge className={AVAILABLE_BADGE_CLASS(isLendableNow(p))}>
+                    {isLendableNow(p) ? "Available" : "Unavailable"}
                   </Badge>
                 </TableCell>
                 <TableCell className="py-4 pr-6">

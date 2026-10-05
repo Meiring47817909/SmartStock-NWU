@@ -5,6 +5,7 @@ import { ImageOff, MapPin, Calendar, Clock } from 'lucide-react'
 import { storageDownloadUrl } from '@/lib/firebase/storage'
 import { formatLendWindow, formatDateOnly } from '@/lib/utils'
 import { lendingIntervalLabel } from '@/lib/loanRequestRules'
+import { isLendableNow } from '@/lib/catalogRules'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -140,8 +141,8 @@ export default function ProductPreviewDialog({
                     on something they can't actually get right now. */}
                 {(() => {
                   const adminDisabled = !(product.available ?? true)
-                  const outOfStock = !adminDisabled && (product.quantity_on_hand ?? 0) <= 0
-                  const unavailable = adminDisabled || outOfStock
+                  const unavailable = !isLendableNow(product)
+                  const outOfStock = !adminDisabled && unavailable
                   const label = adminDisabled
                     ? 'Unavailable'
                     : outOfStock
@@ -222,7 +223,7 @@ export default function ProductPreviewDialog({
             </div>
 
             <DialogFooter className="dlg:flex-row dlg:justify-end">
-              {cart && (product.available ?? true) && product.quantity_on_hand > 0 ? (
+              {cart && isLendableNow(product) ? (
                 <div className="flex w-full items-center gap-1.5 sm:w-auto sm:justify-end">
                   <Button variant="ghost" size="icon-sm" onClick={cart.onDecrement}>−</Button>
                   <span className="min-w-6 text-center font-bold text-primary">{cart.quantity}</span>

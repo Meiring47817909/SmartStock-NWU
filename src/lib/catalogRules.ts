@@ -5,6 +5,16 @@ import type { LendingInterval } from '@/types/database'
 
 export type { ReservationHolder }
 
+/**
+ * Whether a product can be lent right now: the admin's own Available toggle is on AND there is stock on hand. The
+ * toggle alone does not track stock (Stock Out lowers quantity_on_hand without touching `available`), so a product can
+ * be switched on and still have nothing to lend; every screen shows that as Unavailable. A product saved before the
+ * toggle existed has no `available` value and counts as switched on.
+ */
+export function isLendableNow(p: { available?: boolean | null; quantity_on_hand?: number | null }): boolean {
+  return (p.available ?? true) && (p.quantity_on_hand ?? 0) > 0
+}
+
 /** The product form's fields, as sent to create/update. */
 export interface ProductInput {
   /** Optional 20-character [A-Za-z0-9] id chosen by the caller (so photos can be uploaded under products/<id>/ before the save). */
