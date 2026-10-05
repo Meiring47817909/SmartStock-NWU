@@ -284,6 +284,12 @@ function cleanProduct(input: ProductInput): CleanProduct {
   if (!(LENDING_INTERVALS as readonly string[]).includes(interval)) throw new DataError(400, 'Lending interval is not valid.')
   const images = Array.isArray(input.images) ? input.images : []
   if (!images.every((i) => typeof i === 'string')) throw new DataError(400, 'Images must be storage paths.')
+  const lend_from = dateOrNull(input.lend_from, 'Available From')
+  const lend_to = dateOrNull(input.lend_to, 'Available To')
+  // Available From may lie in the past (a product that has been lendable for a while); only the order is checked.
+  if (lend_from && lend_to && lend_to <= lend_from) {
+    throw new DataError(400, 'Available To date must be after the Available From date.')
+  }
   return {
     name: input.name,
     barcodes,
@@ -293,8 +299,8 @@ function cleanProduct(input: ProductInput): CleanProduct {
     reorder_threshold: wholeNumber(input.reorder_threshold ?? 0, 'Reorder Threshold'),
     available: input.available !== false,
     location: typeof input.location === 'string' ? input.location : DEFAULT_LOCATION,
-    lend_from: dateOrNull(input.lend_from, 'Available From'),
-    lend_to: dateOrNull(input.lend_to, 'Available To'),
+    lend_from,
+    lend_to,
     lending_interval: interval,
     images,
   }

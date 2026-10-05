@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DragDropContext, Draggable, Droppable, type DropResult } from "@hello-pangea/dnd";
-import { stockStatusLabel, genBarcode, todayDateStr } from "@/lib/utils";
+import { stockStatusLabel, genBarcode, addDaysToDateStr } from "@/lib/utils";
 import { Search, Plus, Pencil, Eye, RefreshCw, X, GripVertical, Copy, Trash2, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { useTable, type SortingState } from "@tanstack/react-table";
@@ -640,12 +640,9 @@ export default function ProductsPage() {
         return;
       }
     }
-    if (form.lend_from && form.lend_from < todayDateStr()) {
-      setError("Available From date can't be in the past.");
-      return;
-    }
-    if (form.lend_from && form.lend_to && form.lend_to < form.lend_from) {
-      setError("Available To date can't be before Available From date.");
+    // Available From may be in the past; Available To only has to come after it.
+    if (form.lend_from && form.lend_to && form.lend_to <= form.lend_from) {
+      setError("Available To date must be after the Available From date.");
       return;
     }
     setSaving(true);
@@ -1152,7 +1149,6 @@ export default function ProductsPage() {
                     <AvailabilityDatePicker
                       id="p-lend-from"
                       className="w-full"
-                      min={todayDateStr()}
                       value={form.lend_from}
                       onChange={(nextLendFrom) => {
                         setForm((f) => ({
@@ -1162,7 +1158,8 @@ export default function ProductsPage() {
                           // with nothing to be "after" — and a product with no
                           // Lend From can't stay Available (see Availability's
                           // onChange/disabled logic above, same pattern).
-                          lend_to: nextLendFrom ? f.lend_to : "",
+                          // A Lend To that is no longer after the new Lend From is dropped too.
+                          lend_to: nextLendFrom && f.lend_to > nextLendFrom ? f.lend_to : "",
                           available: nextLendFrom ? f.available : false,
                         }))
                       }}
@@ -1173,7 +1170,7 @@ export default function ProductsPage() {
                     <AvailabilityDatePicker
                       id="p-lend-to"
                       className="w-full"
-                      min={form.lend_from || todayDateStr()}
+                      min={form.lend_from ? addDaysToDateStr(form.lend_from, 1) : undefined}
                       value={form.lend_to}
                       disabled={!form.lend_from}
                       onChange={(next) =>

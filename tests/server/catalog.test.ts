@@ -185,6 +185,19 @@ describe('categories', () => {
 })
 
 describe('products', () => {
+  it('accepts an Available From date in the past, but Available To must come after Available From', async () => {
+    // NOW is 2026-10-04: a product lendable since September is fine.
+    const past = await createProduct(adminCtx(), productInput({ lend_from: '2026-09-01', lend_to: '2026-09-30' }))
+    expect(past).toMatchObject({ lend_from: '2026-09-01', lend_to: '2026-09-30' })
+    const openEnded = await createProduct(adminCtx(), productInput({ name: 'Old stock', barcodes: ['P-002'], lend_from: '2025-01-15', lend_to: null }))
+    expect(openEnded).toMatchObject({ lend_from: '2025-01-15', lend_to: null })
+
+    const message = 'Available To date must be after the Available From date.'
+    await expect(createProduct(adminCtx(), productInput({ name: 'Same day', lend_from: '2026-10-10', lend_to: '2026-10-10' }))).rejects.toThrow(message)
+    await expect(createProduct(adminCtx(), productInput({ name: 'Backwards', lend_from: '2026-10-10', lend_to: '2026-10-09' }))).rejects.toThrow(message)
+    await expect(updateProduct(adminCtx(), past.id, productInput({ lend_from: '2026-09-30', lend_to: '2026-09-01' }))).rejects.toThrow(message)
+  })
+
   it('product with barcodes round-trips in order', async () => {
     const cat = await createCategory(adminCtx(), { name: 'AV', description: 'audio visual' })
     const created = await createProduct(
