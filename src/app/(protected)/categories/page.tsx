@@ -123,7 +123,8 @@ export default function CategoriesPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="mb-6 flex items-center justify-between">
+      {/* Title and Add Category side by side; below sm the button moves under the title. */}
+      <div className="mb-6 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Categories</h1>
           <p className="text-sm text-[#5B4F67]">{categories.length} categories</p>
