@@ -67,3 +67,7 @@ firebase-export-*/
 *firebase-adminsdk*.json
 serviceAccountKey.json
 *.serviceaccount.json
+
+# Cloud SQL Auth Proxy binary (downloaded locally for cut-over)
+cloud-sql-proxy.exe
+server-ca.pem
