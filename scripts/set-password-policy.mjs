@@ -20,18 +20,19 @@
 // changed (profile page, reset link, new staff login).
 //
 // Run once, deliberately, against the live project:
-//   node scripts/set-password-policy.mjs
+//   npm run auth:password-policy   (PowerShell: npm.cmd run auth:password-policy)
 //
 // Uses the same real Admin SDK credentials as src/lib/firebase/admin.ts
 // (FIREBASE_ADMIN_PROJECT_ID / FIREBASE_ADMIN_CLIENT_EMAIL /
 // FIREBASE_ADMIN_PRIVATE_KEY from .env.local) — this script does NOT
 // point at the emulator, unlike every other script in this directory.
 
-import { config as loadEnv } from 'dotenv'
-
-loadEnv({ path: '.env.local' })
 import { cert, initializeApp } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
+
+// Reads .env.local (Node's built-in loader; variables already set in the
+// environment win).
+process.loadEnvFile('.env.local')
 
 const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID
 const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL

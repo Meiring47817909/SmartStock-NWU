@@ -19,6 +19,7 @@
     "db:stop": "node scripts/db.mjs stop",
     "db:migrate": "drizzle-kit migrate",
     "db:check": "node scripts/db-check.mjs",
+    "auth:password-policy": "node scripts/set-password-policy.mjs",
     "db:reset": "tsx scripts/db-reset.ts",
     "db:import-firestore": "tsx --conditions=react-server scripts/import-firestore.ts",
     "test": "vitest run",

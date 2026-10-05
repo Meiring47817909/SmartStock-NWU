@@ -56,18 +56,25 @@ describe('newPasswordProblem', () => {
     assert.deepEqual(localPasswordMissing('my password!'), ['an uppercase letter', 'a number'])
   })
 
-  it('live policy, valid password -> null', async () => {
+  it('FR-002 is checked first, without asking Firebase, even when the live policy is looser', async () => {
+    // The live project still on the old 6-20 rule would call 'password123' valid.
     fb.vp = { isValid: true, passwordPolicy: { customStrengthOptions: { minPasswordLength: 6, maxPasswordLength: 20 } } }
-    assert.equal(await newPasswordProblem(auth, 'whatever'), null)
-    assert.deepEqual(fb.calls, ['whatever'])
+    assert.equal(await newPasswordProblem(auth, 'password123'), 'New password needs at least 12 characters, an uppercase letter, a symbol.')
+    assert.deepEqual(fb.calls, [])
   })
 
-  it('live policy, invalid -> lists exactly what is missing, with the live numbers', async () => {
+  it('live policy, valid password -> null', async () => {
+    fb.vp = { isValid: true, passwordPolicy: { customStrengthOptions: { minPasswordLength: 12 } } }
+    assert.equal(await newPasswordProblem(auth, 'Password123!'), null)
+    assert.deepEqual(fb.calls, ['Password123!'])
+  })
+
+  it('a stricter live policy is still reported, with the live numbers', async () => {
     fb.vp = {
       isValid: false,
-      passwordPolicy: { customStrengthOptions: { minPasswordLength: 8, maxPasswordLength: 30 } },
-      meetsMinPasswordLength: false, containsUppercaseLetter: false, containsNumericCharacter: true,
+      passwordPolicy: { customStrengthOptions: { minPasswordLength: 16, maxPasswordLength: 30 } },
+      meetsMinPasswordLength: false, containsUppercaseLetter: true, containsNumericCharacter: true,
     }
-    assert.equal(await newPasswordProblem(auth, 'abc'), 'New password needs at least 8 characters, an uppercase letter.')
+    assert.equal(await newPasswordProblem(auth, 'Password123!'), 'New password needs at least 16 characters.')
   })
 })

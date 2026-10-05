@@ -20,19 +20,22 @@ export function localPasswordMissing(password: string): string[] {
 
 // Returns what is wrong with a new password, or null when it is fine.
 //
-// Normally this checks against the live Firebase Auth password policy, so
-// the form always matches what the server enforces. The Firebase Auth
-// emulator does not implement the password policy lookup (validatePassword
-// always throws there), so when the lookup fails the same FR-002 rule is
-// checked here instead. Firebase still enforces its own policy when the
-// password is saved.
+// The FR-002 rule is always checked here first, so the form never accepts a
+// password the rule refuses, even before the live Firebase policy has been
+// updated (scripts/set-password-policy.mjs). The live Firebase Auth policy is
+// then checked as well, in case it is ever stricter. The Firebase Auth
+// emulator does not implement the policy lookup (validatePassword always
+// throws there), so a failed lookup leaves the FR-002 check as the answer.
+// Firebase still enforces its own policy when the password is saved.
 export async function newPasswordProblem(auth: Auth, password: string): Promise<string | null> {
+  const localMissing = localPasswordMissing(password)
+  if (localMissing.length > 0) return `New password needs ${localMissing.join(', ')}.`
+
   let status: Awaited<ReturnType<typeof validatePassword>>
   try {
     status = await validatePassword(auth, password)
   } catch {
-    const missing = localPasswordMissing(password)
-    return missing.length > 0 ? `New password needs ${missing.join(', ')}.` : null
+    return null
   }
   if (status.isValid) return null
 
