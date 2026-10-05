@@ -22,6 +22,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { SEGMENTED_TABS_LIST, SEGMENTED_TAB_TRIGGER } from '@/components/ui/segmentedTabs'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 
@@ -306,10 +307,10 @@ export default function DashboardPage() {
             own base class hardcodes h-[calc(100%-1px)], which otherwise
             wins and stretches every tab to the track's full height with no
             breathing room top/bottom. */}
-        <TabsList className="mb-4 flex w-full !h-14 gap-1.5 overflow-hidden rounded-2xl border border-purple-200/50 bg-white/60 p-1.5 backdrop-blur-sm">
+        <TabsList className={SEGMENTED_TABS_LIST}>
           <TabsTrigger
             value="outstanding-returns"
-            className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
+            className={SEGMENTED_TAB_TRIGGER}
           >
             Outstanding Returns
             {outstanding.length > 0 && (
@@ -318,7 +319,7 @@ export default function DashboardPage() {
           </TabsTrigger>
           <TabsTrigger
             value="incoming-pickups"
-            className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
+            className={SEGMENTED_TAB_TRIGGER}
           >
             Incoming Pickups
             {incomingPickups.length > 0 && (
@@ -327,7 +328,7 @@ export default function DashboardPage() {
           </TabsTrigger>
           <TabsTrigger
             value="low-stock"
-            className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
+            className={SEGMENTED_TAB_TRIGGER}
           >
             Low Stock Alerts
             {stats.low_stock > 0 && (

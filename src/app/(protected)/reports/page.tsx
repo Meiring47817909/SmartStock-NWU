@@ -33,6 +33,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { SEGMENTED_TABS_LIST, SEGMENTED_TAB_TRIGGER_WIDE } from '@/components/ui/segmentedTabs'
 import { collapseLinesByProduct, formatBarcodeQuantities, formatBarcodeLabels } from '@/lib/transactionLines'
 
 type ReportTab = 'stock-levels' | 'low-stock' | 'issued-per-staff' | 'returns'
@@ -232,12 +233,12 @@ export default function ReportsPage() {
             TabsTrigger's own base class hardcodes h-[calc(100%-1px)],
             which otherwise wins and stretches every tab to the track's
             full height with no breathing room top/bottom. */}
-        <TabsList className="mb-4 flex w-full !h-14 gap-1.5 overflow-hidden rounded-2xl border border-purple-200/50 bg-white/60 p-1.5 backdrop-blur-sm">
+        <TabsList className={SEGMENTED_TABS_LIST}>
           {TABS.map(t => (
             <TabsTrigger
               key={t.id}
               value={t.id}
-              className="!h-11 flex-1 cursor-pointer self-center rounded-xl px-4 text-sm font-semibold whitespace-nowrap text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md"
+              className={SEGMENTED_TAB_TRIGGER_WIDE}
             >
               {t.label}
             </TabsTrigger>
