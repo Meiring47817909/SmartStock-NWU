@@ -71,3 +71,5 @@ serviceAccountKey.json
 # Cloud SQL Auth Proxy binary (downloaded locally for cut-over)
 cloud-sql-proxy.exe
 server-ca.pem
+# Importer dry-run reports (contain real client data)
+import-dry-run*.txt
