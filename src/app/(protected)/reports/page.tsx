@@ -19,6 +19,7 @@ import {
   TablePagination,
 } from '@/components/data-table-helpers'
 import { ChevronDown, Search } from 'lucide-react'
+import { CollapsibleFilters } from '@/components/CollapsibleFilters'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import {
@@ -375,7 +376,8 @@ function StockLevelsReport() {
     <div className="flex h-full min-h-0 flex-col">
       {/* Same NWU-Stitch restyle as Issued per Staff -- rounded-2xl white filter
           card, lavender dropdown/search controls, purple focus ring. */}
-      <section className="mb-4 flex flex-wrap items-end gap-4 rounded-2xl border border-[#E2D8E9] bg-white px-5 py-3.5 shadow-sm">
+      <section className="mb-4 rounded-2xl border border-[#E2D8E9] bg-white px-5 py-3.5 shadow-sm">
+        <CollapsibleFilters className="flex-wrap items-end gap-4" summary={`${sorted.length} ${sorted.length === 1 ? 'product' : 'products'}`} active={!!search.trim() || (catFilter !== null && catFilter.size < cats.length + 1) || statusFilter.size < STOCK_STATUS_VALUES.length}>
         <div className="flex flex-col gap-1">
           <span className="text-sm font-semibold text-slate-600">Categories</span>
           <CategoryFilter selected={catFilter} onChange={setCatFilter} cats={cats} />
@@ -429,6 +431,7 @@ function StockLevelsReport() {
             { header: 'Status', width: 90, value: (p: any) => p.status },
           ]}
         />
+        </CollapsibleFilters>
       </section>
       <Card className="min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -527,7 +530,8 @@ function LowStockReport() {
     <div className="flex h-full min-h-0 flex-col">
       {/* Same NWU-Stitch restyle as Issued per Staff -- rounded-2xl white filter
           card, lavender search box, purple focus ring. */}
-      <section className="mb-4 flex flex-wrap items-center gap-4 rounded-2xl border border-[#E2D8E9] bg-white px-5 py-3.5 shadow-sm">
+      <section className="mb-4 rounded-2xl border border-[#E2D8E9] bg-white px-5 py-3.5 shadow-sm">
+        <CollapsibleFilters className="flex-wrap items-center gap-4" summary={`${sorted.length} ${sorted.length === 1 ? 'item' : 'items'}`} active={!!search.trim()}>
         {!loading && (
           <div className={`text-sm font-semibold ${data.length > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
             {data.length === 0 ? '✓ All stock levels are healthy' : `${data.length} item${data.length !== 1 ? 's' : ''} at or below reorder threshold`}
@@ -571,6 +575,7 @@ function LowStockReport() {
             { header: 'Shortage', width: 80, value: (p: any) => p.quantity_on_hand - p.reorder_threshold },
           ]}
         />
+        </CollapsibleFilters>
       </section>
       <Card className="min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -756,7 +761,8 @@ function IssuedPerStaffReport() {
           inline here (rather than through the shared DateRangeFilter/SearchBox) so
           the restyle stays scoped to this one tab -- Stock Levels/Low Stock/Returns
           keep their existing look untouched. */}
-      <section className="mb-4 flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-[#E2D8E9] bg-white px-5 py-3.5 shadow-sm">
+      <section className="mb-4 rounded-2xl border border-[#E2D8E9] bg-white px-5 py-3.5 shadow-sm">
+        <CollapsibleFilters className="flex-wrap items-end justify-between gap-4" summary={`${sortedStaff.length} staff`} active={!!search.trim() || !!fromDate || !!toDate || !includeUndated}>
         <div className="flex flex-1 flex-wrap items-end gap-4">
           <div className="flex flex-col gap-1">
             <label htmlFor="issued-from-date" className="text-sm font-semibold text-slate-600">Issued from</label>
@@ -857,6 +863,7 @@ function IssuedPerStaffReport() {
             { header: 'Qty', width: 30, value: (s: any) => s.quantity ?? '—' },
           ]}
         />
+        </CollapsibleFilters>
       </section>
       <Card className="min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -1186,7 +1193,8 @@ function ReturnsReport() {
           (rather than through the shared DateRangeFilter/SearchBox) so the
           restyle stays scoped to this tab -- Stock Levels/Low Stock keep the
           plain DateRangeFilter/SearchBox look where they don't use dates. */}
-      <section className="mb-4 flex flex-wrap items-end gap-4 rounded-2xl border border-[#E2D8E9] bg-white px-5 py-3.5 shadow-sm">
+      <section className="mb-4 rounded-2xl border border-[#E2D8E9] bg-white px-5 py-3.5 shadow-sm">
+        <CollapsibleFilters className="flex-wrap items-end gap-4" summary={`${sortedReturns.length} ${sortedReturns.length === 1 ? 'return' : 'returns'}`} active={!!search.trim() || !!fromDate || !!toDate || !includeUndated || statusFilter.size < RETURN_STATUS_VALUES.length}>
         <div className="flex flex-col gap-1">
           <label htmlFor="returns-from-date" className="text-sm font-semibold text-slate-600">Expected from</label>
           <AvailabilityDatePicker
@@ -1319,6 +1327,7 @@ function ReturnsReport() {
             },
           ]}
         />
+        </CollapsibleFilters>
       </section>
       <Card className="min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
       <div className="min-h-0 flex-1 overflow-y-auto">

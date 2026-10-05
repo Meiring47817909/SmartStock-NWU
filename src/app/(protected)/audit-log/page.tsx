@@ -12,6 +12,7 @@ import {
   type PageSize, paginate, TablePagination,
 } from '@/components/data-table-helpers'
 import { Card, CardContent } from '@/components/ui/card'
+import { CollapsibleFilters } from '@/components/CollapsibleFilters'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { AvailabilityDatePicker } from '@/components/portal/AvailabilityDatePicker'
@@ -1077,7 +1078,13 @@ export default function AuditLogPage() {
       </div>
 
       <Card className="mb-4 rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
-        <CardContent className="flex flex-wrap items-end gap-3">
+        <CardContent>
+        <CollapsibleFilters
+          label="Filters"
+          className="flex-wrap items-end gap-3"
+          summary={`${filtered.length} ${filtered.length === 1 ? 'entry' : 'entries'}`}
+          active={entityFilter.length > 0 || actionFilter.length > 0 || !!fromDate || !!toDate}
+        >
         <div className="grid gap-1.5">
           <span className="text-sm font-semibold text-slate-600">Entities</span>
           <MultiSelect
@@ -1172,6 +1179,7 @@ export default function AuditLogPage() {
             { header: 'Details', value: (e: AuditLogEntry) => flattenAfterForPdf(reorderForDisplay(e.entity_type, e.action, e.after)) },
           ]}
         />
+        </CollapsibleFilters>
         </CardContent>
       </Card>
 

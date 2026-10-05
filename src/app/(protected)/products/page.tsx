@@ -41,6 +41,7 @@ import { notifyProductStockChange } from "@/lib/firebase/notifyEvent";
 import { useAuth } from "@/context/AuthContext";
 import { useRole } from "@/context/RoleContext";
 import { Card, CardContent } from "@/components/ui/card";
+import { CollapsibleFilters } from '@/components/CollapsibleFilters'
 import {
   Table,
   TableHeader,
@@ -803,7 +804,12 @@ export default function ProductsPage() {
 
       {/* Filters */}
       <Card className="mb-4 rounded-xl border border-[#E2D8E9] bg-white shadow-sm ring-0">
-        <CardContent className="flex flex-wrap items-end gap-3">
+        <CardContent>
+        <CollapsibleFilters
+          className="flex-wrap items-end gap-3"
+          summary={`${filteredProducts.length} ${filteredProducts.length === 1 ? 'product' : 'products'}`}
+          active={!!search.trim() || !!catFilter || statusFilter.size < PRODUCT_STATUS_VALUES.length || availableFilter.size < AVAILABLE_VALUES.length}
+        >
         <div className="grid gap-1.5">
           <span className="text-sm font-semibold text-slate-600">Categories</span>
           <Select
@@ -846,6 +852,7 @@ export default function ProductsPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
+        </CollapsibleFilters>
         </CardContent>
       </Card>
 
