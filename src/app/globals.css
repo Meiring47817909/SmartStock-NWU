@@ -5,9 +5,11 @@
  ---break---
  */
 @custom-variant dark (&:is(.dark *));
-/* A screen with room for always-open search/filter cards: at least 768px wide
-   AND 500px tall. A phone turned sideways is wide but short, so it keeps the
-   folded filter bar (see CollapsibleFilters). */
+/* A screen with room for the admin sidebar and always-open search/filter
+   cards: at least 768px wide AND 500px tall. A phone turned sideways is wide
+   but short, so it keeps the top navigation bar and the folded filter bar
+   (AdminTopBar, CollapsibleFilters). The exact opposite of the mobile query
+   in hooks/use-mobile.ts; keep the numbers in sync. */
 @custom-variant roomy {
   @media (min-width: 768px) and (min-height: 500px) {
     @slot;

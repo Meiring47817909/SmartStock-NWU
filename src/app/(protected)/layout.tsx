@@ -96,7 +96,7 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
       >
         <Sidebar profile={profile as Profile | null} counts={navCounts} />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* Below md the Sidebar is hidden; this horizontal bar replaces it. */}
+          {/* On phones (narrow, or turned sideways) the Sidebar is hidden; this horizontal bar replaces it. */}
           <AdminTopBar profile={profile as Profile | null} counts={navCounts} />
           <main className="flex flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6 md:px-8 md:py-6" style={{ background: pageBackground }}>
             {/* Most pages fill the screen and let their table scroll inside

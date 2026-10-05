@@ -17,11 +17,12 @@ import { isAdminNavActive, signOutAdmin, visibleAdminNav, type AdminNavCounts } 
 import type { Profile } from '@/types/database'
 
 /**
- * The admin navigation on narrow screens (below md, 768px). The shadcn
- * Sidebar turns into a hidden off-canvas panel at that width, so this
- * horizontal bar takes over, laid out like the lending portal's mobile
- * header: a menu button listing every page, the SmartStock logo, and the
- * account menu. Hidden from md up, where the Sidebar is back.
+ * The admin navigation on phones: narrower than 768px, or shorter than
+ * 500px (a phone turned sideways). The shadcn Sidebar turns into a hidden
+ * off-canvas panel there (see hooks/use-mobile.ts), so this horizontal bar
+ * takes over, laid out like the lending portal's mobile header: a menu
+ * button listing every page, the SmartStock logo, and the account menu.
+ * Hidden on "roomy" screens (globals.css), where the Sidebar is back.
  */
 export default function AdminTopBar({ profile, counts }: { profile: Profile | null; counts: AdminNavCounts }) {
   const pathname = usePathname()
@@ -31,7 +32,7 @@ export default function AdminTopBar({ profile, counts }: { profile: Profile | nu
   const totalBadge = (counts.alerts ?? 0) + (counts.loanRequests ?? 0)
 
   return (
-    <header className="shrink-0 border-b bg-card md:hidden">
+    <header className="shrink-0 border-b bg-card roomy:hidden">
       <div className="flex items-center justify-between gap-3 px-4 py-2.5">
         <div className="flex items-center gap-3">
           <DropdownMenu>
