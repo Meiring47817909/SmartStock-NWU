@@ -55,9 +55,8 @@ function DialogContent({
   // other DialogContent call site is unaffected.
   mobileFullScreen?: boolean
 }) {
-  const popupRef = React.useRef<HTMLDivElement>(null)
-
-  // Below dlg:, pin the popup's height to the *measured* visual viewport
+  // Size the popup to the *measured* visual viewport (full screen below
+  // dlg:, a capped card from dlg: up)
   // rather than trusting a CSS length unit (100%, dvh, even svh) to give
   // the right answer. Chrome DevTools' named device presets (Pixel 9,
   // iPhone 16 Pro Max, the Folds, ...) simulate a toolbar/address bar
@@ -71,20 +70,29 @@ function DialogContent({
   // Falls back to the h-svh/max-h-svh classes below (removed once this
   // runs) for the very first paint and for browsers without
   // visualViewport.
-  React.useEffect(() => {
-    if (!mobileFullScreen) return
-    const el = popupRef.current
-    if (!el) return
+  // A callback ref (with React 19's ref cleanup), not an effect: the popup
+  // only mounts once the dialog opens, inside the portal, after this
+  // component has rendered, so the sizing has to start when it appears.
+  const sizeToViewport = React.useCallback((el: HTMLDivElement | null) => {
+    if (!mobileFullScreen || !el) return
     function apply() {
       if (!el) return
+      const vh = window.visualViewport?.height ?? window.innerHeight
+      // The centering wrapper is position:fixed; inset:0, which mobile
+      // browsers size against the large viewport (as if the address bar
+      // were hidden). Pin it to the visible height so the popup is centred
+      // in what the user can actually see.
+      // (The wrapper is the popup's parent element.)
+      if (el.parentElement) el.parentElement.style.height = `${vh}px`
       if (window.innerWidth >= 500) {
-        // dlg: (500px) and up — hand height back to the CSS classes
-        // (dlg:h-auto dlg:max-h-none) instead of the mobile measurement.
+        // dlg: (500px) and up: a centred card. Cap it to the visible height
+        // (90%, and never closer than the wrapper's 1rem padding), so on a
+        // short screen -- a phone turned sideways -- the whole card, footer
+        // included, stays on screen and its content scrolls inside it.
         el.style.height = ''
-        el.style.maxHeight = ''
+        el.style.maxHeight = `${Math.floor(Math.min(vh * 0.9, vh - 32))}px`
         return
       }
-      const vh = window.visualViewport?.height ?? window.innerHeight
       el.style.height = `${vh}px`
       el.style.maxHeight = `${vh}px`
     }
@@ -123,7 +131,7 @@ function DialogContent({
             silently overrides sm:max-w-[...] on every dialog and grows the
             popup past its intended width instead of scrolling internally. */}
         <DialogPrimitive.Popup
-          ref={popupRef}
+          ref={sizeToViewport}
           data-slot="dialog-content"
           className={cn(
             "relative grid w-full min-w-0 max-w-[calc(100%-2rem)] gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",

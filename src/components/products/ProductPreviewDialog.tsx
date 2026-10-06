@@ -172,7 +172,10 @@ export default function ProductPreviewDialog({
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-[3fr_2fr]">
+                {/* Side by side when both fit, otherwise Lending Interval wraps
+                    under Availability (e.g. a phone turned sideways), instead of
+                    being cut off at the dialog's edge. */}
+                <div className="flex flex-wrap gap-x-10 gap-y-4">
                   {(product.lend_from || product.lend_to) && (
                     <div>
                       <div className="mb-1 text-sm font-semibold">Availability</div>
@@ -200,7 +203,7 @@ export default function ProductPreviewDialog({
                     </div>
                   )}
 
-                  <div className={product.lend_from || product.lend_to ? undefined : 'col-span-2'}>
+                  <div>
                     <div className="mb-1 text-sm font-semibold">Lending Interval</div>
                     <div className="flex items-center gap-1.5 text-sm">
                       <Clock className="size-4 shrink-0 text-muted-foreground" />
