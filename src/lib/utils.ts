@@ -209,18 +209,26 @@ export function sentenceCase(s: string): string {
 // same principle noted in the Audit Log's TransactionSummary: what a CSV
 // export carries should read as the same thing the screen showed, not a
 // second, differently-formatted version of it.
+/**
+ * One CSV cell. Commas, quotes and line breaks are quoted. Text that starts
+ * like a spreadsheet formula (=, +, -, @, tab or carriage return) gets a
+ * leading apostrophe, so Excel shows it as text instead of running it
+ * (CSV/formula injection). Numbers are left as numbers, negative ones too.
+ */
+export function csvCell(v: string | number | null | undefined): string {
+  let s = v === null || v === undefined ? '' : String(v)
+  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = `'${s}`
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
 export function downloadCsv<T>(
   filename: string,
   columns: { header: string; value: (row: T) => string | number | null | undefined }[],
   rows: T[],
 ): void {
-  const escape = (v: string | number | null | undefined): string => {
-    const s = v === null || v === undefined ? '' : String(v)
-    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-  }
   const lines = [
-    columns.map(c => escape(c.header)).join(','),
-    ...rows.map(row => columns.map(c => escape(c.value(row))).join(',')),
+    columns.map(c => csvCell(c.header)).join(','),
+    ...rows.map(row => columns.map(c => csvCell(c.value(row))).join(',')),
   ]
   // Leading BOM so Excel — still where an exported CSV most often gets
   // opened — reads it as UTF-8 rather than mis-decoding anything outside

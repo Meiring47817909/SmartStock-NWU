@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isRealDate } from '@/lib/utils'
+import { csvCell, isRealDate } from '@/lib/utils'
 
 describe('isRealDate', () => {
   it('accepts real YYYY-MM-DD calendar days, leap days included', () => {
@@ -11,5 +11,32 @@ describe('isRealDate', () => {
       expect(isRealDate(d), d).toBe(false)
     }
     for (const v of [null, undefined, 20261005, new Date('2026-10-05')]) expect(isRealDate(v)).toBe(false)
+  })
+})
+
+describe('csvCell', () => {
+  it('quotes commas, quotes and line breaks', () => {
+    expect(csvCell('plain')).toBe('plain')
+    expect(csvCell('a,b')).toBe('"a,b"')
+    expect(csvCell('say "hi"')).toBe('"say ""hi"""')
+    expect(csvCell('two\nlines')).toBe('"two\nlines"')
+    expect(csvCell(null)).toBe('')
+    expect(csvCell(undefined)).toBe('')
+  })
+
+  it('stops text that starts like a spreadsheet formula from running as one', () => {
+    expect(csvCell('=HYPERLINK("http://x","Click")')).toBe('"\'=HYPERLINK(""http://x"",""Click"")"')
+    expect(csvCell('+27 18 299 1111')).toBe("'+27 18 299 1111")
+    expect(csvCell('-cmd')).toBe("'-cmd")
+    expect(csvCell('@SUM(A1)')).toBe("'@SUM(A1)")
+    expect(csvCell('\t=1')).toBe("'\t=1")
+    expect(csvCell('\r=1')).toBe('"\'\r=1"')
+  })
+
+  it('leaves numbers, including negative ones, and ordinary text alone', () => {
+    expect(csvCell(-5)).toBe('-5')
+    expect(csvCell(12)).toBe('12')
+    expect(csvCell('2026-10-06')).toBe('2026-10-06')
+    expect(csvCell('a=b')).toBe('a=b')
   })
 })
