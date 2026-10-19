@@ -680,7 +680,8 @@ export default function StockOutPage() {
                 <AlertDescription>
                   This issue fulfils {activeRequest.staff_name}&apos;s accepted request, which agreed a
                   return by {formatDateOnly(activeRequest.to_date)}. Leaving Lend To blank overrides
-                  that — the item won&apos;t appear in Outstanding Returns.
+                  that — the item will be listed under Outstanding Returns as &ldquo;No return date&rdquo;
+                  and never become overdue.
                 </AlertDescription>
               </Alert>
             )}
@@ -698,7 +699,7 @@ export default function StockOutPage() {
                   <p className="text-xs text-muted-foreground">
                     {lendTo
                       ? 'Clear this if the item does not need to come back.'
-                      : 'No return date — this item will not be chased on the Dashboard.'}
+                      : 'No return date — the Dashboard lists it as "No return date" and never marks it overdue.'}
                   </p>
                   {lendTo && (
                     <button type="button" onClick={() => setLendTo('')}

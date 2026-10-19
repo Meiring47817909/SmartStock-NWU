@@ -58,8 +58,8 @@ export default function LendingPolicyPage() {
             Add what you need to your cart, choose a single pickup-to-return date range that
             covers everything in it, and submit — an optional message can go along with the
             request. Dates must fall within each item&apos;s own lendable window. Adding something
-            to your cart does not reserve it: equipment is only held for you once the IT Store approves
-            the request.
+            to your cart does not reserve it. Once you submit, the units are set aside for your request
+            while it is reviewed, and they are confirmed for you once the IT Store approves it.
           </p>
 
           <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">4. Review by the IT Store</h2>
