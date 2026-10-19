@@ -301,7 +301,7 @@ export function summaryLines(s: SeedSummary): string[] {
     'LOGINS:',
     `  BICS admin:      ${s.adminEmail} / ${s.password}               -> http://localhost:3000/login   (${s.adminName})`,
     `  Notifications:   administrator emails -> ${s.adminEmail}; sent from ${s.systemFromEmail}`,
-    `  Portal borrower: ${s.portalBorrower.email} / ${s.password} -> http://localhost:3000/lend/login`,
+    `  Portal borrower: ${s.portalBorrower.email} / ${s.password} -> http://localhost:3000/login`,
     ...(s.otherPortalEmails.length > 0 ? ['  Other staff with portal access (same password): ' + s.otherPortalEmails.join(', ')] : []),
     '',
     'DASHBOARD -> Outstanding Returns: No Date / Overdue / Due Today / Not Due Yet /',
@@ -314,10 +314,10 @@ export function summaryLines(s: SeedSummary): string[] {
     ...(s.liveNoShow
       ? [
           '  message). One more accepted request has its whole pickup window already behind it:',
-          '  your first Dashboard load settles it as Not Picked Up (as the system, once) and it',
+          '  your first Dashboard load settles it as Not picked up (as the system, once) and it',
           '  leaves the list; the others are already recorded.',
         ]
-      : ['  message), and Not Picked Up (already recorded).']),
+      : ['  message), and Not picked up (already recorded).']),
     '',
     `DASHBOARD -> Low Stock Alerts: "${s.lowStockProductName}" (low) and "${s.outOfStockProductName}" (out of stock).`,
     '',

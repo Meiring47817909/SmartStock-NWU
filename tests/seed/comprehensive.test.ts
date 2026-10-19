@@ -573,7 +573,7 @@ describe('reports and the printed summary', () => {
     const text = summaryLines(summary).join('\n')
     expect(text).toContain('Seeded comprehensive demo data:')
     expect(text).toContain('BICS admin:      jonathan.pritchard@nwu.ac.za / password123')
-    expect(text).toContain('Portal borrower: jessica.moore@gmail.com / password123 -> http://localhost:3000/lend/login')
+    expect(text).toContain('Portal borrower: jessica.moore@gmail.com / password123 -> http://localhost:3000/login')
     expect(text).toContain('WHO IS WHO (each staff member demonstrates one scenario):')
     expect(text).toContain('Emma Richardson      Pending loan request (fresh); staff create/update audit')
     expect(text).toContain('LOST LABELS: Returns -> "Ryan Fletcher" has one row per product (3 x 27-inch Monitor,')

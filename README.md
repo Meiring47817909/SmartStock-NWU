@@ -11,6 +11,7 @@ The full handout (setup, Cloud SQL, deployment, email and the manual check list)
 
 ```bash
 npm install
+cp .env.example .env.local   # PowerShell: Copy-Item .env.example .env.local (the values work as they are locally)
 npm run db            # PostgreSQL 17 in Docker on 127.0.0.1:5432 (user/password postgres); or use any local PostgreSQL 17
 npm run db:migrate    # create the tables (DATABASE_URL, default postgres://postgres:postgres@127.0.0.1:5432/smartstock)
 npm run emulators     # Firebase Auth + Storage emulators (own terminal)
