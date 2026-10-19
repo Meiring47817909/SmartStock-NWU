@@ -43,6 +43,8 @@
 
 ## Cut-over to Cloud SQL
 
+> **Done and closed (Oct 2026).** The live data moved to Cloud SQL, the client signed off the UAT, and the old Firestore database has been deleted. The importer (`scripts/import-firestore.ts`, `src/server/import/`, `npm run db:import-firestore`) and the write-freeze files (`scripts/cutover/`) were removed from the repo afterwards; the steps below are kept as a record and can only be followed from an older commit (before the removal) if they are ever needed again.
+
 This is the runbook for moving the live data from Firestore into the production PostgreSQL (Cloud SQL). Run it from the repo root on the `postgres` branch. The importer only ever reads Firestore; it cannot write to it.
 
 **0. Prepare**

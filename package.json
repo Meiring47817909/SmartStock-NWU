@@ -21,7 +21,6 @@
     "db:check": "node scripts/db-check.mjs",
     "auth:password-policy": "node scripts/set-password-policy.mjs",
     "db:reset": "tsx scripts/db-reset.ts",
-    "db:import-firestore": "tsx --conditions=react-server scripts/import-firestore.ts",
     "test": "vitest run",
     "dev:emulators": "cross-env NEXT_PUBLIC_USE_FIREBASE_EMULATORS=true FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 FIREBASE_STORAGE_EMULATOR_HOST=127.0.0.1:9199 FIREBASE_ADMIN_PROJECT_ID=demo-smartstock-nwu MAIL_TRANSPORT=smtp SMTP_HOST=127.0.0.1 SMTP_PORT=1025 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/smartstock next dev"
   },

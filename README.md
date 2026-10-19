@@ -4,7 +4,7 @@ Stock and loan management for the NWU BICS store, built with Next.js 16 (App Rou
 
 - **Data:** PostgreSQL, reached only from server code through `DATABASE_URL`. The browser calls the `/api/*` routes.
 - **Sign-in:** Firebase Auth. **Product photos:** Firebase Storage, written and deleted only by the server (`/api/products/images`) after it checks the admin role in PostgreSQL. `storage.rules` allows public reads and no browser writes.
-- Firestore is no longer used. The one-off importer `npm run db:import-firestore` is the only code that still reads it.
+- Firestore is no longer used, and the old Firestore database has been deleted. The one-off importer that copied it into PostgreSQL (and the cut-over write-freeze files) were removed once that was done; they remain in the git history.
 
 The full handout (setup, cut-over runbook, behaviour changes, manual check list and the dated history) is in [`handout.md`](./handout.md).
 
@@ -38,7 +38,6 @@ Sign in after `seed:demo` as `selouna.visser@nwu.ac.za` / `password123` (adminis
 | `npm run db:migrate` / `db:reset` | Apply the schema / drop and recreate the schema, then re-run the migrations (all data in that database is lost) |
 | `npm run seed:comprehensive` / `seed:demo` | Seed every scenario / the client demo (`-- --reset` to start clean) |
 | `npm run emulators` | Firebase Auth + Storage emulators (Emulator UI on http://127.0.0.1:4000) |
-| `npm run db:import-firestore` | One-off Firestore to PostgreSQL import (see "Cut-over to Cloud SQL" in the handout) |
 
 ## Deploying
 
