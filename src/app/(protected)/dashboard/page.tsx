@@ -75,10 +75,10 @@ const OUTSTANDING_RETURNS_COLUMNS = sortableColumnHelper.columns([
 
 // Same idea for Incoming Pickups' Status column — Not Picked Up is the most
 // urgent state, On Schedule the least.
-const PICKUP_STATUS_RANK: Record<string, number> = { 'Not Picked Up': 0, Insufficient: 1, 'On Schedule': 2 }
+const PICKUP_STATUS_RANK: Record<string, number> = { 'Not picked up': 0, Insufficient: 1, 'On Schedule': 2 }
 
 function pickupStatusLabel(p: { noShow: boolean; insufficient: boolean }): string {
-  return p.noShow ? 'Not Picked Up' : p.insufficient ? 'Insufficient' : 'On Schedule'
+  return p.noShow ? 'Not picked up' : p.insufficient ? 'Insufficient' : 'On Schedule'
 }
 
 const INCOMING_PICKUPS_COLUMNS = sortableColumnHelper.columns([

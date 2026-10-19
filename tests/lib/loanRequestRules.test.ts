@@ -47,3 +47,17 @@ describe('calendar days are Johannesburg days, not the machine\'s', () => {
     expect(isNoShowCandidate(accepted, '2026-10-05')).toBe(true)
   })
 })
+
+describe('loanRequestStatusLabel', () => {
+  it('gives every status the label the screens show, with no_show as "Not picked up"', async () => {
+    const { loanRequestStatusLabel } = await import('@/lib/loanRequestRules')
+    expect(loanRequestStatusLabel('pending')).toBe('Pending')
+    expect(loanRequestStatusLabel('countered')).toBe('Countered')
+    expect(loanRequestStatusLabel('accepted')).toBe('Accepted')
+    expect(loanRequestStatusLabel('fulfilled')).toBe('Fulfilled')
+    expect(loanRequestStatusLabel('declined')).toBe('Declined')
+    expect(loanRequestStatusLabel('expired')).toBe('Expired')
+    expect(loanRequestStatusLabel('withdrawn')).toBe('Withdrawn')
+    expect(loanRequestStatusLabel('no_show')).toBe('Not picked up')
+  })
+})

@@ -160,7 +160,7 @@ export default function ProfilePage() {
     <div className="mx-auto flex max-w-[1000px] flex-col gap-6">
       <div className="space-y-1">
         <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Profile</h1>
-        <p className="text-sm text-[#5B4F67]">Your NWU staff record, as Jonathan has it on file.</p>
+        <p className="text-sm text-[#5B4F67]">Your NWU staff record, as the IT Store has it on file.</p>
       </div>
 
       {/* Left column (identity + details cards, stacked) and right column

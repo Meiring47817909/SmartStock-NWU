@@ -12,7 +12,8 @@ import {
   listRequests, getRequestLines, computeExpiryDate, getReservedQuantity, effectiveToDate,
 } from '@/lib/api/loanRequests'
 import { getProduct } from '@/lib/api/catalog'
-import { formatDateOnly, formatDateShort, formatLendWindow, sentenceCase, todayDateStr } from '@/lib/utils'
+import { formatDateOnly, formatDateShort, formatLendWindow, todayDateStr } from '@/lib/utils'
+import { loanRequestStatusLabel } from '@/lib/loanRequestRules'
 import { notifyAlertsChanged } from '@/lib/alertsBus'
 import { Card } from '@/components/ui/card'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
@@ -560,7 +561,7 @@ export default function LoanRequestsPage() {
             </TableCell>
             <TableCell className="py-4 text-sm text-slate-600">{r.itemCount} item{r.itemCount === 1 ? '' : 's'}</TableCell>
             <TableCell className="py-4">
-              <Badge className={STATUS_BADGE_CLASS[r.status]}>{sentenceCase(r.status.replace('_', ' '))}</Badge>
+              <Badge className={STATUS_BADGE_CLASS[r.status]}>{loanRequestStatusLabel(r.status)}</Badge>
             </TableCell>
             <TableCell className="py-4 text-sm font-medium text-slate-600">{formatDateShort(dateValue)}</TableCell>
             <TableCell className="py-4 pr-6 text-sm font-medium text-slate-600">{expiry ? formatDateOnly(expiry) : '—'}</TableCell>

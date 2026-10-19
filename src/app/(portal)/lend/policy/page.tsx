@@ -58,23 +58,27 @@ export default function LendingPolicyPage() {
             Add what you need to your cart, choose a single pickup-to-return date range that
             covers everything in it, and submit — an optional message can go along with the
             request. Dates must fall within each item&apos;s own lendable window. Adding something
-            to your cart does not reserve it: equipment is only held for you once Jonathan approves
+            to your cart does not reserve it: equipment is only held for you once the IT Store approves
             the request.
           </p>
 
-          <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">4. Jonathan&apos;s Review</h2>
+          <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">4. Review by the IT Store</h2>
           <p className="mb-4 text-sm text-muted-foreground">
-            Jonathan reviews every request and can approve it as submitted, or send back a
+            The IT Store reviews every request and can approve it as submitted, or send back a
             counter — a reduced quantity or an adjusted date range — if the exact request can&apos;t
             be met. You&apos;ll see exactly what changed on any counter, and can accept or decline it.
           </p>
 
           <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">5. Loan Duration &amp; Pickup Window</h2>
           <p className="mb-4 text-sm text-muted-foreground">
-            Requests cover a maximum of 7 days from pickup to return. Once approved, a request
-            stays open for pickup at the Potchefstroom BICS IT Service Desk until 7 days after it
-            was last updated, or your requested start date — whichever comes first. If it isn&apos;t
-            picked up by then, it expires automatically.
+            How long you can borrow an item depends on the item: each one shows its limit, from
+            &ldquo;Borrow for up to 1 week&rdquo; to &ldquo;up to 1 month&rdquo;, or &ldquo;No return
+            date required&rdquo;. When your cart holds several items, the shortest limit applies to
+            the whole request. A request that is waiting for review, or a counter waiting for your
+            answer, stays open for 30 days after it last changed, or until your requested start date
+            if that comes sooner; after that it expires automatically. Once approved, the equipment
+            is held for you from your start date to your return date, for collection at the
+            Potchefstroom BICS IT Service Desk.
           </p>
 
           <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">6. Cancelling or Changing a Request</h2>
@@ -84,10 +88,12 @@ export default function LendingPolicyPage() {
             or dates on an approved request, withdraw it and submit a new one.
           </p>
 
-          <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">7. No-Shows</h2>
+          <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">7. Requests Not Picked Up</h2>
           <p className="mb-4 text-sm text-muted-foreground">
-            If an approved request isn&apos;t collected by its start date, it&apos;s marked as a
-            no-show and the reservation is released back into stock for other staff to request.
+            If an approved request isn&apos;t collected before its return date has passed, it&apos;s
+            marked as not picked up and the reserved equipment is released for other staff to
+            request. A request with no return date is not marked automatically, but the IT Store
+            can still cancel it.
           </p>
 
           <h2 className="mt-6 mb-2 text-lg font-semibold text-foreground">8. Caring for Borrowed Equipment</h2>

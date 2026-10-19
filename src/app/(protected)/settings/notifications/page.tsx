@@ -272,8 +272,9 @@ export default function NotificationSettingsPage() {
           </Card>
 
           <p className="text-sm text-[#5B4F67]">
-            Password-reset emails (&quot;Send/Resend Login Email&quot; on the Staff page) aren&apos;t listed here —
-            they already go out through Firebase&apos;s own built-in email flow, separate from these settings.
+            Login and password emails (&quot;Send/Resend Login Email&quot; on the Staff page, &quot;Forgot
+            password&quot; and email-change links) are always sent and can&apos;t be switched off here. They
+            use the System sending address above.
           </p>
         </>
       )}

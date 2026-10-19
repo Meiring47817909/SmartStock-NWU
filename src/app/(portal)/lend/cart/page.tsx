@@ -131,7 +131,7 @@ export default function LendCartPage() {
         cart, fromDate, toDate, message.trim() || null, staffMember.id.toString(),
       )
       notifyLoanRequestEvent(user, 'new_loan_request', requestId)
-      toast.success('Request submitted — Jonathan will review it soon.')
+      toast.success('Request submitted — the IT Store will review it soon.')
       clearCart()
       router.push('/lend/requests')
     } catch (err) {
@@ -245,7 +245,7 @@ export default function LendCartPage() {
           <div className="grid gap-1.5">
             <Label htmlFor="message">Message (optional)</Label>
             <Textarea id="message" value={message} onChange={(e) => setMessage(e.target.value)}
-              placeholder="Anything Jonathan should know about this request…" rows={3} />
+              placeholder="Anything the IT Store should know about this request…" rows={3} />
           </div>
 
           {errors.map((e) => (

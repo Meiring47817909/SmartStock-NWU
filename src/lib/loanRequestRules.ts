@@ -6,6 +6,22 @@ import { appCalendarDay, addDaysToDateStr } from '@/lib/utils'
 import type { Product, LoanRequest, LoanRequestStatus, LendingInterval } from '@/types/database'
 
 export const ACTIVE_STATUSES: LoanRequestStatus[] = ['pending', 'countered', 'accepted']
+
+const STATUS_LABELS: Record<LoanRequestStatus, string> = {
+  pending: 'Pending',
+  countered: 'Countered',
+  accepted: 'Accepted',
+  fulfilled: 'Fulfilled',
+  declined: 'Declined',
+  expired: 'Expired',
+  withdrawn: 'Withdrawn',
+  no_show: 'Not picked up',
+}
+
+/** The label every screen shows for a loan request status (no_show reads "Not picked up" everywhere). */
+export function loanRequestStatusLabel(status: LoanRequestStatus): string {
+  return STATUS_LABELS[status] ?? status
+}
 const MAX_LOAN_DAYS = 30
 
 // Stand-in upper/lower bounds for "any time, ever" when a check has no

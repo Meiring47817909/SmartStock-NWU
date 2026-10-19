@@ -153,7 +153,7 @@ export default function LendBrowsePage() {
       <div className="mb-6 space-y-1">
         <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">Browse Equipment</h1>
         <p className="max-w-2xl text-sm text-[#5B4F67]">
-          Request equipment to borrow — Jonathan will review and confirm your pickup window at the Potchefstroom BICS IT Service Desk. For any enquiries, contact{' '}
+          Request equipment to borrow — the IT Store will review your request and confirm your pickup window at the Potchefstroom BICS IT Service Desk. For any enquiries, contact{' '}
           <ContactEmailLink />.
         </p>
       </div>
@@ -175,7 +175,7 @@ export default function LendBrowsePage() {
           <Input
             id="lend-search"
             className="h-auto w-full rounded-lg border-border bg-muted/40 py-2.5 pl-10 text-sm transition-colors outline-none hover:bg-card focus-visible:border-(--nwu-purple) focus-visible:bg-card focus-visible:ring-(--nwu-purple)/20"
-            placeholder="Search equipment by name, model, or serial number…"
+            placeholder="Search equipment by name…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />

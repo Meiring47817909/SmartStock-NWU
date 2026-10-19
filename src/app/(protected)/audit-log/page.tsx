@@ -73,7 +73,7 @@ const LOAN_REQUEST_BADGE_CLASS: Record<string, string> = {
 // Up" everywhere the admin actually sees it (the Dashboard's Incoming
 // Pickups badge), so the Audit Log says the same thing.
 const LOAN_REQUEST_STATUS_LABEL: Record<string, string> = {
-  no_show: 'Not Picked Up',
+  no_show: 'Not picked up',
 }
 
 function loanRequestStatusLabel(status: string): string {
@@ -134,7 +134,7 @@ const ACTIVITY: Record<string, {
   'status:declined': { label: 'Declined', className: LOAN_REQUEST_BADGE_CLASS.declined, entities: ['loan_request'] },
   'status:expired': { label: 'Expired', className: LOAN_REQUEST_BADGE_CLASS.expired, entities: ['loan_request'] },
   'status:withdrawn': { label: 'Withdrawn', className: LOAN_REQUEST_BADGE_CLASS.withdrawn, entities: ['loan_request'] },
-  'status:no_show': { label: 'Not Picked Up', className: LOAN_REQUEST_BADGE_CLASS.no_show, entities: ['loan_request'] },
+  'status:no_show': { label: 'Not picked up', className: LOAN_REQUEST_BADGE_CLASS.no_show, entities: ['loan_request'] },
 
   'action:create': { label: 'Create', className: ACTION_BADGE_CLASS.create, entities: RECORD_ENTITIES },
   // 'settings' only ever logs 'update' (there's no create/delete for a
@@ -790,7 +790,7 @@ function LoanRequestSummary({
             )}
           </div>
           {counterMessage && (
-            <div><span className="font-medium text-foreground">Jonathan&apos;s counter message:</span> &ldquo;{counterMessage}&rdquo;</div>
+            <div><span className="font-medium text-foreground">Counter message:</span> &ldquo;{counterMessage}&rdquo;</div>
           )}
           {declineMessage && (
             <div><span className="font-medium text-foreground">Decline message:</span> &ldquo;{declineMessage}&rdquo;</div>

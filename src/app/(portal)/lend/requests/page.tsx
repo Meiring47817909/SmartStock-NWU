@@ -6,7 +6,8 @@ import { notifyLoanRequestEvent } from '@/lib/firebase/notifyEvent'
 import { useStaffPortal } from '@/context/StaffPortalContext'
 import { acceptCounter, declineCounter, withdrawRequest, expireIfDue, isStaleRequestError, listRequests, getRequestLines, computeExpiryDate, effectiveToDate, OPEN_ENDED_TO } from '@/lib/api/loanRequests'
 import { notifyAlertsChanged } from '@/lib/alertsBus'
-import { formatDateOnly, formatLendWindow, sentenceCase } from '@/lib/utils'
+import { formatDateOnly, formatLendWindow } from '@/lib/utils'
+import { loanRequestStatusLabel } from '@/lib/loanRequestRules'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -54,7 +55,7 @@ function RequestCard({
             </span>
           )}
         </CardTitle>
-        <Badge className={STATUS_BADGE_CLASS[request.status]}>{sentenceCase(request.status.replace('_', ' '))}</Badge>
+        <Badge className={STATUS_BADGE_CLASS[request.status]}>{loanRequestStatusLabel(request.status)}</Badge>
       </CardHeader>
       <div className="flex flex-col gap-3 p-4">
         {request.status === 'countered' && (
@@ -97,7 +98,7 @@ function RequestCard({
 
         {request.admin_message && (
           <div className="rounded-md border bg-muted/50 p-2">
-            <p className="text-xs font-medium text-muted-foreground">Message from Jonathan</p>
+            <p className="text-xs font-medium text-muted-foreground">Message from the IT Store</p>
             <p className="mt-0.5 text-sm text-foreground">&ldquo;{request.admin_message}&rdquo;</p>
           </div>
         )}
@@ -206,7 +207,7 @@ export default function MyRequestsPage() {
     setBusy(null)
   }
 
-  // Needs your response / Awaiting Jonathan: soonest-to-expire first, using
+  // Needs your response / Awaiting review: soonest-to-expire first, using
   // the SAME computed expiry expireIfNeeded() itself acts on --
   // computeExpiryDate() = min(updated_at + 30 days, from_date) -- rather
   // than just the lend window's start date. A request sitting untouched
@@ -259,7 +260,7 @@ export default function MyRequestsPage() {
     <div className="mx-auto flex max-w-[1000px] flex-col gap-6">
       <div className="space-y-1">
         <h1 className="text-3xl font-extrabold tracking-tight text-[#22162B]">My Requests</h1>
-        <p className="text-sm text-[#5B4F67]">Track your lending requests and respond to Jonathan&apos;s counters.</p>
+        <p className="text-sm text-[#5B4F67]">Track your lending requests and respond to counter-offers from the IT Store.</p>
       </div>
 
       {requests.length === 0 ? (
@@ -286,7 +287,7 @@ export default function MyRequestsPage() {
               value="pending"
               className="!h-auto min-h-16 flex-1 flex-col cursor-pointer items-center justify-center gap-1 self-center rounded-xl px-1 py-2 text-center text-xs leading-tight font-semibold whitespace-normal text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md sm:!h-11 sm:min-h-0 sm:flex-row sm:gap-1.5 sm:px-4 sm:text-sm sm:leading-normal sm:whitespace-nowrap"
             >
-              Awaiting Jonathan
+              Awaiting review
               {pending.length > 0 && <Badge className="bg-(--nwu-turquoise) text-white">{pending.length}</Badge>}
             </TabsTrigger>
             <TabsTrigger
