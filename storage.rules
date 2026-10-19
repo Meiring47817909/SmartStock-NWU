@@ -1,20 +1,16 @@
 rules_version = '2';
 
-// Mirrors the live smartstock-nwu project's deployed Storage rules (see
-// firebase_get_security_rules({type: "storage"}) via the Firebase MCP
-// server) -- kept here too so `npm run emulators` can start the Storage
-// emulator locally and product images behave the same way in dev as in
-// prod: publicly readable, only a BICS admin can write/delete.
+// Product photos are publicly readable. Nobody writes or deletes them from a
+// browser: the app's server stores and removes them with the Admin SDK (which
+// these rules don't apply to) after checking the caller is an admin in Cloud
+// SQL -- see src/server/productImages.ts and /api/products/images. Firestore
+// is no longer consulted. Deploy after changing:
+//   npx firebase-tools deploy --only storage --project <project-id>
 service firebase.storage {
   match /b/{bucket}/o {
     match /products/{productId}/{fileName} {
       allow read: if true;
-      allow write: if request.auth != null
-                   && firestore.get(/databases/(default)/documents/profiles/$(request.auth.uid)).data.role == 'admin'
-                   && request.resource.size < 5 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
-      allow delete: if request.auth != null
-                   && firestore.get(/databases/(default)/documents/profiles/$(request.auth.uid)).data.role == 'admin';
+      allow write, delete: if false;
     }
     match /{allPaths=**} {
       allow read, write: if false;

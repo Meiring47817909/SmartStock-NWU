@@ -60,3 +60,24 @@ describe('catalog client', () => {
     ).toBe('Still in use — 1 unit(s) checked out with Sam (R1). Resolve or cancel these first.')
   })
 })
+
+describe('product photos', () => {
+  it('sends the photo to the server as base64 and returns the stored path', async () => {
+    const { uploadProductImage } = await import('@/lib/api/catalog')
+    apiMock.mockResolvedValueOnce({ path: 'products/p1/1-2-a.jpg' })
+    const file = new File([Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3])], 'a.jpg', { type: 'image/jpeg' })
+    expect(await uploadProductImage('p1', file, 2)).toBe('products/p1/1-2-a.jpg')
+    expect(apiMock).toHaveBeenLastCalledWith('POST', '/api/products/images', {
+      action: 'upload', productId: 'p1', index: 2, fileName: 'a.jpg', contentType: 'image/jpeg', dataBase64: '/9j/4AECAw==',
+    })
+  })
+
+  it('deletes photos through the server, and does nothing for an empty list', async () => {
+    const { deleteProductImages } = await import('@/lib/api/catalog')
+    apiMock.mockResolvedValue({ deleted: 1 })
+    await deleteProductImages([])
+    expect(apiMock).not.toHaveBeenCalled()
+    await deleteProductImages(['products/p1/x.jpg'])
+    expect(apiMock).toHaveBeenLastCalledWith('POST', '/api/products/images', { action: 'delete', paths: ['products/p1/x.jpg'] })
+  })
+})

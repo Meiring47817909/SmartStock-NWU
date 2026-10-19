@@ -11,12 +11,11 @@ import {
   sortableColumnHelper,
   SortableHead,
 } from "@/components/data-table-helpers";
-import { storage } from "@/lib/firebase/config";
-import { ref, uploadBytes, deleteObject } from "firebase/storage";
 import { storageDownloadUrl } from "@/lib/firebase/storage";
 import {
   createProduct,
   deleteProduct,
+  deleteProductImages,
   findBarcodeConflict,
   getBarcodeUnitCounts,
   getProductDeleteBlockers,
@@ -25,11 +24,13 @@ import {
   newProductId,
   productDeleteBlockReason,
   updateProduct,
+  uploadProductImage,
   type ProductDeleteBlockers,
   type BarcodeUnitCount,
 } from "@/lib/api/catalog";
 import { findQuantityReductionConflicts } from "@/lib/api/loanRequests";
 import { isLendableNow } from "@/lib/catalogRules";
+import { prepareProductImage } from "@/lib/prepareProductImage";
 import {
   reservationStatusLabel,
   resolutionInstruction,
@@ -569,11 +570,7 @@ export default function ProductsPage() {
       // fail a delete that already succeeded, same tolerance handleSave gives
       // removed-image cleanup on a plain edit.
       await deleteProduct(deleting.id.toString());
-      await Promise.all(
-        (deleting.images ?? []).map((path) =>
-          deleteObject(ref(storage, path)).catch(() => {}),
-        ),
-      );
+      await deleteProductImages(deleting.images ?? []).catch(() => {});
       toast.success(`${deleting.name} deleted.`);
       closeDelete();
       load();
@@ -675,8 +672,9 @@ export default function ProductsPage() {
         lending_interval: form.lending_interval,
       };
 
-      const discardUploads = (paths: string[]) =>
-        Promise.all(paths.map((p) => deleteObject(ref(storage, p)).catch(() => {})));
+      // Photos are stored and removed by the server (it checks the admin role in
+      // Cloud SQL); the browser never writes to Firebase Storage itself.
+      const discardUploads = (paths: string[]) => deleteProductImages(paths).catch(() => {});
 
       // Upload any newly-picked files under products/<productId>/, keep existing
       // paths as-is. If the save below fails, the files uploaded here are removed
@@ -688,8 +686,7 @@ export default function ProductsPage() {
           for (let i = 0; i < form.images.length; i++) {
             const img = form.images[i];
             if (img.file) {
-              const path = `products/${productId}/${Date.now()}-${i}-${img.file.name}`;
-              await uploadBytes(ref(storage, path), img.file);
+              const path = await uploadProductImage(productId, await prepareProductImage(img.file), i);
               uploaded.push(path);
               images.push(path);
             } else {

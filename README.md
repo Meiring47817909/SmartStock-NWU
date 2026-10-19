@@ -3,7 +3,7 @@
 Stock and loan management for the NWU BICS store, built with Next.js 16 (App Router), TypeScript, Drizzle ORM and PostgreSQL 17.
 
 - **Data:** PostgreSQL, reached only from server code through `DATABASE_URL`. The browser calls the `/api/*` routes.
-- **Sign-in:** Firebase Auth. **Product photos:** Firebase Storage.
+- **Sign-in:** Firebase Auth. **Product photos:** Firebase Storage, written and deleted only by the server (`/api/products/images`) after it checks the admin role in PostgreSQL. `storage.rules` allows public reads and no browser writes.
 - Firestore is no longer used. The one-off importer `npm run db:import-firestore` is the only code that still reads it.
 
 The full handout (setup, cut-over runbook, behaviour changes, manual check list and the dated history) is in [`handout.md`](./handout.md).
@@ -47,6 +47,12 @@ The app deploys to Vercel. In the project's environment variables, set the Fireb
 - `DATABASE_URL`: `postgres://<user>:<password>@<address>:5432/smartstock`, without `sslmode` (with this `pg` version `sslmode=require` means full host-name verification, which fails against Cloud SQL's certificate on an IP address).
 - `DATABASE_SSL_CA`: the Cloud SQL instance's server CA certificate (`server-ca.pem`) as PEM text, or one line with `\n` escapes. The app then connects with TLS and checks the certificate against this CA.
 - `DATABASE_POOL_MAX` (optional, default 5): pool size per running instance.
+
+Product photos are uploaded through the server, so the Firebase Storage rules must refuse browser writes. After changing `storage.rules`, deploy them once:
+
+```bash
+npx firebase-tools deploy --only storage --project <project-id>
+```
 
 Command-line work against Cloud SQL (`npm run db:migrate`, the importer) goes through the Cloud SQL Auth Proxy on `127.0.0.1:5433`, with no `sslmode`. Run `db:migrate` there before deploying code that adds a migration. The handout covers moving the live data over (including the write freeze on the old app), the PostgreSQL connection pool on Vercel and the deployment notes.
 

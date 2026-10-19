@@ -9,6 +9,7 @@
 //   GET  /api/products/<id>                           public   one (404 → null here)
 //   POST /api/products/<id> { action: update|delete } admin
 //   GET  /api/products/lookup?kind=…                  admin    barcode / conflict / holders / unitCounts / deleteBlockers
+//   POST /api/products/images { action: upload|delete } admin   product photos (the server writes to Storage)
 import { api, ClientApiError } from '@/lib/api/client'
 import type { Category, Product } from '@/types/database'
 import type {
@@ -112,4 +113,30 @@ export function getBarcodeUnitCounts(productId: string): Promise<Record<string, 
 
 export function getProductDeleteBlockers(productId: string): Promise<ProductDeleteBlockers> {
   return api<ProductDeleteBlockers>('GET', '/api/products/lookup', { kind: 'deleteBlockers', productId })
+}
+
+// --- Product photos ----------------------------------------------------------
+// The browser never writes to Firebase Storage itself: the server checks the
+// caller is an admin (Cloud SQL) and saves or deletes the file.
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(binary)
+}
+
+/** Uploads one photo for a product and returns its storage path (for products.images). */
+export async function uploadProductImage(productId: string, file: File, index: number): Promise<string> {
+  const dataBase64 = toBase64(new Uint8Array(await file.arrayBuffer()))
+  const res = await api<{ path: string }>('POST', '/api/products/images', {
+    action: 'upload', productId, index, fileName: file.name, contentType: file.type, dataBase64,
+  })
+  return res.path
+}
+
+/** Deletes product photos by storage path (at most 10 per call; longer lists are split). */
+export async function deleteProductImages(paths: string[]): Promise<void> {
+  for (let i = 0; i < paths.length; i += 10) {
+    await api('POST', '/api/products/images', { action: 'delete', paths: paths.slice(i, i + 10) })
+  }
 }
