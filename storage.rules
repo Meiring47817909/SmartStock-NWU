@@ -3,8 +3,8 @@ rules_version = '2';
 // Product photos are publicly readable. Nobody writes or deletes them from a
 // browser: the app's server stores and removes them with the Admin SDK (which
 // these rules don't apply to) after checking the caller is an admin in Cloud
-// SQL -- see src/server/productImages.ts and /api/products/images. Firestore
-// is no longer consulted. Deploy after changing:
+// SQL -- see src/server/productImages.ts and /api/products/images. Deploy
+// after changing:
 //   npx firebase-tools deploy --only storage --project <project-id>
 service firebase.storage {
   match /b/{bucket}/o {

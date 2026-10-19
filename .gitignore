@@ -58,7 +58,6 @@ next-env.d.ts
 # `firebase emulators:start` or similar locally; safe to keep even if unused)
 .firebase/
 firebase-debug.log
-firestore-debug.log
 ui-debug.log
 firebase-export-*/
 
@@ -68,8 +67,10 @@ firebase-export-*/
 serviceAccountKey.json
 *.serviceaccount.json
 
-# Cloud SQL Auth Proxy binary (downloaded locally for cut-over)
+# Cloud SQL Auth Proxy binary (downloaded locally for command-line work on Cloud SQL)
 cloud-sql-proxy.exe
 server-ca.pem
-# Importer dry-run reports (contain real client data)
+# Old dry-run reports, if any are still lying around (they contain real client data)
 import-dry-run*.txt
+# Leftovers of files deleted while still open (FUSE file systems)
+.fuse_hidden*

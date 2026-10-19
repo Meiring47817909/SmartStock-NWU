@@ -175,7 +175,7 @@ const ACTIVITY_GROUPS: { label: string; keys: string[] }[] = [
   { label: 'Portal access', keys: ['action:grant_access', 'action:resend_access'] },
 ]
 
-// Plain-English labels for the raw Firestore field names that show up in
+// Plain-English labels for the raw stored field names that show up in
 // product/category/staff before-after snapshots — Jonathan shouldn't have to
 // know what "quantity_on_hand" or "reorder_threshold" mean.
 const FIELD_LABELS: Record<string, string> = {
@@ -893,8 +893,8 @@ function LoanRequestSummary({
 // trailing " |" on every line but the last keeps the pipe-separator look
 // Jonathan already knows, while the line break does the actual visual
 // separating -- this reads far better than either a single "|"-joined
-// line or a raw JSON dump. Field NAMES are kept exactly as they are in
-// Firestore (reference_no, not "Reference") rather than run through
+// line or a raw JSON dump. Field NAMES are kept exactly as they are
+// stored (reference_no, not "Reference") rather than run through
 // friendlyLabel — Jonathan cross-references these against the raw-data
 // JSON view, so the two need to say the same thing. Field VALUES still go
 // through friendlyValue for the same date/status/boolean formatting the

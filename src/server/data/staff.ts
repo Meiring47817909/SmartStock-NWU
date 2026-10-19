@@ -21,8 +21,8 @@ import {
 } from '@/lib/staffRules'
 import type { StaffMember } from '@/types/database'
 
-// `StaffMember.id` is typed `number` in src/types/database.ts but ids are strings (same cast the Firestore code used for
-// its string document ids); the server side says so honestly, and the browser client hands pages the `StaffMember` type.
+// `StaffMember.id` is typed `number` in src/types/database.ts but ids are strings (20-character keys from newId); the
+// server side says so honestly, and the browser client hands pages the `StaffMember` type.
 export type StaffOut = Omit<StaffMember, 'id'> & { id: string }
 
 type StaffRow = typeof staff.$inferSelect

@@ -28,7 +28,7 @@ export const LOAN_REQUEST_EVENTS: readonly LoanRequestEvent[] = [
 
 // These three need a timer (expiry sweep, overdue scan, stock re-check) that
 // does not exist yet. They are always off: the Settings page refuses to turn
-// them on and the server never sends them, whatever Firestore holds.
+// them on and the server never sends them, whatever the stored settings say.
 export const UNIMPLEMENTED_NOTIFICATIONS: ReadonlySet<NotificationSettingKey> = new Set<NotificationSettingKey>([
   'loan_request_expired',
   'overdue_return_alert',

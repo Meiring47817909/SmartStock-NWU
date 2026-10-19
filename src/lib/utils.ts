@@ -49,8 +49,8 @@ export function genBarcode(): string {
 
 /**
  * Human-readable reference, e.g. TXN-SBHMPJ10 — something Selouna can
- * quote in an email or write on a note, as opposed to a Firestore
- * document id. 8 random chars from a 36-character alphabet, the scheme
+ * quote in an email or write on a note, as opposed to a 20-character
+ * database id. 8 random chars from a 36-character alphabet, the scheme
  * transactions have always used.
  */
 function genPrefixedRef(prefix: string): string {

@@ -26,8 +26,8 @@ export async function getMe(ctx: Ctx): Promise<{ profile: Profile | null; staff:
           created_at: toIso(profileRow.created_at) as string,
         }
       : null,
-    // StaffMember.id is typed `number` in src/types/database.ts but ids are strings now (same cast the
-    // Firestore code used for its string document ids).
+    // StaffMember.id is typed `number` in src/types/database.ts but ids are strings (20-character keys
+    // from newId).
     staff: staffRow
       ? ({
           id: staffRow.id,

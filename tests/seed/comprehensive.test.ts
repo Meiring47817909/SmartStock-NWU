@@ -36,52 +36,48 @@ import { closeTestDb, resetTestDb } from '../helpers/db'
 
 // seed:comprehensive on PostgreSQL, run end to end against a fresh test database with in-memory Auth/Storage stand-ins.
 //
-// The expected numbers are the ones the unchanged Firestore seed produced (an in-memory stand-in run; the Firestore
-// emulator is not available in the build environment), with each difference on PostgreSQL pinned and explained:
+// The expected numbers, and why some of them are what they are:
 //
-//                              Firestore seed    PostgreSQL seed   why
-//   audit_log                          140               206      see the per-action rows below
-//   categories                           8                 8
-//   loan_request_lines                  44                44
-//   loan_requests                       37                37
-//   products                            25                25
-//   profiles                             1                 1      portal borrowers have no profile row (loadCaller treats a
-//                                                                  missing one as 'staff'), so only the admin has one
-//   return_waivers                       1                 1
-//   settings                             1                 1      one row, key 'notifications'
-//   staff                               32                32
-//   transaction_lines                   61                61
-//   transactions                        31                31
-//   auth users                          17                17
+//   table                     rows   why
+//   audit_log                  206   see the per-action rows below
+//   categories                   8
+//   loan_request_lines          44
+//   loan_requests               37
+//   products                    25
+//   profiles                     1   portal borrowers have no profile row (loadCaller treats a missing one as 'staff'),
+//                                    so only the admin has one
+//   return_waivers               1
+//   settings                     1   one row, key 'notifications'
+//   staff                       32
+//   transaction_lines           61
+//   transactions                31
+//   auth users                  17
 //
-//   audit action (entity)        Firestore  PostgreSQL  why
-//   category create                     1          8     every category is created through createCategory, which audits each create;
-//                                                         the old seed wrote raw documents and logged one demonstration entry
-//   category update                     1          1
-//   staff create                        1         31     same: createStaff audits every record
-//   staff update                        1          1
-//   staff activate                      1          1
-//   staff deactivate                    1          2     Zoe Mitchell is switched off (day -21) and back on (day -20), so the
-//                                                         'activate' is a real change; Callum Rhodes is switched off (day -19)
-//   staff grant_access                 16         16     linkStaffLogin audits each login link
-//   staff resend_access                 1          1
-//   product create                      1         25     createProduct audits every product
-//   product update                      1          3     Desktop PC (as before) + the UPS and the SSD, whose last units are
-//                                                         written off with a stock-count edit after their requests were made
-//   transaction create                 31         31
-//   transaction resolve                 1          1
-//   loan_request create                37         37
-//   loan_request update                46         46
-//   settings update                     0          2     the two notification addresses are saved with saveAddress, which audits
+//   audit action (entity)     rows   why
+//   category create              8   every category is created through createCategory, which audits each create
+//   category update              1
+//   staff create                31   same: createStaff audits every record
+//   staff update                 1
+//   staff activate               1
+//   staff deactivate             2   Zoe Mitchell is switched off (day -21) and back on (day -20), so the 'activate' is a
+//                                    real change; Callum Rhodes is switched off (day -19)
+//   staff grant_access          16   linkStaffLogin audits each login link
+//   staff resend_access          1
+//   product create              25   createProduct audits every product
+//   product update               3   Desktop PC + the UPS and the SSD, whose last units are written off with a stock-count
+//                                    edit after their requests were made
+//   transaction create          31
+//   transaction resolve          1
+//   loan_request create         37
+//   loan_request update         46
+//   settings update              2   the two notification addresses are saved with saveAddress, which audits
 //
-// Other differences that are not counts:
-//   - the system's expiry / no-show entries carry the name 'System (automatic)' (the old seed left the actor blank);
-//   - five of them (three expiries, two no-shows) are dated one day later than in the old seed, because the app only
-//     settles a request the day after its due date;
-//   - the live "Not Picked Up" request is settled by the first Dashboard load and leaves the list at once (the old
-//     Firestore page showed it once with the badge first);
-//   - two windows the app refuses (more than 7 days on a 1-week product) are 7 days: Grace Thornton's pickup ends on day
-//     -3 (was -1) and Samuel Prescott's on day -18 (was -15 -- see the seed for the dates).
+// Other things pinned here:
+//   - the system's expiry / no-show entries carry the name 'System (automatic)';
+//   - the app settles a request the day after its due date, so expiry and no-show entries are dated that day;
+//   - the live "Not Picked Up" request is settled by the first Dashboard load and leaves the list at once;
+//   - no window is longer than the app allows (7 days on a 1-week product): Grace Thornton's pickup ends on day -3 and
+//     Samuel Prescott's on day -18 (see the seed for the dates).
 
 const NOW = new Date()
 
@@ -91,7 +87,7 @@ const NOW = new Date()
 const MANUAL_OVERRIDES = 18
 
 // The cast the user records their video with: it must never change. [full name, email, department, has a card, has a login]
-// (the departments, emails and the card / login mix are the Firestore seed's, one row per scenario staff member).
+// (one row per scenario staff member).
 const ROSTER: [string, string, string, boolean, boolean][] = [
   ['Emma Richardson', 'emma.richardson@gmail.com', 'Computer Science and Information Systems', true, true],
   ['Oliver Bennett', 'oliver.bennett92@gmail.com', 'Physical and Chemical Sciences', true, false],
@@ -312,7 +308,7 @@ describe('logins', () => {
 })
 
 describe('staff', () => {
-  it('has exactly the 31 scenario staff of the Firestore seed: names, emails, departments, cards and logins', async () => {
+  it('has exactly the 31 scenario staff: names, emails, departments, cards and logins', async () => {
     const rows = await db.select().from(staff).where(eq(staff.is_admin_account, false))
     expect(rows).toHaveLength(31)
     expect(ROSTER).toHaveLength(31)
@@ -347,7 +343,7 @@ describe('staff', () => {
 })
 
 describe('loan requests', () => {
-  it('has every status in the same numbers as the Firestore seed', () => {
+  it('has every status in the expected numbers', () => {
     expect(statusCounts).toEqual({ pending: 5, countered: 5, accepted: 7, no_show: 3, expired: 3, fulfilled: 3, declined: 7, withdrawn: 4 })
   })
 
@@ -376,7 +372,7 @@ describe('loan requests', () => {
 })
 
 describe('tables and audit log', () => {
-  it('has the row counts the Firestore seed had, except where noted in the header', () => {
+  it('has the row counts listed in the header', () => {
     expect(tableCounts).toEqual({
       audit_log: 206,
       categories: 8,
@@ -392,12 +388,12 @@ describe('tables and audit log', () => {
     })
   })
 
-  it('has the transaction mix of the Firestore seed', async () => {
+  it('has the expected transaction mix', async () => {
     const rows = await db.select({ type: transactions.transaction_type, n: count() }).from(transactions).groupBy(transactions.transaction_type)
     expect(Object.fromEntries(rows.map((r) => [r.type, r.n]))).toEqual({ OUT: 23, IN: 3, ADJUST: 1, RETURN: 4 })
   })
 
-  it("records the manual overrides of the Firestore seed: every Stock Out / Return of a staff member without a card, plus Lucas Hamilton's explicit one", async () => {
+  it("records the manual overrides: every Stock Out / Return of a staff member without a card, plus Lucas Hamilton's explicit one", async () => {
     const rows = await db
       .select({ type: transactions.transaction_type, manual: transactions.manual_override, who: transactions.staff_name, card: staff.card_uid, notes: transactions.notes })
       .from(transactions)
@@ -420,7 +416,7 @@ describe('tables and audit log', () => {
     expect(rows.filter((r) => r.type === 'IN' || r.type === 'ADJUST').every((r) => !r.manual)).toBe(true)
   })
 
-  it('has the audit counts per entity and action (differences from the Firestore seed are explained in the header)', () => {
+  it('has the audit counts per entity and action listed in the header', () => {
     expect(auditCounts).toEqual({
       'category create': 8,
       'category update': 1,
@@ -469,7 +465,7 @@ describe('products', () => {
     }
   })
 
-  it('ends at the stock levels of the Firestore seed', async () => {
+  it('ends at the expected stock levels', async () => {
     const rows = await db.select({ name: products.name, qty: products.quantity_on_hand }).from(products)
     const qty = Object.fromEntries(rows.map((r) => [r.name, r.qty]))
     expect(qty).toMatchObject({

@@ -12,8 +12,7 @@ import {
 // Product photos live in Firebase Storage, but only this server writes or
 // deletes them: the caller is checked against Cloud SQL (assertAdmin reads
 // profiles.role) exactly like every other admin action, then the Admin SDK
-// saves the file. storage.rules therefore refuses all writes from browsers,
-// and Firestore plays no part in deciding who is an admin.
+// saves the file. storage.rules therefore refuses all writes from browsers.
 
 export interface ImageStore {
   save(path: string, data: Buffer, contentType: string): Promise<void>

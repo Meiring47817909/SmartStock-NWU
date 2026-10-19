@@ -4,9 +4,8 @@ Stock and loan management for the NWU BICS store, built with Next.js 16 (App Rou
 
 - **Data:** PostgreSQL, reached only from server code through `DATABASE_URL`. The browser calls the `/api/*` routes.
 - **Sign-in:** Firebase Auth. **Product photos:** Firebase Storage, written and deleted only by the server (`/api/products/images`) after it checks the admin role in PostgreSQL. `storage.rules` allows public reads and no browser writes.
-- Firestore is no longer used, and the old Firestore database has been deleted. The one-off importer that copied it into PostgreSQL (and the cut-over write-freeze files) were removed once that was done; they remain in the git history.
 
-The full handout (setup, cut-over runbook, behaviour changes, manual check list and the dated history) is in [`handout.md`](./handout.md).
+The full handout (setup, Cloud SQL, deployment, email and the manual check list) is in [`handout.md`](./handout.md).
 
 ## Local setup
 
@@ -20,7 +19,7 @@ npm run mailpit       # optional local inbox at http://localhost:8025 (Docker, o
 npm run dev:emulators # the app on http://localhost:3000, against the emulators and the local database
 ```
 
-The `db:*` scripts, the seeds and the importer read `DATABASE_URL` from the shell environment, not from `.env.local` (only Next.js reads that file); without it they use the local `smartstock` database.
+The `db:*` scripts and the seeds read `DATABASE_URL` from the shell environment, not from `.env.local` (only Next.js reads that file); without it they use the local `smartstock` database.
 
 If you do not use `npm run db`, create the databases `smartstock` (the app) and `smartstock_test` (the tests) yourself and set `DATABASE_URL` (and `TEST_DATABASE_URL` for the tests, default `postgres://postgres:postgres@127.0.0.1:5432/smartstock_test`).
 
@@ -53,6 +52,6 @@ Product photos are uploaded through the server, so the Firebase Storage rules mu
 npx firebase-tools deploy --only storage --project <project-id>
 ```
 
-Command-line work against Cloud SQL (`npm run db:migrate`, the importer) goes through the Cloud SQL Auth Proxy on `127.0.0.1:5433`, with no `sslmode`. Run `db:migrate` there before deploying code that adds a migration. The handout covers moving the live data over (including the write freeze on the old app), the PostgreSQL connection pool on Vercel and the deployment notes.
+Command-line work against Cloud SQL (`npm run db:migrate`, `npm run db:check`) goes through the Cloud SQL Auth Proxy on `127.0.0.1:5433`, with no `sslmode`. Run `db:migrate` there before deploying code that adds a migration. The handout covers running commands against Cloud SQL, loading the demo data onto the live site, the PostgreSQL connection pool on Vercel and the deployment notes.
 
 Next.js in this repo has breaking changes from older versions: read the guides in `node_modules/next/dist/docs/` before changing routes or build settings.

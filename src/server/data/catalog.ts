@@ -31,13 +31,13 @@ import {
 } from '@/lib/catalogRules'
 import type { Category, LendingInterval, Product } from '@/types/database'
 
-// `Product.id` is typed `number` in src/types/database.ts but ids are strings (same cast the Firestore code used for its
-// string document ids); the server side says so honestly, and the browser client hands pages the `Product` type they use.
+// `Product.id` is typed `number` in src/types/database.ts but ids are strings (20-character keys from newId); the
+// server side says so honestly, and the browser client hands pages the `Product` type they use.
 export type ProductOut = Omit<Product, 'id'> & { id: string }
 
 const ID_PATTERN = /^[A-Za-z0-9]{20}$/
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
-export const DEFAULT_LOCATION = 'NWU - Potchefstroom, Building G4, Room 28' // same default the Products page falls back to (and the importer)
+export const DEFAULT_LOCATION = 'NWU - Potchefstroom, Building G4, Room 28' // same default the Products page falls back to
 
 /** Run `fn` in a transaction on the caller's connection (a savepoint when `ctx.db` is already a transaction). */
 function inTx<T>(ctx: Ctx, fn: (txCtx: Ctx) => Promise<T>): Promise<T> {

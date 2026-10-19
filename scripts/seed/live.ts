@@ -5,7 +5,6 @@
 //   - Auth: it only LOOKS UP existing accounts by email and links them. It never creates an account, never changes one,
 //     never sets a password. Every login the cast needs must already exist, or the run stops before writing anything.
 //   - Storage: it uploads the product photos (new files under products/<new product id>/). Nothing existing is touched.
-// Firestore is not used at all.
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { parseEnv } from 'node:util'
@@ -16,7 +15,6 @@ export const EMULATOR_ENV_VARS = [
   'FIREBASE_AUTH_EMULATOR_HOST',
   'FIREBASE_STORAGE_EMULATOR_HOST',
   'STORAGE_EMULATOR_HOST',
-  'FIRESTORE_EMULATOR_HOST',
 ] as const
 
 export function liveSeedEnvProblem(env: Record<string, string | undefined>): string | null {

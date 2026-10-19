@@ -682,8 +682,8 @@ export async function loadWaivedByTxn(ctx: Ctx): Promise<WaivedByTxn> {
   return map
 }
 
-// `ReturnWaiver.staff_id` is typed `number` in src/types/database.ts but ids are strings (the same cast the Firestore
-// code made); the server side says so honestly, and the browser client hands pages the `ReturnWaiver` type.
+// `ReturnWaiver.staff_id` is typed `number` in src/types/database.ts but ids are strings (20-character keys from
+// newId); the server side says so honestly, and the browser client hands pages the `ReturnWaiver` type.
 export type ReturnWaiverOut = Omit<ReturnWaiver, 'staff_id'> & { staff_id: string | null }
 
 /** Every waiver, oldest first (the Staff page's expanded rows show who kept what). */

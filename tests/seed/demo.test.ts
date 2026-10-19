@@ -27,8 +27,8 @@ import { listRequests } from '@/server/data/loanRequests'
 import { closeTestDb, resetTestDb } from '../helpers/db'
 
 // seed:demo on PostgreSQL: the NWU demo version of seed:comprehensive, run end to end against a fresh test database with
-// in-memory Auth/Storage stand-ins. The first 11 tests are the 11 assertions of the scratch check-seed-demo.mjs that checked
-// the Firestore version (the numbers in their titles); the rest pin what the PostgreSQL version adds.
+// in-memory Auth/Storage stand-ins. The first 11 tests are the 11 core checks (the numbers in their titles); the rest pin the
+// details.
 //
 // The expected counts are seed:comprehensive's (see tests/seed/comprehensive.test.ts) with the 10 dropped scenarios, the
 // 10 fewer staff and the one extra product taken into account:
@@ -149,7 +149,7 @@ afterAll(async () => {
 
 const ctxNow = () => seedCtx(db, NOW, admin)
 
-describe('the 11 checks of the Firestore seed:demo', () => {
+describe('the 11 core checks of seed:demo', () => {
   it('1. only two logins: Selouna (admin) and Meiring (portal)', () => {
     expect([...fake.users.values()].map((u) => u.email).sort()).toEqual([MEIRING, ADMIN].sort())
     expect([...fake.users.values()].find((u) => u.email === ADMIN)?.uid).toBe('admin-selouna-visser')
@@ -494,7 +494,7 @@ describe('seed:demo wiring', () => {
     expect(scripts['seed:comprehensive']).toBe('tsx --conditions=react-server scripts/seed/comprehensive.ts')
   })
 
-  it('has retired the Firestore seeds and their npm scripts, and kept the image scripts', () => {
+  it('has no seed scripts besides seed:comprehensive and seed:demo, and keeps the image scripts', () => {
     const retired = [
       'seed-demo.mjs', 'seed-emulator.mjs', 'seed-lending-portal.mjs', 'seed-staff-roster.mjs', 'seed-conflict-scenarios.mjs',
       'seed-outstanding.mjs', 'seed-products.mjs', 'seed-product-catalog.mjs', 'cleanup-borrower-test-data.mjs',

@@ -352,7 +352,7 @@ export function createProductImageSeeder(bucket: SeedBucket, imagesDir: string =
 
 /** firebase-admin loads on demand, so tests that pass fakes never initialise it. Checks the emulator hosts and that both answer first. */
 export async function createEmulatorAuthAndBucket(): Promise<{ auth: SeedAuth; bucket: SeedBucket }> {
-  // Same defaults as the old Firestore seed: the ports `npm run emulators` uses (firebase.json). A value already set in
+  // Defaults: the ports `npm run emulators` uses (firebase.json). A value already set in
   // the shell wins, and assertEmulatorsReachable still refuses anything that isn't on this machine.
   process.env.FIREBASE_AUTH_EMULATOR_HOST ||= '127.0.0.1:9099'
   process.env.FIREBASE_STORAGE_EMULATOR_HOST ||= '127.0.0.1:9199'

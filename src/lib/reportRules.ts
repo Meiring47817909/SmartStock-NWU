@@ -1,9 +1,8 @@
 // Row shapes of the Reports page's four tabs and of the Audit Log, shared by the server (src/server/data/reports.ts,
 // auditLog.ts) and the browser client (src/lib/api/reports.ts, auditLog.ts). No Firebase, no database.
 //
-// The rows are the ones the pages built in the browser when they read Firestore directly, so the table, CSV and PDF code
-// reads the same fields. What changed is who does the work: the dates (calendar days in Africa/Johannesburg), the
-// outstanding balances and the status of each row are decided on the server.
+// The rows carry the fields the table, CSV and PDF code reads. The server decides the dates (calendar days in
+// Africa/Johannesburg), the outstanding balances and the status of each row.
 import { appCalendarDay } from '@/lib/utils'
 import type { AuditLogEntry, LoanRequestLine, TransactionLine } from '@/types/database'
 

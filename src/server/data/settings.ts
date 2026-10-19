@@ -19,8 +19,8 @@ import {
 import { DEFAULT_SYSTEM_EMAIL } from '@/lib/notificationCatalog'
 import type { NotificationSettingKey } from '@/types/database'
 
-// The notification settings: one `settings` row, key 'notifications', holding the same flat object the old Firestore
-// document held ({ <toggle>: boolean, admin_notification_email, system_from_email, updated_by_uid, updated_by_name }).
+// The notification settings: one `settings` row, key 'notifications', holding one flat object
+// ({ <toggle>: boolean, admin_notification_email, system_from_email, updated_by_uid, updated_by_name }).
 // Reads and saves are admin only (the Settings page and the Dashboard); the notification routes and the public
 // contact route read the row through getSettingsRow on the server.
 

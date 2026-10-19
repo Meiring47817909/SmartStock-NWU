@@ -1,6 +1,5 @@
 // The pure notification-settings definitions and rules (src/lib/notificationSettingsRules.ts). Port of the scratch harness
-// check-settings.mts (5 checks). The harness loaded the settings through a stubbed Firestore document; the stored object
-// is now passed to resolveNotificationSettings (and the same cases run through the PostgreSQL-backed
+// check-settings.mts (5 checks). The stored object is passed to resolveNotificationSettings (and the same cases run through the PostgreSQL-backed
 // loadNotificationSettings in tests/server/settings.test.ts).
 import assert from 'node:assert/strict'
 import { describe, it } from 'vitest'
