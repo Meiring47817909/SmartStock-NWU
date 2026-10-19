@@ -316,6 +316,23 @@ describe('submitLoanRequest', () => {
 describe('validateCartDates', () => {
   const cart = (...items: [string, number][]) => items.map(([productId, quantity]) => ({ productId, quantity }))
 
+  it('an item the IT Store has switched to Unavailable is refused, by name, and accepted again once it is switched back on', async () => {
+    await db.update(products).set({ available: false }).where(eq(products.id, 'p1'))
+    expect(await validateCartDates(samCtx(), cart(['p1', 1], ['p2', 1]), '2026-10-10', '2026-10-12')).toEqual({
+      valid: false,
+      errors: ['Projector is no longer offered — remove it from your cart.'],
+    })
+    // The submit runs the same check on the server, so a stale cart page can't get round it.
+    await expectDataError(
+      submitLoanRequest(samCtx(), { cart: [{ productId: 'p1', quantity: 1 }], fromDate: '2026-10-10', toDate: '2026-10-12' }),
+      400,
+      'Projector is no longer offered — remove it from your cart.',
+    )
+    expect(await db.select().from(loanRequests)).toEqual([])
+    await db.update(products).set({ available: true }).where(eq(products.id, 'p1'))
+    expect(await validateCartDates(samCtx(), cart(['p1', 1], ['p2', 1]), '2026-10-10', '2026-10-12')).toEqual({ valid: true, errors: [] })
+  })
+
   it('an over-reserved range names the product and how many units are left', async () => {
     await seedRequest({ id: 'held', status: 'accepted', from: '2026-10-12', to: '2026-10-16', lines: [['p1', 3]] })
     const res = await validateCartDates(samCtx(), cart(['p1', 3]), '2026-10-14', '2026-10-18')

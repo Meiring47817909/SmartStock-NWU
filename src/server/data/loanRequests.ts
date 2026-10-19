@@ -437,6 +437,12 @@ async function checkCart(c: Ctx, items: CartItem[], fromDate: string, toDate: st
   const effectiveTo = effectiveToDate(toDate)
 
   for (const { product, quantity } of items) {
+    // The Available switch on the Products page: an item the IT Store has stopped offering can't be requested, even if it
+    // was added to the cart (or a stale Browse page) before it was switched off.
+    if (!product.available) {
+      errors.push(`${product.name} is no longer offered — remove it from your cart.`)
+      continue
+    }
     // lend_to is optional — unset means the product is lendable indefinitely (no end date decided yet), not "not
     // lendable". Only lend_from (the window has actually opened) is required.
     if (!product.lend_from) {
