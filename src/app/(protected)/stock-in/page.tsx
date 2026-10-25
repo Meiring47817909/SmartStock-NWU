@@ -123,8 +123,8 @@ export default function StockInPage() {
             {cart.length > 0 && (
               <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto">
               <Table>
-                <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
-                  <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+                <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+                  <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
                     <TableHead className="text-base font-bold text-[#2D203A]">Product</TableHead>
                     <TableHead className="text-base font-bold text-[#2D203A]">Barcode</TableHead>
                     <TableHead className="text-base font-bold text-[#2D203A]">Current Stock</TableHead>

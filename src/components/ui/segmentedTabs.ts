@@ -19,8 +19,11 @@
 export const SEGMENTED_TABS_LIST =
   '@container mb-4 flex w-full !h-auto gap-1.5 overflow-hidden rounded-2xl border border-purple-200/50 bg-white/60 p-1.5 backdrop-blur-sm'
 
+// data-active:hover:text-white keeps the selected tab's label white while the
+// cursor is still over it: TabsTrigger's base class has hover:text-foreground,
+// which would otherwise turn it black.
 const TRIGGER_BASE =
-  '!h-auto min-h-16 flex-1 flex-col cursor-pointer items-center justify-center gap-1 self-center rounded-xl px-1 py-2 text-center text-xs leading-tight font-semibold whitespace-normal text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:shadow-md'
+  '!h-auto min-h-16 flex-1 flex-col cursor-pointer items-center justify-center gap-1 self-center rounded-xl px-1 py-2 text-center text-xs leading-tight font-semibold whitespace-normal text-(--nwu-grey-dark) transition-all not-data-active:hover:bg-white/70 not-data-active:hover:text-foreground data-active:bg-(--nwu-purple) data-active:text-white data-active:hover:text-white data-active:shadow-md'
 
 /** Switches to the single-row layout once the bar is 42rem (672px) wide. Fits two or three tabs. */
 export const SEGMENTED_TAB_TRIGGER =

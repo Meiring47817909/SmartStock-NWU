@@ -155,6 +155,16 @@ export interface SeedCast {
   extras?: (helpers: SeedExtrasHelpers) => Promise<void>
   /** Paragraphs (lines) the summary prints just before the "who is who" legend. */
   notes?: string[][]
+  /**
+   * seed:video: the portal borrower (PortalLinked) starts with no loan requests at all, so the request they make on
+   * camera is the only one on screen. The My Requests history of section 7 goes to `historyHolderKey` instead, and the
+   * borrower is given one overdue walk-in Stock Out (a Network Switch 8-Port) to bring back on the Returns page.
+   */
+  spinVideo?: {
+    historyHolderKey: string
+    /** Original product name -> name used in this seed (seed:video moves the on-camera items onto Browse page 2). */
+    productRenames?: Record<string, string>
+  }
 }
 
 /**
@@ -191,37 +201,37 @@ const D = {
   bmi: 'Business Mathematics and Informatics',
 }
 const COMPREHENSIVE_ROWS: CastRow[] = [
-  ['PendingFresh', 'Emma', 'Richardson', 'emma.richardson@gmail.com', D.cs, 'Pending loan request (fresh); staff create/update audit'],
-  ['PendingNearExpiry', 'Oliver', 'Bennett', 'oliver.bennett92@gmail.com', D.phys, 'Pending loan request, close to expiring'],
-  ['CounteredRich', 'Sophie', 'Hartley', 'sophie.hartley@gmail.com', D.bio, 'Counter-offer with removed line, messages and date change'],
-  ['CounteredSimple', 'James', 'Whitfield', 'james.whitfield@gmail.com', D.geo, 'Plain counter-offer'],
-  ['AcceptedOnSchedule', 'Charlotte', 'Ellis', 'charlotte.ellis88@gmail.com', D.agri, 'Accepted request, pickup on schedule'],
-  ['InsufficientCauseRecipient', 'Daniel', 'Mercer', 'daniel.mercer@gmail.com', D.math, 'Pickup short on stock, overdue return is the likely cause'],
-  ['OverdueHolderCause', 'Amelia', 'Hayes', 'amelia.hayes@gmail.com', D.bmi, 'Holds the overdue item behind the shortage above'],
-  ['InsufficientNoCauseRecipient', 'Benjamin', 'Carter', 'ben.carter.work@gmail.com', D.cs, 'Pickup short on stock, no overdue return to blame'],
-  ['NoShowLive', 'Grace', 'Thornton', 'grace.thornton@gmail.com', D.phys, 'Missed pickup -- flips to Not Picked Up live on first Dashboard load'],
-  ['NoShowRecorded', 'Samuel', 'Prescott', 'samuel.prescott@gmail.com', D.bio, 'Missed pickup, already recorded'],
-  ['ExpiredRecorded', 'Olivia', 'Sinclair', 'olivia.sinclair@gmail.com', D.geo, 'Expired request'],
-  ['FulfilledPickup', 'Henry', 'Caldwell', 'henry.caldwell@gmail.com', D.agri, 'Full pending -> countered -> accepted -> fulfilled history'],
-  ['DeclinedPending', 'Lily', 'Fraser', 'lily.fraser@gmail.com', D.math, 'Declined by admin from pending'],
-  ['DeclinedCounterRich', 'William', 'Ashford', 'william.ashford@gmail.com', D.bmi, 'Admin declined a rich counter-offer'],
-  ['DeclinedByStaff', 'Chloe', 'Winters', 'chloe.winters@gmail.com', D.cs, 'Declined by the staff member via the portal'],
-  ['WithdrawnByStaff', 'Thomas', 'Reeves', 'thomas.reeves@gmail.com', D.phys, 'Withdrawn by staff, no reason'],
-  ['WithdrawnByAdmin', 'Isabella', 'Crawford', 'isabella.crawford@gmail.com', D.bio, 'Admin cancelled an accepted pickup, with a reason'],
-  ['ReturnNoDate', 'Lucas', 'Hamilton', 'lucas.hamilton@gmail.com', D.geo, 'Outstanding return -- No Return Date'],
-  ['ReturnOverdue', 'Hannah', 'Wells', 'hannah.wells@gmail.com', D.agri, 'Outstanding return -- Overdue'],
-  ['ReturnDueToday', 'Nathan', 'Brooks', 'nathan.brooks@gmail.com', D.math, 'Outstanding return -- Due Today'],
-  ['ReturnNotDueYet', 'Victoria', 'Lang', 'victoria.lang@gmail.com', D.bmi, 'Outstanding return -- Not Due Yet'],
-  ['ReturnPartlyResolved', 'Joshua', 'Kerr', 'joshua.kerr@gmail.com', D.cs, 'Outstanding return -- Partly Resolved (one unit written off)'],
-  ['ReturnMixedHolder', 'Natalie', 'Pierce', 'natalie.pierce@gmail.com', D.phys, 'One holder, three return states at once'],
-  ['ReturnCompleted', 'Ethan', 'Marshall', 'ethan.marshall@gmail.com', D.bio, 'Fully returned'],
-  ['ReturnPartial', 'Rachel', 'Dawson', 'rachel.dawson@gmail.com', D.geo, 'Partially returned, the rest not due yet'],
-  ['MultiBarcodeFull', 'Adam', 'Sutton', 'adam.sutton@gmail.com', D.agri, 'Multi-product, multi-barcode Stock Out, fully returned'],
-  ['MultiBarcodePartial', 'Megan', 'Holloway', 'megan.holloway@gmail.com', D.math, 'Multi-product, multi-barcode Stock Out, partly returned (rest due today)'],
-  ['LostLabels', 'Ryan', 'Fletcher', 'ryan.fletcher@gmail.com', D.bmi, 'Lost-label Returns demo (relabel flow)'],
-  ['BadgeActive', 'Zoe', 'Mitchell', 'zoe.mitchell@gmail.com', D.cs, 'Staff badge activated (audit log); holds two items that are not due yet'],
-  ['BadgeDeactivated', 'Callum', 'Rhodes', 'callum.rhodes@gmail.com', D.phys, 'Deactivated staff badge (audit log, inactive card)'],
-  ['PortalLinked', 'Jessica', 'Moore', 'jessica.moore@gmail.com', D.bio, 'Portal borrower login -- owns the My Requests history'],
+  ['PendingFresh', 'Emma', 'Richardson', 'emma.richardson@nwu.ac.za', D.cs, 'Pending loan request (fresh); staff create/update audit'],
+  ['PendingNearExpiry', 'Oliver', 'Bennett', 'oliver.bennett@nwu.ac.za', D.phys, 'Pending loan request, close to expiring'],
+  ['CounteredRich', 'Sophie', 'Hartley', 'sophie.hartley@nwu.ac.za', D.bio, 'Counter-offer with removed line, messages and date change'],
+  ['CounteredSimple', 'James', 'Whitfield', 'james.whitfield@nwu.ac.za', D.geo, 'Plain counter-offer'],
+  ['AcceptedOnSchedule', 'Charlotte', 'Ellis', 'charlotte.ellis@nwu.ac.za', D.agri, 'Accepted request, pickup on schedule'],
+  ['InsufficientCauseRecipient', 'Daniel', 'Mercer', 'daniel.mercer@nwu.ac.za', D.math, 'Pickup short on stock, overdue return is the likely cause'],
+  ['OverdueHolderCause', 'Amelia', 'Hayes', 'amelia.hayes@nwu.ac.za', D.bmi, 'Holds the overdue item behind the shortage above'],
+  ['InsufficientNoCauseRecipient', 'Benjamin', 'Carter', 'benjamin.carter@nwu.ac.za', D.cs, 'Pickup short on stock, no overdue return to blame'],
+  ['NoShowLive', 'Grace', 'Thornton', 'grace.thornton@nwu.ac.za', D.phys, 'Missed pickup -- flips to Not Picked Up live on first Dashboard load'],
+  ['NoShowRecorded', 'Samuel', 'Prescott', 'samuel.prescott@nwu.ac.za', D.bio, 'Missed pickup, already recorded'],
+  ['ExpiredRecorded', 'Olivia', 'Sinclair', 'olivia.sinclair@nwu.ac.za', D.geo, 'Expired request'],
+  ['FulfilledPickup', 'Henry', 'Caldwell', 'henry.caldwell@nwu.ac.za', D.agri, 'Full pending -> countered -> accepted -> fulfilled history'],
+  ['DeclinedPending', 'Lily', 'Fraser', 'lily.fraser@nwu.ac.za', D.math, 'Declined by admin from pending'],
+  ['DeclinedCounterRich', 'William', 'Ashford', 'william.ashford@nwu.ac.za', D.bmi, 'Admin declined a rich counter-offer'],
+  ['DeclinedByStaff', 'Chloe', 'Winters', 'chloe.winters@nwu.ac.za', D.cs, 'Declined by the staff member via the portal'],
+  ['WithdrawnByStaff', 'Thomas', 'Reeves', 'thomas.reeves@nwu.ac.za', D.phys, 'Withdrawn by staff, no reason'],
+  ['WithdrawnByAdmin', 'Isabella', 'Crawford', 'isabella.crawford@nwu.ac.za', D.bio, 'Admin cancelled an accepted pickup, with a reason'],
+  ['ReturnNoDate', 'Lucas', 'Hamilton', 'lucas.hamilton@nwu.ac.za', D.geo, 'Outstanding return -- No Return Date'],
+  ['ReturnOverdue', 'Hannah', 'Wells', 'hannah.wells@nwu.ac.za', D.agri, 'Outstanding return -- Overdue'],
+  ['ReturnDueToday', 'Nathan', 'Brooks', 'nathan.brooks@nwu.ac.za', D.math, 'Outstanding return -- Due Today'],
+  ['ReturnNotDueYet', 'Victoria', 'Lang', 'victoria.lang@nwu.ac.za', D.bmi, 'Outstanding return -- Not Due Yet'],
+  ['ReturnPartlyResolved', 'Joshua', 'Kerr', 'joshua.kerr@nwu.ac.za', D.cs, 'Outstanding return -- Partly Resolved (one unit written off)'],
+  ['ReturnMixedHolder', 'Natalie', 'Pierce', 'natalie.pierce@nwu.ac.za', D.phys, 'One holder, three return states at once'],
+  ['ReturnCompleted', 'Ethan', 'Marshall', 'ethan.marshall@nwu.ac.za', D.bio, 'Fully returned'],
+  ['ReturnPartial', 'Rachel', 'Dawson', 'rachel.dawson@nwu.ac.za', D.geo, 'Partially returned, the rest not due yet'],
+  ['MultiBarcodeFull', 'Adam', 'Sutton', 'adam.sutton@nwu.ac.za', D.agri, 'Multi-product, multi-barcode Stock Out, fully returned'],
+  ['MultiBarcodePartial', 'Megan', 'Holloway', 'megan.holloway@nwu.ac.za', D.math, 'Multi-product, multi-barcode Stock Out, partly returned (rest due today)'],
+  ['LostLabels', 'Ryan', 'Fletcher', 'ryan.fletcher@nwu.ac.za', D.bmi, 'Lost-label Returns demo (relabel flow)'],
+  ['BadgeActive', 'Zoe', 'Mitchell', 'zoe.mitchell@nwu.ac.za', D.cs, 'Staff badge activated (audit log); holds two items that are not due yet'],
+  ['BadgeDeactivated', 'Callum', 'Rhodes', 'callum.rhodes@nwu.ac.za', D.phys, 'Deactivated staff badge (audit log, inactive card)'],
+  ['PortalLinked', 'Jessica', 'Moore', 'jessica.moore@nwu.ac.za', D.bio, 'Portal borrower login -- owns the My Requests history'],
 ]
 
 export const COMPREHENSIVE_CAST: SeedCast = {
@@ -340,8 +350,8 @@ export function summaryLines(s: SeedSummary): string[] {
     '  a matching multi-barcode Stock In sits in Transaction History / Audit Log.',
     '',
     `LOST LABELS: Returns -> "${s.lostLabels.staff}" has one row per product (3 x ${s.lostLabels.monitor},`,
-    `  barcode DEMO-LOSTLABEL-A; 2 x ${s.lostLabels.webcam}, barcode DEMO-LOSTPAIR-A). Scan A once, then click + twice and enter`,
-    '  DEMO-LOSTLABEL-B / -C: every unit can be returned, lost labels included.',
+    `  barcode 6009880010981; 2 x ${s.lostLabels.webcam}, barcode 6009880011193). Scan A once, then click + twice and enter`,
+    '  6009880010998 / 6009880011001: every unit can be returned, lost labels included.',
     '',
     ...s.notes.flatMap((paragraph) => [...paragraph, '']),
     'WHO IS WHO (each staff member demonstrates one scenario):',
@@ -542,11 +552,12 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   async function makeProduct(spec: ProductSpec, overrides: { quantity_on_hand?: number } = {}): Promise<SeedProduct> {
     // Photos go up first under products/<id>/ (the Products page does the same), then the product is saved with the paths.
     const id = newId()
-    const images = await seedImages(id, spec.name, spec.image_slug)
+    const name = cast.spinVideo?.productRenames?.[spec.name] ?? spec.name
+    const images = await seedImages(id, name, spec.image_slug)
     const barcodes = spec.barcodes ?? [spec.barcode]
     const input: ProductInput = {
       id,
-      name: spec.name,
+      name,
       description: spec.description,
       barcodes,
       category_id: categoryId[spec.category],
@@ -570,65 +581,65 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   }
 
   P.healthy = await makeProduct({
-    name: 'Wireless Mouse', barcode: 'DEMO-HEALTHY', barcodes: ['DEMO-HEALTHY', 'DEMO-HEALTHY-ALT'],
+    name: 'Wireless Mouse', barcode: '6009880010219', barcodes: ['6009880010219', '6009880010226'],
     quantity_on_hand: 25, reorder_threshold: 5, lending_interval: 'week_1', category: 'Peripherals',
     image_slug: 'wireless-mouse', description: '2.4 GHz wireless optical mouse with a nano USB-A receiver that stores inside the battery bay. Ergonomic right-hand shape with a precision scroll wheel, forward and back buttons and adjustable 800 / 1200 / 1600 DPI. Runs up to 12 months on a single AA battery. Plug-and-play on Windows, macOS and Linux.',
   })
   // Edge case: ten barcodes on one product -- stress-tests how the Issued per Staff report renders a long barcode list
   // under a single product line. Paper is a natural fit: every ream carries its own barcode.
   P.manyBarcodes = await makeProduct({
-    name: 'A4 Copy Paper (500 sheets)', barcode: 'DEMO-MANYBARCODE-01',
-    barcodes: Array.from({ length: 10 }, (_, i) => `DEMO-MANYBARCODE-${String(i + 1).padStart(2, '0')}`),
+    name: 'A4 Copy Paper (500 sheets)', barcode: '6009880020003',
+    barcodes: ['6009880020003', '6009880020010', '6009880020027', '6009880020034', '6009880020041', '6009880020058', '6009880020065', '6009880020072', '6009880020089', '6009880020096'],
     quantity_on_hand: 20, reorder_threshold: 3, lending_interval: 'week_1', category: 'Consumables',
     image_slug: 'a4-copy-paper', description: '80 gsm white A4 multipurpose paper (210 x 297 mm), 500 sheets per ream. Suitable for laser and inkjet printers, photocopiers and fax machines. Acid-free, with a smooth finish that feeds reliably and resists jamming. Each ream carries its own barcode so individual reams can be issued and returned.',
   })
   // Two more multi-barcode products for the "Multi-Barcode" Stock In / Stock Out / Return scenario in section 5.
   P.kitCable = await makeProduct({
-    name: 'USB-C Cable 1m', barcode: 'DEMO-KITCABLE-A', barcodes: ['DEMO-KITCABLE-A', 'DEMO-KITCABLE-B', 'DEMO-KITCABLE-C'],
+    name: 'USB-C Cable 1m', barcode: '6009880010707', barcodes: ['6009880010707', '6009880010714', '6009880010721'],
     quantity_on_hand: 0, reorder_threshold: 2, lending_interval: 'week_2', category: 'Cables & Adapters',
     image_slug: 'usb-c-cable', description: 'Braided nylon USB-C to USB-C cable, 1 metre, with a connector at each end. Supports USB 3.1 Gen 2 data transfer up to 10 Gbps, 60 W fast charging and video output on compatible devices. Reinforced strain relief and a reversible plug that fits either way round.',
   })
   P.kitAdapter = await makeProduct({
-    name: 'DisplayPort Cable 2m', barcode: 'DEMO-KITADAPTER-A', barcodes: ['DEMO-KITADAPTER-A', 'DEMO-KITADAPTER-B'],
+    name: 'DisplayPort Cable 2m', barcode: '6009880010561', barcodes: ['6009880010561', '6009880010578'],
     quantity_on_hand: 0, reorder_threshold: 2, lending_interval: 'week_2', category: 'Cables & Adapters',
     image_slug: 'displayport-cable', description: 'DisplayPort 1.4 cable, 2 metres, with a DisplayPort male connector at each end. Carries video and audio up to 8K at 30 Hz or 4K at 120 Hz, with HDR support. Gold-plated latching connectors give a secure fit on monitors, docking stations and graphics cards.',
   })
   // Lost-label demo: THREE units are issued under ONE barcode (A) even though the product has three registered barcodes.
   P.lostLabel = await makeProduct({
-    name: '27-inch Monitor', barcode: 'DEMO-LOSTLABEL-A', barcodes: ['DEMO-LOSTLABEL-A', 'DEMO-LOSTLABEL-B', 'DEMO-LOSTLABEL-C'],
+    name: '27-inch Monitor', barcode: '6009880010981', barcodes: ['6009880010981', '6009880010998', '6009880011001'],
     quantity_on_hand: 10, reorder_threshold: 2, lending_interval: 'week_2', category: 'Peripherals',
     image_slug: 'monitor-27', description: '27-inch Full HD (1920 x 1080) IPS monitor with wide 178-degree viewing angles and a 75 Hz refresh rate. Inputs: 2 x HDMI 1.4, 1 x DisplayPort 1.2 and a 3.5 mm audio output. Height-adjustable stand with tilt and swivel, plus a 100 x 100 mm VESA mount. Flicker-free with a low blue-light mode.',
   })
   // Second product on the same Lost Labels transaction, so that row has TWO products (3 x monitor + 2 x webcam).
   P.lostLabelPair = await makeProduct({
-    name: 'HD Webcam', barcode: 'DEMO-LOSTPAIR-A', barcodes: ['DEMO-LOSTPAIR-A', 'DEMO-LOSTPAIR-B'],
+    name: 'HD Webcam', barcode: '6009880011193', barcodes: ['6009880011193', '6009880011209'],
     quantity_on_hand: 8, reorder_threshold: 2, lending_interval: 'week_2', category: 'Peripherals',
     image_slug: 'hd-webcam', description: '1080p Full HD webcam recording at 30 frames per second with a 90-degree wide-angle lens and autofocus. Built-in dual noise-reducing microphones. Connects through a 1.5 m attached USB-A 2.0 cable, plug and play with no drivers. Clips onto a monitor or screws onto a standard tripod, and works with Teams, Zoom and Google Meet.',
   })
   P.lowStock = await makeProduct({
-    name: 'Ethernet Patch Cable Cat6', barcode: 'DEMO-LOWSTOCK', quantity_on_hand: 4, reorder_threshold: 5,
+    name: 'Ethernet Patch Cable Cat6', barcode: '6009880011339', quantity_on_hand: 4, reorder_threshold: 5,
     lending_interval: 'week_2', category: 'Cables & Adapters',
     image_slug: 'ethernet-patch-cable', description: 'Cat6 patch cable with RJ45 connectors at both ends, 2 metres. Supports Gigabit Ethernet up to 1 Gbps (rated to 250 MHz) for switches, routers, access points and wall points. Snagless moulded boots protect the latch, and the shielded cable reduces interference.',
   })
   // Out of stock by the end of the seed. It is created with one unit so that the declined requests below could be
   // submitted (the app refuses a request for stock that is not there); the last unit is written off at the end (section 8).
   P.outOfStock = await makeProduct({
-    name: 'Solid State Drive 1TB', barcode: 'DEMO-OUTOFSTOCK', quantity_on_hand: 0, reorder_threshold: 3,
+    name: 'Solid State Drive 1TB', barcode: '6009880011759', quantity_on_hand: 0, reorder_threshold: 3,
     lending_interval: 'week_3', category: 'Storage',
     image_slug: 'ssd-1tb', description: '1 TB 2.5-inch SATA III solid state drive with sequential reads up to 550 MB/s and writes up to 520 MB/s. Connects through a standard SATA data port plus SATA power, in a 7 mm slim case that fits laptops and desktops. Shock-resistant with no moving parts, a quick way to upgrade an ageing hard drive.',
   }, { quantity_on_hand: 1 })
   P.indefinite = await makeProduct({
-    name: 'Business Laptop', barcode: 'DEMO-INDEFINITE', quantity_on_hand: 12, reorder_threshold: 2,
+    name: 'Business Laptop', barcode: '6009880010356', quantity_on_hand: 12, reorder_threshold: 2,
     lending_interval: 'indefinite', category: 'Laptops & Computers',
     image_slug: 'business-laptop', description: '14-inch business laptop with a Full HD anti-glare display, 16 GB RAM and a 512 GB NVMe SSD. Ports: 2 x USB-A 3.2, 2 x USB-C (Thunderbolt 4, charging and DisplayPort), 1 x HDMI 2.0, a 3.5 mm combo audio jack and a microSD reader. Backlit keyboard, fingerprint reader and Wi-Fi 6. Issued for the duration of a project.',
   })
   P.monthInterval = await makeProduct({
-    name: 'Wi-Fi Router', barcode: 'DEMO-MONTH', quantity_on_hand: 15, reorder_threshold: 3,
+    name: 'Wi-Fi Router', barcode: '6009880011544', quantity_on_hand: 15, reorder_threshold: 3,
     lending_interval: 'month_1', category: 'Networking',
     image_slug: 'wifi-router', description: 'Dual-band AC1200 Wi-Fi router (2.4 GHz and 5 GHz) with four external antennas. Ports: 1 x Gigabit WAN, 4 x Gigabit LAN and 1 x USB 3.0 for sharing storage. Supports guest networks, WPA3 and basic parental controls, and is configured through a web page. Ideal for labs and temporary office set-ups.',
   })
   P.legacyNoInterval = await makeProduct({
-    name: 'Surge Protector Power Strip', barcode: 'DEMO-LEGACY', quantity_on_hand: 10, reorder_threshold: 2,
+    name: 'Surge Protector Power Strip', barcode: '6009880010912', quantity_on_hand: 10, reorder_threshold: 2,
     category: 'Power',
     image_slug: 'surge-power-strip', description: 'Six-outlet surge protector with an illuminated on/off switch and a protected and grounded indicator light. Absorbs up to 1800 joules and has a built-in overload breaker. 2 metre power cord, and keyhole mounting slots so it can be fixed to a wall or desk underside.',
   })
@@ -636,68 +647,68 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // createProduct always writes one, and the app treats an empty interval as 1 Week.
   await db.update(products).set({ lending_interval: null }).where(eq(products.id, P.legacyNoInterval.id))
   P.unavailable = await makeProduct({
-    name: 'Laser Toner Cartridge (Black)', barcode: 'DEMO-UNAVAILABLE', quantity_on_hand: 8, reorder_threshold: 2,
+    name: 'Laser Toner Cartridge (Black)', barcode: '6009880012312', quantity_on_hand: 8, reorder_threshold: 2,
     available: false, lending_interval: 'week_1', category: 'Consumables',
     image_slug: 'toner-cartridge', description: 'Black toner cartridge for departmental monochrome laser printers, with a page yield of about 3,000 pages at 5 percent coverage. Includes a new drum interface and chip, installs without tools, and prints sharp text and graphics. Currently withdrawn from lending.',
   })
   // Starts at 5 / reorder 1 / 1 Week and is edited to 3 / reorder 2 / 2 Weeks (the product 'update' audit entry below).
   P.insufficientCause = await makeProduct({
-    name: 'Desktop PC', barcode: 'DEMO-INSUFF-CAUSE', quantity_on_hand: 5, reorder_threshold: 1,
+    name: 'Desktop PC', barcode: '6009880010424', quantity_on_hand: 5, reorder_threshold: 1,
     lending_interval: 'week_1', category: 'Laptops & Computers',
     image_slug: 'desktop-pc', description: 'Compact desktop PC with a quad-core processor, 16 GB RAM and a 512 GB SSD. Front ports: 2 x USB 3.2 and 1 x headphone/microphone combo jack. Rear ports: 1 x HDMI, 1 x DisplayPort, 1 x Gigabit Ethernet, 4 x USB 2.0 and 2 x audio jacks. Wi-Fi and Bluetooth are built in. Suited to labs and temporary workstations.',
   })
   // Two units on the shelf until the pickup below is approved; one is written off afterwards (section 8), which is what
   // makes the accepted request for two come up short.
   P.insufficientNoCause = await makeProduct({
-    name: 'UPS Battery Backup 1500VA', barcode: 'DEMO-INSUFF-NOCAUSE', quantity_on_hand: 1, reorder_threshold: 3,
+    name: 'UPS Battery Backup 1500VA', barcode: '6009880010493', quantity_on_hand: 1, reorder_threshold: 3,
     lending_interval: 'week_2', category: 'Power',
     image_slug: 'ups-battery-backup', description: '1500VA / 900 W line-interactive UPS with automatic voltage regulation and a front LCD showing input, output, load and runtime. Eight outlets: four with battery backup and surge protection, four surge-only. Includes a USB port for monitoring software and RJ45 network surge protection. Keeps equipment running through load-shedding and short power cuts.',
   }, { quantity_on_hand: 2 })
   P.onSchedule = await makeProduct({
-    name: 'Network Switch 8-Port', barcode: 'DEMO-ONSCHEDULE', quantity_on_hand: 10, reorder_threshold: 2,
+    name: 'Network Switch 8-Port', barcode: '6009880011681', quantity_on_hand: 10, reorder_threshold: 2,
     lending_interval: 'week_2', category: 'Networking',
     image_slug: 'network-switch', description: '8-port gigabit unmanaged Ethernet switch with 8 x 10/100/1000 RJ45 ports that auto-negotiate speed and cable type. Plug and play with no configuration, and LED indicators for link and activity on every port. Compact metal case with a fanless design, suited to desks, labs and small cabinets.',
   })
   P.noShowFeeder = await makeProduct({
-    name: 'Wireless Access Point', barcode: 'DEMO-NOSHOW', quantity_on_hand: 5, reorder_threshold: 2,
+    name: 'Wireless Access Point', barcode: '6009880011612', quantity_on_hand: 5, reorder_threshold: 2,
     lending_interval: 'week_1', category: 'Networking',
     image_slug: 'wireless-access-point', description: 'Ceiling- or wall-mount Wi-Fi 6 access point, dual-band up to 1.8 Gbps, supporting more than 100 connected devices. One Gigabit Ethernet port that is powered over PoE (802.3af), so no separate power adapter is needed. Supports multiple SSIDs, VLANs and band steering. Mounting bracket included.',
   })
   P.fulfilled = await makeProduct({
-    name: 'Mechanical Keyboard', barcode: 'DEMO-FULFILLED', quantity_on_hand: 10, reorder_threshold: 2,
+    name: 'Mechanical Keyboard', barcode: '6009880010073', quantity_on_hand: 10, reorder_threshold: 2,
     lending_interval: 'week_2', category: 'Peripherals',
     image_slug: 'mechanical-keyboard', description: 'Full-size mechanical keyboard with 104 keys including a numeric keypad. Tactile blue switches rated for 50 million keystrokes, with per-key backlighting and N-key rollover. Metal top plate with a removable cable and a USB-A connection. Compatible with Windows, macOS and Linux.',
   })
   P.returnNoDate = await makeProduct({
-    name: 'External Hard Drive 2TB', barcode: 'DEMO-RET-NODATE', quantity_on_hand: 20, reorder_threshold: 5,
+    name: 'External Hard Drive 2TB', barcode: '6009880012039', quantity_on_hand: 20, reorder_threshold: 5,
     category: 'Storage', image_slug: 'external-hard-drive', description: 'Portable 2 TB external hard drive in a slim, shock-resistant case. Supports USB 3.0 (5 Gbps), with both a USB-A and a USB-C connection cable included. Powered over USB with no external adapter. Pre-formatted for Windows and also usable on macOS and Linux. Ideal for backups and moving large datasets.',
   })
   P.returnOverdue = await makeProduct({
-    name: 'Ultrabook Laptop 14-inch', barcode: 'DEMO-RET-OVERDUE', quantity_on_hand: 20, reorder_threshold: 5,
+    name: 'Ultrabook Laptop 14-inch', barcode: '6009880012176', quantity_on_hand: 20, reorder_threshold: 5,
     category: 'Laptops & Computers', image_slug: 'business-laptop', description: 'Lightweight 14-inch ultrabook weighing about 1.3 kg, with a Full HD display, 16 GB RAM and a 512 GB SSD. Ports: 2 x USB-C (Thunderbolt 4), 1 x USB-A 3.2, 1 x HDMI 2.0 and a 3.5 mm audio jack. Up to 12 hours of battery life. Popular for conferences and fieldwork.',
   })
   P.returnDueToday = await makeProduct({
-    name: 'USB Flash Drive 64GB', barcode: 'DEMO-RET-DUETODAY', quantity_on_hand: 20, reorder_threshold: 5,
+    name: 'USB Flash Drive 64GB', barcode: '6009880011964', quantity_on_hand: 20, reorder_threshold: 5,
     category: 'Storage', image_slug: 'usb-flash-drive', description: '64 GB USB 3.0 flash drive with read speeds up to 120 MB/s. Retractable USB-A connector, so there is no cap to lose, and a loop for a lanyard or key ring. Compatible with Windows, macOS and Linux.',
   })
   P.returnNotDueYet = await makeProduct({
-    name: 'HDMI Cable 2m', barcode: 'DEMO-RET-NOTDUEYET', quantity_on_hand: 20, reorder_threshold: 5,
+    name: 'HDMI Cable 2m', barcode: '6009880012107', quantity_on_hand: 20, reorder_threshold: 5,
     category: 'Cables & Adapters', image_slug: 'hdmi-cable', description: 'High-speed HDMI 2.0 cable, 2 metres, with HDMI Type A male connectors at both ends. Supports 4K at 60 Hz, HDR and Ethernet channel, and carries up to 8 channels of audio. Gold-plated connectors and a shielded cable for a clean picture.',
   })
   P.returnPartlyResolved = await makeProduct({
-    name: '24-inch Monitor', barcode: 'DEMO-RET-PARTRESOLVED', quantity_on_hand: 20, reorder_threshold: 5,
+    name: '24-inch Monitor', barcode: '6009880012244', quantity_on_hand: 20, reorder_threshold: 5,
     category: 'Peripherals', image_slug: 'monitor-27', description: '24-inch Full HD (1920 x 1080) IPS monitor with a 75 Hz refresh rate. Inputs: 1 x HDMI 1.4, 1 x VGA and a 3.5 mm audio output. Tilt-adjustable stand and a 75 x 75 mm VESA mount. Slim bezel design suited to lecture rooms and office desks.',
   })
   P.ioAdjustRestock = await makeProduct({
-    name: 'High-Yield Toner Cartridge (Black)', barcode: 'DEMO-RESTOCK', quantity_on_hand: 6, reorder_threshold: 3,
+    name: 'High-Yield Toner Cartridge (Black)', barcode: '6009880011896', quantity_on_hand: 6, reorder_threshold: 3,
     category: 'Consumables', image_slug: 'toner-cartridge', description: 'High-yield black toner cartridge for shared monochrome laser printers, with a page yield of about 6,000 pages at 5 percent coverage. Includes a new drum interface and chip, and installs without tools. A better fit than the standard cartridge for busy printers.',
   })
   P.fullReturnPair = await makeProduct({
-    name: 'Compact Wireless Mouse', barcode: 'DEMO-FULLRETURN', quantity_on_hand: 20, reorder_threshold: 5,
+    name: 'Compact Wireless Mouse', barcode: '6009880010141', quantity_on_hand: 20, reorder_threshold: 5,
     category: 'Peripherals', image_slug: 'wireless-mouse', description: 'Compact 2.4 GHz wireless mouse sized for laptop bags, with a nano USB-A receiver that stores in the battery bay. 1000 DPI optical sensor and a quiet-click scroll wheel. Runs on one AA battery for up to 18 months. Plug and play on Windows, macOS and Linux.',
   })
   P.partialReturnPair = await makeProduct({
-    name: 'Network Switch 24-Port', barcode: 'DEMO-PARTIALRETURN', quantity_on_hand: 20, reorder_threshold: 5,
+    name: 'Network Switch 24-Port', barcode: '6009880011827', quantity_on_hand: 20, reorder_threshold: 5,
     category: 'Networking', image_slug: 'network-switch', description: '24-port gigabit managed Ethernet switch with 24 x 10/100/1000 RJ45 ports and 2 x SFP uplink slots. Supports VLANs, QoS, link aggregation and port mirroring, configured through a web interface. Rack-mountable in a 19-inch rack (1U), with LED indicators on every port.',
   })
 
@@ -851,8 +862,8 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   await movement({
     type: 'IN',
     items: [
-      { product: P.kitCable, quantity: 9, barcodes: ['DEMO-KITCABLE-A', 'DEMO-KITCABLE-B', 'DEMO-KITCABLE-C'] },
-      { product: P.kitAdapter, quantity: 7, barcodes: ['DEMO-KITADAPTER-A', 'DEMO-KITADAPTER-B'] },
+      { product: P.kitCable, quantity: 9, barcodes: ['6009880010707', '6009880010714', '6009880010721'] },
+      { product: P.kitAdapter, quantity: 7, barcodes: ['6009880010561', '6009880010578'] },
     ],
     notes: 'Delivery of cable + adapter kits -- several barcodes scanned per product.', dayOffset: -30,
   })
@@ -860,16 +871,16 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   const kitFullOut = await movement({
     type: 'OUT', staff: S.MultiBarcodeFull,
     items: [
-      { product: P.kitCable, quantity: 3, barcodes: ['DEMO-KITCABLE-A', 'DEMO-KITCABLE-B', 'DEMO-KITCABLE-C'] },
-      { product: P.kitAdapter, quantity: 3, barcodes: ['DEMO-KITADAPTER-A', 'DEMO-KITADAPTER-B'] },
+      { product: P.kitCable, quantity: 3, barcodes: ['6009880010707', '6009880010714', '6009880010721'] },
+      { product: P.kitAdapter, quantity: 3, barcodes: ['6009880010561', '6009880010578'] },
     ],
     lendFrom: addDays(-14), lendTo: addDays(-7), dayOffset: -14,
   })
   await movement({
     type: 'RETURN', staff: S.MultiBarcodeFull,
     items: [
-      { product: P.kitCable, quantity: 3, barcodes: ['DEMO-KITCABLE-A', 'DEMO-KITCABLE-B', 'DEMO-KITCABLE-C'] },
-      { product: P.kitAdapter, quantity: 3, barcodes: ['DEMO-KITADAPTER-A', 'DEMO-KITADAPTER-B'] },
+      { product: P.kitCable, quantity: 3, barcodes: ['6009880010707', '6009880010714', '6009880010721'] },
+      { product: P.kitAdapter, quantity: 3, barcodes: ['6009880010561', '6009880010578'] },
     ],
     returnDate: addDays(-6), linkedTxnId: kitFullOut.id, notes: 'Everything back -- same barcodes as issued.', dayOffset: -6,
   })
@@ -877,35 +888,35 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   const kitPartialOut = await movement({
     type: 'OUT', staff: S.MultiBarcodePartial,
     items: [
-      { product: P.kitCable, quantity: 3, barcodes: ['DEMO-KITCABLE-A', 'DEMO-KITCABLE-B', 'DEMO-KITCABLE-C'] },
-      { product: P.kitAdapter, quantity: 2, barcodes: ['DEMO-KITADAPTER-A', 'DEMO-KITADAPTER-B'] },
+      { product: P.kitCable, quantity: 3, barcodes: ['6009880010707', '6009880010714', '6009880010721'] },
+      { product: P.kitAdapter, quantity: 2, barcodes: ['6009880010561', '6009880010578'] },
     ],
     lendFrom: addDays(-12), lendTo: TODAY, dayOffset: -12,
   })
   await movement({
     type: 'RETURN', staff: S.MultiBarcodePartial,
     items: [
-      { product: P.kitCable, quantity: 2, barcodes: ['DEMO-KITCABLE-A', 'DEMO-KITCABLE-B'] },
-      { product: P.kitAdapter, quantity: 1, barcodes: ['DEMO-KITADAPTER-A'] },
+      { product: P.kitCable, quantity: 2, barcodes: ['6009880010707', '6009880010714'] },
+      { product: P.kitAdapter, quantity: 1, barcodes: ['6009880010561'] },
     ],
     returnDate: addDays(-3), linkedTxnId: kitPartialOut.id,
     notes: 'Cable A + B and Adapter A back -- Cable C and Adapter B still out.', dayOffset: -3,
   })
 
   // ---- Lost-label scenario ---------------------------------------------------
-  // The Lost Labels scenario (Ryan Fletcher) was issued 3 x 27-inch Monitor, all scanned as DEMO-LOSTLABEL-A, so Returns
+  // The Lost Labels scenario (Ryan Fletcher) was issued 3 x 27-inch Monitor, all scanned as 6009880010981, so Returns
   // shows ONE row: barcode A, issued 3, returnable 3. Pretend two of the three labels have come off. To test:
-  // The same row also holds 2 x HD Webcam (barcode DEMO-LOSTPAIR-A; -B is its registered replacement barcode).
-  //   1. Scan DEMO-LOSTLABEL-A once        -> row 1 / 3, + is still there
-  //   2. Click +, enter DEMO-LOSTLABEL-B   -> row 2 / 3, + is still there
-  //   3. Click +, enter DEMO-LOSTLABEL-B (or -C) again -> row 3 / 3, + gone
+  // The same row also holds 2 x HD Webcam (barcode 6009880011193; -B is its registered replacement barcode).
+  //   1. Scan 6009880010981 once        -> row 1 / 3, + is still there
+  //   2. Click +, enter 6009880010998   -> row 2 / 3, + is still there
+  //   3. Click +, enter 6009880010998 (or -C) again -> row 3 / 3, + gone
   // Also try: a barcode that isn't registered (rejected -- add it under Products -> Edit first), the issued barcode A via +
   // (rejected -- scan it), and - to take units back off (relabelled ones come off last).
   await movement({
     type: 'OUT', staff: S.LostLabels,
     items: [
-      { product: P.lostLabel, quantity: 3, barcodes: ['DEMO-LOSTLABEL-A'] },
-      { product: P.lostLabelPair, quantity: 2, barcodes: ['DEMO-LOSTPAIR-A'] },
+      { product: P.lostLabel, quantity: 3, barcodes: ['6009880010981'] },
+      { product: P.lostLabelPair, quantity: 2, barcodes: ['6009880011193'] },
     ],
     lendFrom: addDays(-10), lendTo: addDays(5), dayOffset: -10,
     notes: 'Seed: 3 units issued under one barcode -- for testing lost-label returns.',
@@ -1123,9 +1134,12 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
     await adminCancels(req, -1, 'Staff member said their project got cancelled -- no longer needed.')
   }
 
+  // Who section 7's My Requests history belongs to: the portal borrower, or (seed:video) someone else.
+  const H7 = cast.spinVideo ? S[cast.spinVideo.historyHolderKey] : S.PortalLinked
+
   // =====================================================================
   // 7. MY REQUESTS (portal) -- a full spread of every tab/status combo on ONE staff member (S.PortalLinked /
-  //    jessica.moore@gmail.com), so signing into the portal as them shows every possible "My Requests" outcome in one
+  //    jessica.moore@nwu.ac.za), so signing into the portal as them shows every possible "My Requests" outcome in one
   //    place, unlike section 6 above which deliberately spreads one status per staff member for the administrator's Loan
   //    Requests queue. History alone runs to 12 rows -- past the 10-row page size -- so its pagination footer has a real
   //    second page to click through.
@@ -1135,7 +1149,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   {
     const counterMsg = "Can only spare 1 of the first -- the second's almost out of stock so I'd rather not commit it."
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(2), toDate: addDays(9),
+      staff: H7, fromDate: addDays(2), toDate: addDays(9),
       message: 'Would it be possible to get 3 of these plus 2 of the low-stock item?',
       lines: [{ product: P.healthy, requested: 3, offered: 1 }, { product: P.lowStock, requested: 2, offered: 0 }],
       createdDayOffset: -6,
@@ -1144,7 +1158,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   }
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(1), toDate: null,
+      staff: H7, fromDate: addDays(1), toDate: null,
       lines: [{ product: P.indefinite, requested: 3, offered: 2 }],
       createdDayOffset: -3,
     })
@@ -1152,7 +1166,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   }
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(8), toDate: addDays(15),
+      staff: H7, fromDate: addDays(8), toDate: addDays(15),
       lines: [{ product: P.monthInterval, requested: 2, offered: 1 }, { product: P.onSchedule, requested: 1, offered: 1 }],
       createdDayOffset: -5,
     })
@@ -1161,18 +1175,18 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
 
   // ---- Awaiting the administrator (pending) x3 --------------------------------------
   await openRequest({
-    staff: S.PortalLinked, fromDate: addDays(3), toDate: addDays(10),
+    staff: H7, fromDate: addDays(3), toDate: addDays(10),
     lines: [{ product: P.healthy, requested: 2 }],
     createdDayOffset: -1,
   })
   await openRequest({
-    staff: S.PortalLinked, fromDate: addDays(20), toDate: addDays(27),
+    staff: H7, fromDate: addDays(20), toDate: addDays(27),
     message: 'Need this for a workshop on the 25th, thanks!',
     lines: [{ product: P.onSchedule, requested: 1 }],
     createdDayOffset: -2,
   })
   await openRequest({
-    staff: S.PortalLinked, fromDate: addDays(5), toDate: addDays(12),
+    staff: H7, fromDate: addDays(5), toDate: addDays(12),
     lines: [{ product: P.monthInterval, requested: 1 }, { product: P.indefinite, requested: 1 }],
     createdDayOffset: -1,
   })
@@ -1180,7 +1194,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // ---- Upcoming (accepted) x3 ----------------------------------------------
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(2), toDate: addDays(9),
+      staff: H7, fromDate: addDays(2), toDate: addDays(9),
       lines: [{ product: P.onSchedule, requested: 2, offered: 2 }],
       createdDayOffset: -3,
     })
@@ -1188,7 +1202,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   }
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(6), toDate: addDays(13),
+      staff: H7, fromDate: addDays(6), toDate: addDays(13),
       message: 'Two of these for a site visit, if possible.',
       lines: [{ product: P.healthy, requested: 2, offered: 2 }, { product: P.monthInterval, requested: 1, offered: 1 }],
       createdDayOffset: -4,
@@ -1197,7 +1211,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   }
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: TODAY, toDate: addDays(7),
+      staff: H7, fromDate: TODAY, toDate: addDays(7),
       lines: [{ product: P.indefinite, requested: 1, offered: 1 }],
       createdDayOffset: -2,
     })
@@ -1209,7 +1223,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // fulfilled x2 (one plain accepted->fulfilled, one full negotiation chain)
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(-8), toDate: addDays(6),
+      staff: H7, fromDate: addDays(-8), toDate: addDays(6),
       lines: [{ product: P.fulfilled, requested: 2, offered: 2 }],
       createdDayOffset: -15,
     })
@@ -1222,7 +1236,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
     const newFrom = addDays(-18)
     const newTo = addDays(-11)
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: origFrom, toDate: origTo,
+      staff: H7, fromDate: origFrom, toDate: origTo,
       lines: [{ product: P.onSchedule, requested: 2, offered: 1 }],
       createdDayOffset: -25,
     })
@@ -1234,7 +1248,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // declined while still pending (administrator) x2
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(-5), toDate: addDays(2),
+      staff: H7, fromDate: addDays(-5), toDate: addDays(2),
       lines: [{ product: P.outOfStock, requested: 1, offered: 1 }],
       createdDayOffset: -12,
     })
@@ -1242,7 +1256,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   }
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(-14), toDate: addDays(-7),
+      staff: H7, fromDate: addDays(-14), toDate: addDays(-7),
       lines: [{ product: P.legacyNoInterval, requested: 1, offered: 1 }],
       createdDayOffset: -20,
     })
@@ -1252,7 +1266,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // declined FROM an already-sent counter (rich decline-of-a-counter snapshot)
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(-10), toDate: addDays(-3),
+      staff: H7, fromDate: addDays(-10), toDate: addDays(-3),
       message: 'Could I get 3 of these plus 2 of the low-stock item?',
       lines: [{ product: P.healthy, requested: 3, offered: 1 }, { product: P.lowStock, requested: 2, offered: 0 }],
       createdDayOffset: -18,
@@ -1264,7 +1278,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // declined BY the staff member themselves (portal declineCounter)
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(-6), toDate: null,
+      staff: H7, fromDate: addDays(-6), toDate: null,
       lines: [{ product: P.indefinite, requested: 2, offered: 1 }],
       createdDayOffset: -16,
     })
@@ -1276,7 +1290,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // min(created + 30 days, From))
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(-25), toDate: addDays(-18),
+      staff: H7, fromDate: addDays(-25), toDate: addDays(-18),
       lines: [{ product: P.healthy, requested: 1, offered: 1 }],
       createdDayOffset: -55,
     })
@@ -1284,7 +1298,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   }
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(-35), toDate: addDays(-28),
+      staff: H7, fromDate: addDays(-35), toDate: addDays(-28),
       lines: [{ product: P.monthInterval, requested: 1, offered: 1 }],
       createdDayOffset: -65,
     })
@@ -1294,7 +1308,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // no_show (already recorded) x2 -- settled the day after the pickup window ended
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(-22), toDate: addDays(-15),
+      staff: H7, fromDate: addDays(-22), toDate: addDays(-15),
       lines: [{ product: P.noShowFeeder, requested: 1, offered: 1 }],
       createdDayOffset: -28,
     })
@@ -1303,7 +1317,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   }
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(-17), toDate: addDays(-10),
+      staff: H7, fromDate: addDays(-17), toDate: addDays(-10),
       lines: [{ product: P.onSchedule, requested: 1, offered: 1 }],
       createdDayOffset: -22,
     })
@@ -1314,7 +1328,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // withdrawn by the staff member (no reason)
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(-9), toDate: addDays(-2),
+      staff: H7, fromDate: addDays(-9), toDate: addDays(-2),
       lines: [{ product: P.healthy, requested: 1, offered: 1 }],
       createdDayOffset: -13,
     })
@@ -1324,7 +1338,7 @@ export async function seedComprehensive(deps: SeedDeps): Promise<SeedSummary> {
   // withdrawn by the administrator cancelling an accepted pickup (with reason)
   {
     const req = await openRequest({
-      staff: S.PortalLinked, fromDate: addDays(-4), toDate: addDays(3),
+      staff: H7, fromDate: addDays(-4), toDate: addDays(3),
       lines: [{ product: P.healthy, requested: 1, offered: 1 }],
       createdDayOffset: -9,
     })

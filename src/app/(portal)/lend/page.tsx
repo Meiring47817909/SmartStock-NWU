@@ -299,7 +299,7 @@ export default function LendBrowsePage() {
         <div className="p-8 text-center text-sm text-muted-foreground">No equipment matches these filters.</div>
       )}
 
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4 xl:grid-cols-5">
         {pageRows.map((p) => {
           const isOffered = p.available ?? true
           const inStock = p.quantity_on_hand > 0

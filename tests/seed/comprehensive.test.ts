@@ -89,37 +89,37 @@ const MANUAL_OVERRIDES = 18
 // The cast the user records their video with: it must never change. [full name, email, department, has a card, has a login]
 // (one row per scenario staff member).
 const ROSTER: [string, string, string, boolean, boolean][] = [
-  ['Emma Richardson', 'emma.richardson@gmail.com', 'Computer Science and Information Systems', true, true],
-  ['Oliver Bennett', 'oliver.bennett92@gmail.com', 'Physical and Chemical Sciences', true, false],
-  ['Sophie Hartley', 'sophie.hartley@gmail.com', 'Biological Sciences', false, true],
-  ['James Whitfield', 'james.whitfield@gmail.com', 'Geo- and Spatial Sciences', false, false],
-  ['Charlotte Ellis', 'charlotte.ellis88@gmail.com', 'Agricultural Sciences', true, true],
-  ['Daniel Mercer', 'daniel.mercer@gmail.com', 'Mathematical and Statistical Sciences', true, false],
-  ['Amelia Hayes', 'amelia.hayes@gmail.com', 'Business Mathematics and Informatics', false, true],
-  ['Benjamin Carter', 'ben.carter.work@gmail.com', 'Computer Science and Information Systems', false, false],
-  ['Grace Thornton', 'grace.thornton@gmail.com', 'Physical and Chemical Sciences', true, true],
-  ['Samuel Prescott', 'samuel.prescott@gmail.com', 'Biological Sciences', true, false],
-  ['Olivia Sinclair', 'olivia.sinclair@gmail.com', 'Geo- and Spatial Sciences', false, true],
-  ['Henry Caldwell', 'henry.caldwell@gmail.com', 'Agricultural Sciences', false, false],
-  ['Lily Fraser', 'lily.fraser@gmail.com', 'Mathematical and Statistical Sciences', true, true],
-  ['William Ashford', 'william.ashford@gmail.com', 'Business Mathematics and Informatics', true, false],
-  ['Chloe Winters', 'chloe.winters@gmail.com', 'Computer Science and Information Systems', false, true],
-  ['Thomas Reeves', 'thomas.reeves@gmail.com', 'Physical and Chemical Sciences', false, false],
-  ['Isabella Crawford', 'isabella.crawford@gmail.com', 'Biological Sciences', true, true],
-  ['Lucas Hamilton', 'lucas.hamilton@gmail.com', 'Geo- and Spatial Sciences', true, false],
-  ['Hannah Wells', 'hannah.wells@gmail.com', 'Agricultural Sciences', false, true],
-  ['Nathan Brooks', 'nathan.brooks@gmail.com', 'Mathematical and Statistical Sciences', false, false],
-  ['Victoria Lang', 'victoria.lang@gmail.com', 'Business Mathematics and Informatics', true, true],
-  ['Joshua Kerr', 'joshua.kerr@gmail.com', 'Computer Science and Information Systems', true, false],
-  ['Natalie Pierce', 'natalie.pierce@gmail.com', 'Physical and Chemical Sciences', false, true],
-  ['Ethan Marshall', 'ethan.marshall@gmail.com', 'Biological Sciences', false, false],
-  ['Rachel Dawson', 'rachel.dawson@gmail.com', 'Geo- and Spatial Sciences', true, true],
-  ['Adam Sutton', 'adam.sutton@gmail.com', 'Agricultural Sciences', true, false],
-  ['Megan Holloway', 'megan.holloway@gmail.com', 'Mathematical and Statistical Sciences', false, true],
-  ['Ryan Fletcher', 'ryan.fletcher@gmail.com', 'Business Mathematics and Informatics', false, false],
-  ['Zoe Mitchell', 'zoe.mitchell@gmail.com', 'Computer Science and Information Systems', true, true],
-  ['Callum Rhodes', 'callum.rhodes@gmail.com', 'Physical and Chemical Sciences', true, false],
-  ['Jessica Moore', 'jessica.moore@gmail.com', 'Biological Sciences', false, true],
+  ['Emma Richardson', 'emma.richardson@nwu.ac.za', 'Computer Science and Information Systems', true, true],
+  ['Oliver Bennett', 'oliver.bennett@nwu.ac.za', 'Physical and Chemical Sciences', true, false],
+  ['Sophie Hartley', 'sophie.hartley@nwu.ac.za', 'Biological Sciences', false, true],
+  ['James Whitfield', 'james.whitfield@nwu.ac.za', 'Geo- and Spatial Sciences', false, false],
+  ['Charlotte Ellis', 'charlotte.ellis@nwu.ac.za', 'Agricultural Sciences', true, true],
+  ['Daniel Mercer', 'daniel.mercer@nwu.ac.za', 'Mathematical and Statistical Sciences', true, false],
+  ['Amelia Hayes', 'amelia.hayes@nwu.ac.za', 'Business Mathematics and Informatics', false, true],
+  ['Benjamin Carter', 'benjamin.carter@nwu.ac.za', 'Computer Science and Information Systems', false, false],
+  ['Grace Thornton', 'grace.thornton@nwu.ac.za', 'Physical and Chemical Sciences', true, true],
+  ['Samuel Prescott', 'samuel.prescott@nwu.ac.za', 'Biological Sciences', true, false],
+  ['Olivia Sinclair', 'olivia.sinclair@nwu.ac.za', 'Geo- and Spatial Sciences', false, true],
+  ['Henry Caldwell', 'henry.caldwell@nwu.ac.za', 'Agricultural Sciences', false, false],
+  ['Lily Fraser', 'lily.fraser@nwu.ac.za', 'Mathematical and Statistical Sciences', true, true],
+  ['William Ashford', 'william.ashford@nwu.ac.za', 'Business Mathematics and Informatics', true, false],
+  ['Chloe Winters', 'chloe.winters@nwu.ac.za', 'Computer Science and Information Systems', false, true],
+  ['Thomas Reeves', 'thomas.reeves@nwu.ac.za', 'Physical and Chemical Sciences', false, false],
+  ['Isabella Crawford', 'isabella.crawford@nwu.ac.za', 'Biological Sciences', true, true],
+  ['Lucas Hamilton', 'lucas.hamilton@nwu.ac.za', 'Geo- and Spatial Sciences', true, false],
+  ['Hannah Wells', 'hannah.wells@nwu.ac.za', 'Agricultural Sciences', false, true],
+  ['Nathan Brooks', 'nathan.brooks@nwu.ac.za', 'Mathematical and Statistical Sciences', false, false],
+  ['Victoria Lang', 'victoria.lang@nwu.ac.za', 'Business Mathematics and Informatics', true, true],
+  ['Joshua Kerr', 'joshua.kerr@nwu.ac.za', 'Computer Science and Information Systems', true, false],
+  ['Natalie Pierce', 'natalie.pierce@nwu.ac.za', 'Physical and Chemical Sciences', false, true],
+  ['Ethan Marshall', 'ethan.marshall@nwu.ac.za', 'Biological Sciences', false, false],
+  ['Rachel Dawson', 'rachel.dawson@nwu.ac.za', 'Geo- and Spatial Sciences', true, true],
+  ['Adam Sutton', 'adam.sutton@nwu.ac.za', 'Agricultural Sciences', true, false],
+  ['Megan Holloway', 'megan.holloway@nwu.ac.za', 'Mathematical and Statistical Sciences', false, true],
+  ['Ryan Fletcher', 'ryan.fletcher@nwu.ac.za', 'Business Mathematics and Informatics', false, false],
+  ['Zoe Mitchell', 'zoe.mitchell@nwu.ac.za', 'Computer Science and Information Systems', true, true],
+  ['Callum Rhodes', 'callum.rhodes@nwu.ac.za', 'Physical and Chemical Sciences', true, false],
+  ['Jessica Moore', 'jessica.moore@nwu.ac.za', 'Biological Sciences', false, true],
 ]
 
 let db: Db
@@ -279,10 +279,10 @@ describe('logins', () => {
   it('creates the administrator and the portal borrower, with the same names, emails and password', () => {
     expect(summary.adminName).toBe('Jonathan Pritchard')
     expect(summary.adminEmail).toBe('jonathan.pritchard@nwu.ac.za')
-    expect(summary.portalBorrower).toEqual({ fullName: 'Jessica Moore', email: 'jessica.moore@gmail.com' })
+    expect(summary.portalBorrower).toEqual({ fullName: 'Jessica Moore', email: 'jessica.moore@nwu.ac.za' })
     const byEmail = new Map([...fake.users.values()].map((u) => [u.email, u]))
     expect(byEmail.get('jonathan.pritchard@nwu.ac.za')).toMatchObject({ uid: 'seed-admin', password: 'password123' })
-    expect(byEmail.get('jessica.moore@gmail.com')).toMatchObject({ uid: 'seed-demo-portallinked-uid', password: 'password123' })
+    expect(byEmail.get('jessica.moore@nwu.ac.za')).toMatchObject({ uid: 'seed-demo-portallinked-uid', password: 'password123' })
   })
 
   it('creates 17 Auth users: the administrator, the portal borrower and 15 other staff', () => {
@@ -297,7 +297,7 @@ describe('logins', () => {
     expect(adminCallerRow.staffId).not.toBeNull()
     const jessica = await loadCaller(db, 'seed-demo-portallinked-uid')
     expect(jessica).toMatchObject({ role: 'staff', name: 'Jessica Moore' })
-    const [row] = await db.select().from(staff).where(eq(staff.email, 'jessica.moore@gmail.com'))
+    const [row] = await db.select().from(staff).where(eq(staff.email, 'jessica.moore@nwu.ac.za'))
     expect(jessica.staffId).toBe(row.id)
     for (const user of fake.users.values()) {
       const caller = await loadCaller(db, user.uid)
@@ -348,7 +348,7 @@ describe('loan requests', () => {
   })
 
   it("gives Jessica Moore's History more than the 10-row page size (12 terminal requests) and every other tab several rows", async () => {
-    const [jessica] = await db.select().from(staff).where(eq(staff.email, 'jessica.moore@gmail.com'))
+    const [jessica] = await db.select().from(staff).where(eq(staff.email, 'jessica.moore@nwu.ac.za'))
     const own = seedCtx(db, NOW, { uid: 'seed-demo-portallinked-uid', name: 'Jessica Moore', role: 'staff', staffId: jessica.id })
     const mine = await listRequests(own, {})
     const of = (...statuses: string[]) => mine.filter((r) => statuses.includes(r.status)).length
@@ -573,7 +573,7 @@ describe('reports and the printed summary', () => {
     const text = summaryLines(summary).join('\n')
     expect(text).toContain('Seeded comprehensive demo data:')
     expect(text).toContain('BICS admin:      jonathan.pritchard@nwu.ac.za / password123')
-    expect(text).toContain('Portal borrower: jessica.moore@gmail.com / password123 -> http://localhost:3000/login')
+    expect(text).toContain('Portal borrower: jessica.moore@nwu.ac.za / password123 -> http://localhost:3000/login')
     expect(text).toContain('WHO IS WHO (each staff member demonstrates one scenario):')
     expect(text).toContain('Emma Richardson      Pending loan request (fresh); staff create/update audit')
     expect(text).toContain('LOST LABELS: Returns -> "Ryan Fletcher" has one row per product (3 x 27-inch Monitor,')

@@ -390,8 +390,8 @@ export default function LoanRequestsPage() {
 
               <div className="max-h-64 overflow-y-auto rounded-lg border border-[#E5DBEC] bg-white shadow-xs">
               <Table>
-                <TableHeader className="sticky top-0 z-10 bg-[#F6F2F9]">
-                  <TableRow className="border-b border-[#E5DBEC] hover:bg-[#F6F2F9]">
+                <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+                  <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
                     <TableHead className="h-auto py-2.5 text-base font-bold text-[#2D203A]">Product</TableHead>
                     <TableHead className="h-auto py-2.5 text-center text-base font-bold text-[#2D203A]">Requested</TableHead>
                     <TableHead className="h-auto py-2.5 text-center text-base font-bold text-[#2D203A]">Offering</TableHead>
@@ -491,8 +491,8 @@ export default function LoanRequestsPage() {
 
             <div className="max-h-64 overflow-y-auto rounded-lg border border-[#E5DBEC] bg-white shadow-xs">
               <Table>
-                <TableHeader className="sticky top-0 z-10 bg-[#F6F2F9]">
-                  <TableRow className="border-b border-[#E5DBEC] hover:bg-[#F6F2F9]">
+                <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+                  <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
                     <TableHead className="h-auto py-2.5 text-base font-bold text-[#2D203A]">Product</TableHead>
                     <TableHead className="h-auto py-2.5 text-base font-bold text-[#2D203A]">Requested</TableHead>
                     <TableHead className="h-auto py-2.5 text-base font-bold text-[#2D203A]">Counter Offer</TableHead>
@@ -616,8 +616,8 @@ export default function LoanRequestsPage() {
           <Card className="h-full min-h-0 rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
             <div className="min-h-0 flex-1 overflow-y-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
-                <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+              <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+                <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
                   <TableHead className="h-auto w-8 py-3.5 pl-6"></TableHead>
                   <SortableHead column={pendingTable.getColumn('staff_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff</SortableHead>
                   <SortableHead column={pendingTable.getColumn('item_count')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Items</SortableHead>
@@ -636,8 +636,8 @@ export default function LoanRequestsPage() {
           <Card className="h-full min-h-0 rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
             <div className="min-h-0 flex-1 overflow-y-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
-                <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+              <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+                <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
                   <TableHead className="h-auto w-8 py-3.5 pl-6"></TableHead>
                   <SortableHead column={counteredTable.getColumn('staff_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff</SortableHead>
                   <SortableHead column={counteredTable.getColumn('item_count')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Items</SortableHead>

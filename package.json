@@ -10,6 +10,7 @@
     "emulators": "firebase emulators:start --project demo-smartstock-nwu",
     "seed:comprehensive": "tsx --conditions=react-server scripts/seed/comprehensive.ts",
     "seed:demo": "tsx --conditions=react-server scripts/seed/demo.ts",
+    "seed:video": "tsx --conditions=react-server scripts/seed/video.ts",
     "images:fetch": "node scripts/fetch-product-images.mjs",
     "images:generate": "node scripts/generate-product-images.mjs",
     "set:password-policy": "node scripts/set-password-policy.mjs",

@@ -516,8 +516,8 @@ export default function ReturnsPage() {
                 </div>
               ) : (
                 <Table>
-                  <TableHeader className="sticky top-0 z-10 bg-[#F6F2F9]">
-                    <TableRow className="border-b border-[#E5DBEC] hover:bg-[#F6F2F9]">
+                  <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+                    <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
                       <TableHead className="text-base font-bold text-[#2D203A]">Product</TableHead>
                       <TableHead className="text-base font-bold text-[#2D203A]">Barcode</TableHead>
                       <TableHead className="text-base font-bold text-[#2D203A]">Ref</TableHead>

@@ -166,8 +166,8 @@ export default function LendCartPage() {
       <Card className="mb-4 rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
         <div className="max-h-96 overflow-y-auto">
         <Table>
-          <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
-            <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+          <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+            <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
               <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Product</TableHead>
               <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Lendable</TableHead>
               <TableHead className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Max loan</TableHead>

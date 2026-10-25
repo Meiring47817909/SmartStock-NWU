@@ -65,7 +65,7 @@ export function SortableHead({
       <button
         type="button"
         onClick={column.getToggleSortingHandler()}
-        className="-ml-2 inline-flex cursor-pointer items-center gap-1 rounded px-2 py-1 hover:bg-muted"
+        className="-ml-2 inline-flex cursor-pointer items-center gap-1 rounded px-2 py-1 transition-colors hover:bg-white/15"
       >
         {children}
         {sorted === 'asc' ? <ArrowUp className="size-3.5" />

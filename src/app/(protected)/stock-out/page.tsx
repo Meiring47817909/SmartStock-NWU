@@ -409,7 +409,13 @@ export default function StockOutPage() {
                   {STEP_LABELS[i]}
                 </span>
               </button>
-              {i < STEPS.length - 1 && <div className="mx-1.5 h-px min-w-3 flex-1 bg-border sm:mx-3" />}
+              {i < STEPS.length - 1 && (
+                // Purple connector with an arrowhead pointing at the next step.
+                <div aria-hidden className="mx-1.5 flex min-w-3 flex-1 items-center text-[#6C3D91] sm:mx-3">
+                  <div className="h-0.5 flex-1 rounded-full bg-current" />
+                  <svg viewBox="0 0 10 12" className="-ml-px h-3 w-2.5 shrink-0 fill-current"><path d="M0 0 L10 6 L0 12 Z" /></svg>
+                </div>
+              )}
             </Fragment>
           )
         })}
@@ -515,8 +521,8 @@ export default function StockOutPage() {
               {cart.length > 0 && (
                 <div className="max-h-96 overflow-y-auto">
                 <Table>
-                  <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
-                    <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+                  <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+                    <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
                       <TableHead className="text-base font-bold text-[#2D203A]">Product</TableHead>
                       <TableHead className="text-base font-bold text-[#2D203A]">Barcode</TableHead>
                       <TableHead className="text-base font-bold text-[#2D203A]">Qty</TableHead>
@@ -611,8 +617,8 @@ export default function StockOutPage() {
             </div>
             <div className="mb-4 max-h-96 overflow-y-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
-                <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+              <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+                <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
                   <TableHead className="text-base font-bold text-[#2D203A]">Product</TableHead>
                   <TableHead className="text-base font-bold text-[#2D203A]">Barcode</TableHead>
                   <TableHead className="text-base font-bold text-[#2D203A]">Qty</TableHead>

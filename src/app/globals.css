@@ -213,6 +213,56 @@ body {
 .cn-toast [data-description] {
   color: var(--nwu-grey-dark);
 }
+/* Success toasts ("Accepted", "Stock issued", "Return processed" ...) get a
+   solid green card so a completed action reads at a glance. #15803d keeps
+   white text above the 4.5:1 WCAG AA contrast ratio; the larger semibold
+   text and shadow keep it legible over the lavender page background.
+   Error and warning toasts keep the neutral card. */
+[data-sonner-toaster] [data-sonner-toast].cn-toast[data-type="success"] {
+  background: #15803d !important;
+  border-color: #166534 !important;
+  color: #ffffff !important;
+  padding: 14px 18px !important;
+  font-size: 15px !important;
+  box-shadow: 0 10px 24px -6px rgba(21, 128, 61, 0.45) !important;
+}
+[data-sonner-toaster] [data-sonner-toast].cn-toast[data-type="success"] [data-title] {
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.35;
+}
+[data-sonner-toaster] [data-sonner-toast].cn-toast[data-type="success"] [data-description],
+[data-sonner-toaster] [data-sonner-toast].cn-toast[data-type="success"] [data-icon] {
+  color: #ffffff;
+}
+[data-sonner-toaster] [data-sonner-toast].cn-toast[data-type="success"] [data-icon] svg {
+  width: 20px;
+  height: 20px;
+}
+/* Scrollbars on every scrollable area (tables, dialogs, the page itself): a slim
+   lavender thumb so it is obvious that a long table scrolls, styled to match the
+   purple theme. The sidebar keeps its own styling below (.no-scrollbar). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #b79ad6 transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #c9b3e3;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #9f7cc8;
+  background-clip: padding-box;
+}
 /* Sidebar nav scrollbar (Sidebar.tsx / (protected)/layout.tsx) — styled to
    match the sidebar's purple/lavender theme instead of the OS default.
    Scoped to `.no-scrollbar`, which is the class name the vendored

@@ -252,7 +252,7 @@ describe('the 11 core checks of seed:demo', () => {
 
   it('11. the comprehensive catalogue is still there (same product barcodes plus Bostik)', async () => {
     const codes = new Set((await db.select().from(productBarcodes)).map((c) => c.barcode))
-    for (const c of ['DEMO-HEALTHY', 'DEMO-LOWSTOCK', 'DEMO-OUTOFSTOCK', 'DEMO-PARTIALRETURN', 'DEMO-FULLRETURN', 'DEMO-RET-NODATE', 'DEMO-KITCABLE-A', 'DEMO-LOSTLABEL-A', 'DEMO-MANYBARCODE-01']) {
+    for (const c of ['6009880010219', '6009880011339', '6009880011759', '6009880011827', '6009880010141', '6009880012039', '6009880010707', '6009880010981', '6009880020003']) {
       expect(codes.has(c), c).toBe(true)
     }
     expect(productRows).toHaveLength(26)

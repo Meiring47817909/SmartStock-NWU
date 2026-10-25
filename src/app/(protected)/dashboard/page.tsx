@@ -351,8 +351,8 @@ export default function DashboardPage() {
           <Card className="h-full min-h-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
             <div className="min-h-0 flex-1 overflow-y-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
-                <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+              <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+                <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
                   <SortableHead column={outstandingTable.getColumn('product_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Product</SortableHead>
                   <SortableHead column={outstandingTable.getColumn('staff_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff</SortableHead>
                   <SortableHead column={outstandingTable.getColumn('qty')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Qty</SortableHead>
@@ -394,8 +394,8 @@ export default function DashboardPage() {
           <Card className="h-full min-h-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
             <div className="min-h-0 flex-1 overflow-y-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
-                <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+              <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+                <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
                   <TableHead className="w-8"></TableHead>
                   <SortableHead column={pickupsTable.getColumn('staff_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff</SortableHead>
                   <SortableHead column={pickupsTable.getColumn('item_count')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Items</SortableHead>
@@ -495,8 +495,8 @@ export default function DashboardPage() {
           <Card className="h-full min-h-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
             <div className="min-h-0 flex-1 overflow-y-auto">
             <Table>
-              <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
-                <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+              <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+                <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
                   <SortableHead column={lowStockTable.getColumn('name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Product</SortableHead>
                   <SortableHead column={lowStockTable.getColumn('quantity_on_hand')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Qty</SortableHead>
                   <SortableHead column={lowStockTable.getColumn('status')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Status</SortableHead>

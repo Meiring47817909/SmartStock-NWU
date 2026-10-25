@@ -436,8 +436,8 @@ function StockLevelsReport() {
       <Card className="min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
-          <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
-            <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+          <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+            <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
               <SortableHead column={table.getColumn('name')!} className="h-auto py-3.5 pl-6 text-base font-bold text-[#2D203A]">Product</SortableHead>
               <SortableHead column={table.getColumn('category_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Category</SortableHead>
               <SortableHead column={table.getColumn('qty')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Qty On Hand</SortableHead>
@@ -580,8 +580,8 @@ function LowStockReport() {
       <Card className="min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
         <div className="min-h-0 flex-1 overflow-y-auto">
         <Table>
-          <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
-            <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+          <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+            <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
               <SortableHead column={table.getColumn('name')!} className="h-auto py-3.5 pl-6 text-base font-bold text-[#2D203A]">Product</SortableHead>
               <SortableHead column={table.getColumn('category_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Category</SortableHead>
               <SortableHead column={table.getColumn('qty')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Qty On Hand</SortableHead>
@@ -868,8 +868,8 @@ function IssuedPerStaffReport() {
       <Card className="min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
       <div className="min-h-0 flex-1 overflow-y-auto">
       <Table>
-        <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
-          <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+        <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+          <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
             <TableHead className="h-auto w-8 py-3.5 pl-6"></TableHead>
             <SortableHead column={table.getColumn('full_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff Member</SortableHead>
             <SortableHead column={table.getColumn('department')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Department</SortableHead>
@@ -1332,8 +1332,8 @@ function ReturnsReport() {
       <Card className="min-h-0 flex-1 gap-0 overflow-hidden rounded-xl border border-[#E2D8E9] bg-white py-0 shadow-sm ring-0">
       <div className="min-h-0 flex-1 overflow-y-auto">
       <Table>
-        <TableHeader className="sticky top-0 z-10 bg-[#F0EBF5]">
-          <TableRow className="border-b border-[#E0D5E7] hover:bg-[#F0EBF5]">
+        <TableHeader className="sticky top-0 z-10 bg-[#6C3D91] [&_th]:border-b [&_th]:border-[#522E6E] [&_th]:!text-white [&_th_*]:!text-white [&_th_svg]:!text-white/75">
+          <TableRow className="border-b border-[#522E6E] hover:bg-[#6C3D91]">
             <TableHead className="h-auto w-8 py-3.5 pl-6"></TableHead>
             <SortableHead column={table.getColumn('reference_no')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Reference</SortableHead>
             <SortableHead column={table.getColumn('staff_name')!} className="h-auto py-3.5 text-base font-bold text-[#2D203A]">Staff</SortableHead>
