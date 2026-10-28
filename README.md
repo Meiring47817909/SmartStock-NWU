@@ -7,6 +7,12 @@ Stock and loan management for the NWU BICS store, built with Next.js 16 (App Rou
 
 The full handout (setup, Cloud SQL, deployment, email and the manual check list) is in [`handout.md`](./handout.md).
 
+## Demo video
+
+[![Watch the SmartStock demo video](docs/video-preview.png)](https://drive.google.com/file/d/1ZIzHe9QOitbn_mwgZd196AxRelrGayqa/view)
+
+*Click the image to watch the demo on Google Drive.*
+
 ## Local setup
 
 ```bash
